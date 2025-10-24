@@ -53,15 +53,17 @@
       "provider": "github",
       "owner": "g-momo5",
       "repo": "coop2"
-    }
+    },
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false
   },
   "devDependencies": {
     "@electron/remote": "^2.1.3",
+    "electron": "^25.9.0",
     "electron-builder": "^24.0.0"
   },
   "dependencies": {
     "chart.js": "^4.5.0",
-    "electron": "^25.9.0",
     "electron-updater": "^6.1.7",
     "file-saver": "^2.0.5",
     "jspdf": "^3.0.1",
