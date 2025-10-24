@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" style="direction: rtl; text-align: right;">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Language" content="ar">
+  <meta name="format-detection" content="telephone=no">
+  <title>محطة بنزين سمنود - الجمعية التعاونية للبترول</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="rtl-config.js"></script>
+</head>
+
+<body>
+  <!-- Toast Notifications Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <div class="app-container">
+    <!-- Header with Breadcrumb -->
+    <header class="header">
+      <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
+
+      <!-- Breadcrumb Navigation -->
+      <nav class="breadcrumb-nav" id="breadcrumb-nav" style="display: none;">
+        <button class="breadcrumb-back-btn" id="breadcrumb-back-btn" onclick="navigateBack()">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+          </svg>
+          رجوع
+        </button>
+        <div class="breadcrumb-trail" id="breadcrumb-trail"></div>
+      </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Home Screen -->
+      <div id="home-screen" class="screen active">
+        <div class="home-chart-container">
+          <h2>كميات المشتريات الشهرية حسب نوع الوقود</h2>
+          <div class="chart-wrapper">
+            <canvas id="monthly-fuel-sales-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="depot-management">
+          <div class="depot-card" onclick="showDepotScreen()">
+            <h3>إدارة المخزن</h3>
+            <p>تتبع مخزون الوقود والزيوت</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Invoice Screen -->
+      <div id="invoice-screen" class="screen">
+        <h2>فاتورة جديدة</h2>
+        
+        <!-- Invoice Type Selection -->
+        <div class="invoice-type-selector">
+          <button class="type-btn active" data-type="fuel">فاتورة وقود</button>
+          <button class="type-btn" data-type="oil">فاتورة زيوت</button>
+        </div>
+
+        <!-- Fuel Invoice Form -->
+        <div id="fuel-invoice-form" class="invoice-form active">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="fuel-invoice-date">التاريخ:</label>
+              <input type="date" id="fuel-invoice-date" required>
+            </div>
+            <div class="form-group">
+              <label for="fuel-invoice-number">رقم الفاتورة:</label>
+              <input type="text" id="fuel-invoice-number" required>
+            </div>
+          </div>
+
+          <div class="fuel-items-container">
+            <h3>تفاصيل الوقود</h3>
+            <div class="fuel-items-header">
+              <div class="fuel-header-item fuel-name-col">الوقود</div>
+              <div class="fuel-header-item">الكمية</div>
+              <div class="fuel-header-item">سعر الشراء</div>
+              <div class="fuel-header-item">الإجمالي</div>
+            </div>
+            <div class="fuel-item" data-fuel="بنزين ٨٠">
+              <div class="fuel-row">
+                <div class="fuel-name">بنزين ٨٠</div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-quantity" placeholder="الكمية">
+                  <div class="net-quantity" data-fuel="بنزين ٨٠">الكمية الصافية: <span>0</span> لتر</div>
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
+                </div>
+              </div>
+            </div>
+
+            <div class="fuel-item" data-fuel="بنزين ٩٢">
+              <div class="fuel-row">
+                <div class="fuel-name">بنزين ٩٢</div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-quantity" placeholder="الكمية">
+                  <div class="net-quantity" data-fuel="بنزين ٩٢">الكمية الصافية: <span>0</span> لتر</div>
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
+                </div>
+              </div>
+            </div>
+
+            <div class="fuel-item" data-fuel="بنزين ٩٥">
+              <div class="fuel-row">
+                <div class="fuel-name">بنزين ٩٥</div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-quantity" placeholder="الكمية">
+                  <div class="net-quantity" data-fuel="بنزين ٩٥">الكمية الصافية: <span>0</span> لتر</div>
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
+                </div>
+              </div>
+            </div>
+
+            <div class="fuel-item" data-fuel="سولار">
+              <div class="fuel-row">
+                <div class="fuel-name">سولار</div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-quantity" placeholder="الكمية">
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
+                </div>
+                <div class="fuel-input-group">
+                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="invoice-summary">
+            <div class="summary-row">
+              <span>تأمين نقدى:</span>
+              <span id="cash-deposit">0.00 جنيه</span>
+            </div>
+            <div class="summary-row">
+              <span>إجمالي الفاتورة:</span>
+              <input type="number" id="actual-invoice-total" placeholder="أدخل الإجمالي" step="0.01" style="width: 200px; padding: 0.5rem; border: 1px solid #ddd; border-radius: 5px; text-align: center;">
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" onclick="saveFuelInvoice()">حفظ فاتورة الوقود</button>
+            <button type="button" class="btn btn-secondary" onclick="resetFuelInvoiceForm()">إعادة تعيين</button>
+          </div>
+        </div>
+
+        <!-- Oil Invoice Form -->
+        <div id="oil-invoice-form" class="invoice-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="oil-invoice-date">التاريخ:</label>
+              <input type="date" id="oil-invoice-date" required>
+            </div>
+            <div class="form-group">
+              <label for="oil-invoice-number">رقم الفاتورة:</label>
+              <input type="text" id="oil-invoice-number" placeholder="12345" required>
+            </div>
+          </div>
+
+          <div class="oil-items-container">
+            <h3>تفاصيل الزيوت</h3>
+            <div class="oil-items-header">
+              <div class="oil-header-item oil-type-col">نوع الزيت</div>
+              <div class="oil-header-item">الكمية</div>
+              <div class="oil-header-item">سعر الشراء الوحدة</div>
+              <div class="oil-header-item">الضريبة (٪)</div>
+              <div class="oil-header-item">إجمالي الشراء</div>
+              <div class="oil-header-item oil-delete-col"></div>
+            </div>
+            <div class="oil-items-list" id="oil-items-list">
+              <!-- Le righe degli oli verranno aggiunte dinamicamente qui -->
+            </div>
+            <div class="add-oil-item-container">
+              <button type="button" class="btn btn-secondary" onclick="addOilItem()">إضافة زيت</button>
+            </div>
+          </div>
+
+          <div class="invoice-summary">
+            <div class="summary-row discount-row">
+              <label for="immediate-discount">خصم فورى:</label>
+              <input type="number" id="immediate-discount" min="0" step="0.01" value="0" placeholder="0.00">
+              <span>جنيه</span>
+            </div>
+            <div class="summary-row tax-row">
+              <label for="martyrs-tax">ضريبة تكريم شهداء:</label>
+              <input type="number" id="martyrs-tax" min="0" step="0.01" value="0" placeholder="0.00">
+              <span>جنيه</span>
+            </div>
+            <div class="summary-row final-total">
+              <span>إجمالي الفاتورة:</span>
+              <span id="oil-invoice-total">0.00 جنيه</span>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" onclick="saveOilInvoice()">حفظ فاتورة الزيوت</button>
+            <button type="button" class="btn btn-secondary" onclick="resetOilInvoiceForm()">إعادة تعيين</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Screen -->
+      <div id="charts-screen" class="screen">
+        <h2>الرسوم البيانية</h2>
+        <div class="charts-container">
+          <div class="chart-card">
+            <h3>مشتريات الوقود حسب النوع</h3>
+            <canvas id="fuel-sales-chart"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>المصروفات الشهرية</h3>
+            <canvas id="monthly-revenue-chart"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>توزيع طرق الدفع</h3>
+            <canvas id="payment-methods-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Report Screen -->
+      <div id="report-screen" class="screen">
+        <h2>التقارير</h2>
+        <div class="report-controls">
+          <div class="date-range">
+            <label for="start-date">من تاريخ:</label>
+            <input type="date" id="start-date">
+            <label for="end-date">إلى تاريخ:</label>
+            <input type="date" id="end-date">
+            <button class="btn btn-primary" onclick="generateReport()">إنشاء التقرير</button>
+          </div>
+          <button class="btn btn-secondary" onclick="exportToPDF()">تصدير PDF</button>
+          </div>
+
+        <div id="report-content" class="report-content">
+          <div class="report-summary">
+            <h3>ملخص التقرير</h3>
+            <div id="report-summary-data"></div>
+          </div>
+          <div class="report-details">
+            <h3>تفاصيل المشتريات</h3>
+            <div id="report-details-table"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Screen -->
+      <div id="settings-screen" class="screen">
+        <h2>الإعدادات</h2>
+        <div class="settings-layout">
+          <aside class="settings-sidebar">
+            <ul class="settings-menu">
+              <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
+              <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
+              <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
+              <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
+            </ul>
+          </aside>
+          <div class="settings-content">
+            <section id="settings-section-sale-prices" class="settings-section">
+              <!-- Header with actions -->
+              <div class="prices-header">
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                  <span class="prices-label">تعديل الأسعار ابتداءً من</span>
+                  <input type="date" id="price-start-date" class="date-input-compact">
+                  <button class="btn btn-primary" onclick="saveAllPrices()">حفظ</button>
+                </div>
+                <button class="btn btn-secondary" onclick="showPriceHistory()">سجل الأسعار</button>
+              </div>
+
+              <!-- Price Type Tabs -->
+              <div class="price-type-tabs">
+                <div class="price-type-tab active" data-price-type="fuel" onclick="switchPriceType('fuel')">
+                  أسعار الوقود
+                </div>
+                <div class="price-type-tab" data-price-type="oil" onclick="switchPriceType('oil')">
+                  أسعار الزيوت
+                </div>
+              </div>
+
+              <!-- Fuel Prices Table -->
+              <div id="fuel-prices-section" class="price-type-section active">
+                <div class="prices-table-wrapper">
+                  <table class="prices-table-full">
+                    <thead>
+                      <tr>
+                        <th style="width: 50px;">#</th>
+                        <th>المنتج</th>
+                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                        <th style="width: 150px; text-align: center;">السعر الجديد</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr data-product="بنزين ٨٠">
+                        <td>1</td>
+                        <td class="product-name">بنزين ٨٠</td>
+                        <td style="text-align: center;"><span class="current-price" id="current-price-80">—</span></td>
+                        <td style="text-align: center;"><input type="number" id="price-80" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                      </tr>
+                      <tr data-product="بنزين ٩٢">
+                        <td>2</td>
+                        <td class="product-name">بنزين ٩٢</td>
+                        <td style="text-align: center;"><span class="current-price" id="current-price-92">—</span></td>
+                        <td style="text-align: center;"><input type="number" id="price-92" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                      </tr>
+                      <tr data-product="بنزين ٩٥">
+                        <td>3</td>
+                        <td class="product-name">بنزين ٩٥</td>
+                        <td style="text-align: center;"><span class="current-price" id="current-price-95">—</span></td>
+                        <td style="text-align: center;"><input type="number" id="price-95" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                      </tr>
+                      <tr data-product="سولار">
+                        <td>4</td>
+                        <td class="product-name">سولار</td>
+                        <td style="text-align: center;"><span class="current-price" id="current-price-diesel">—</span></td>
+                        <td style="text-align: center;"><input type="number" id="price-diesel" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Oil Prices Table -->
+              <div id="oil-prices-section" class="price-type-section">
+                <div class="prices-table-wrapper">
+                  <table class="prices-table-full">
+                    <thead>
+                      <tr>
+                        <th style="width: 50px;">#</th>
+                        <th>المنتج</th>
+                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                        <th style="width: 150px; text-align: center;">السعر الجديد</th>
+                      </tr>
+                    </thead>
+                    <tbody id="oil-prices-table-body">
+                      <!-- Oil prices will be added here dynamically -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- Add New Product Section -->
+            <section id="settings-section-add-product" class="settings-section">
+              <h3 style="color: #2c3e50; margin-bottom: 2rem;">إضافة منتج جديد</h3>
+              <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="new-product-name" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">اسم المنتج:</label>
+                <input type="text" id="new-product-name" placeholder="أدخل اسم المنتج" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
+              </div>
+              <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="new-product-type" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">نوع المنتج:</label>
+                <select id="new-product-type" onchange="toggleVatField()" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
+                  <option value="">اختر النوع</option>
+                  <option value="fuel">وقود</option>
+                  <option value="oil">زيت</option>
+                </select>
+              </div>
+              <div class="form-group" id="vat-field" style="margin-bottom: 1.5rem; display: none;">
+                <label for="new-product-vat" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">الضريبة المضافة (%):</label>
+                <input type="number" id="new-product-vat" placeholder="0" step="0.01" min="0" max="100" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
+              </div>
+              <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="new-product-price" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">سعر البيع:</label>
+                <input type="number" id="new-product-price" placeholder="0.00" step="0.01" min="0" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
+              </div>
+              <button class="btn btn-primary" onclick="addNewProduct()" style="padding: 0.75rem 2rem; font-size: 1rem;">إضافة المنتج</button>
+            </section>
+
+            <!-- Manage Products Section -->
+            <section id="settings-section-manage-products" class="settings-section active">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h3 style="color: #2c3e50; margin: 0;">إدارة المنتجات</h3>
+                <div style="display: flex; gap: 1rem;">
+                  <button class="btn btn-secondary" onclick="navigateToEditPrices()" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
+                    </svg>
+                    تعديل الأسعار
+                  </button>
+                  <button class="btn btn-primary" onclick="navigateToAddProduct()" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                    </svg>
+                    إضافة منتج جديد
+                  </button>
+                </div>
+              </div>
+
+              <!-- Price Type Tabs -->
+              <div class="price-type-tabs">
+                <div class="price-type-tab active" data-price-type="fuel" onclick="switchManageProductType('fuel')">
+                  الوقود
+                </div>
+                <div class="price-type-tab" data-price-type="oil" onclick="switchManageProductType('oil')">
+                  الزيوت
+                </div>
+              </div>
+
+              <!-- Fuel Products Table -->
+              <div id="manage-fuel-section" class="price-type-section active">
+                <div class="prices-table-wrapper">
+                  <table class="prices-table-full">
+                    <thead>
+                      <tr>
+                        <th style="width: 50px;">#</th>
+                        <th>اسم المنتج</th>
+                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                        <th style="width: 100px; text-align: center;">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody id="manage-fuel-table-body">
+                      <!-- Fuel products will be added here dynamically -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Oil Products Table -->
+              <div id="manage-oil-section" class="price-type-section">
+                <div class="prices-table-wrapper">
+                  <table class="prices-table-full">
+                    <thead>
+                      <tr>
+                        <th style="width: 50px;">#</th>
+                        <th>اسم المنتج</th>
+                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                        <th style="width: 120px; text-align: center;">الضريبة المضافة (%)</th>
+                        <th style="width: 100px; text-align: center;">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody id="manage-oil-table-body">
+                      <!-- Oil products will be added here dynamically -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- General Settings Section -->
+            <section id="settings-section-general" class="settings-section">
+              <h3>إعدادات عامة</h3>
+              <div class="form-group">
+                <label for="station-name">اسم المحطة:</label>
+                <input type="text" id="station-name" value="محطة بنزين سمنود - الجمعية التعاونية للبترول">
+              </div>
+              <div class="form-group">
+                <label for="station-address">العنوان:</label>
+                <input type="text" id="station-address" placeholder="أدخل عنوان المحطة">
+              </div>
+              <div class="form-group">
+                <label for="station-phone">رقم الهاتف:</label>
+                <input type="text" id="station-phone" placeholder="أدخل رقم الهاتف">
+              </div>
+              <button class="btn btn-primary" onclick="saveGeneralSettings()">حفظ الإعدادات</button>
+
+              <!-- Updates Section -->
+              <div class="settings-divider"></div>
+              <h3>التحديثات</h3>
+
+              <div class="update-info-card">
+                <div class="update-info-row">
+                  <span class="update-label">الإصدار الحالي:</span>
+                  <span class="update-value" id="current-version">1.0.0</span>
+                </div>
+                <div class="update-info-row">
+                  <span class="update-label">آخر فحص:</span>
+                  <span class="update-value" id="last-update-check">لم يتم الفحص بعد</span>
+                </div>
+                <div class="update-info-row">
+                  <span class="update-label">الحالة:</span>
+                  <span class="update-value" id="update-status">جاهز للفحص</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="auto-check-updates" checked>
+                  فحص التحديثات تلقائياً عند بدء التشغيل
+                </label>
+              </div>
+
+              <div class="update-actions-group">
+                <button class="btn btn-primary" onclick="checkForUpdatesManually()">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="margin-left: 0.5rem;">
+                    <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                    <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                  </svg>
+                  فحص التحديثات الآن
+                </button>
+                <button class="btn btn-secondary" id="view-changelog-btn" onclick="viewChangelog()" style="display: none;">
+                  عرض التغييرات
+                </button>
+              </div>
+            </section>
+
+            <!-- Invoices List Section -->
+            <section id="settings-section-invoices-list" class="settings-section">
+              <h3>عرض الفواتير</h3>
+
+              <!-- Filters -->
+              <div class="invoices-filters">
+                <div class="filter-group">
+                  <label for="invoice-type-filter">نوع الفاتورة:</label>
+                  <select id="invoice-type-filter" onchange="filterInvoices()">
+                    <option value="all">الكل</option>
+                    <option value="fuel">وقود</option>
+                    <option value="oil">زيوت</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <label for="invoice-start-date">من تاريخ:</label>
+                  <input type="date" id="invoice-start-date" onchange="filterInvoices()">
+                </div>
+                <div class="filter-group">
+                  <label for="invoice-end-date">إلى تاريخ:</label>
+                  <input type="date" id="invoice-end-date" onchange="filterInvoices()">
+                </div>
+                <button class="btn btn-secondary" onclick="resetInvoiceFilters()">إعادة تعيين</button>
+              </div>
+
+              <!-- Invoices Table -->
+              <div class="invoices-table-wrapper">
+                <table class="invoices-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>رقم الفاتورة</th>
+                      <th>النوع</th>
+                      <th>الإجمالي</th>
+                      <th>الإجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody id="invoices-list-body">
+                    <!-- Invoices will be loaded here -->
+                  </tbody>
+                </table>
+                <div id="invoices-empty-state" style="display: none; text-align: center; padding: 3rem; color: #666;">
+                  لا توجد فواتير لعرضها
+                </div>
+              </div>
+            </section>
+
+            <!-- Backup Section -->
+            <section id="settings-section-backup" class="settings-section">
+              <h3>النسخ الاحتياطي</h3>
+              <div class="form-group">
+                <p>احتفظ بنسخة احتياطية من بياناتك لضمان عدم فقدانها.</p>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" onclick="exportBackup()">تصدير نسخة احتياطية</button>
+                <button class="btn btn-secondary" onclick="importBackup()">استيراد نسخة احتياطية</button>
+              </div>
+              <input type="file" id="backup-file-input" style="display: none;" accept=".json" onchange="handleBackupFile(event)">
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- Depot Management Screen -->
+      <div id="depot-screen" class="screen">
+        <div class="depot-container">
+          <!-- Header Section -->
+          <div class="depot-header">
+            <h2>🏪 إدارة المخزن</h2>
+            <p class="depot-subtitle">تتبع مخزون الزيوت</p>
+          </div>
+          
+          <!-- Oil Selection Box -->
+          <div class="oil-selection-box">
+            <h3>اختر نوع الزيت</h3>
+            <div class="oil-grid">
+              <div class="oil-item" data-oil="COOP FACT 20L">COOP FACT 20L</div>
+              <div class="oil-item" data-oil="COOP FACT 8L">COOP FACT 8L</div>
+              <div class="oil-item" data-oil="COOP FACT 5L">COOP FACT 5L</div>
+              <div class="oil-item" data-oil="COOP FACT 4L">COOP FACT 4L</div>
+              <div class="oil-item" data-oil="COOP FACT 1L">COOP FACT 1L</div>
+              <div class="oil-item" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
+              <div class="oil-item" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
+              <div class="oil-item" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
+              <div class="oil-item" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
+              <div class="oil-item" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
+              <div class="oil-item" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
+              <div class="oil-item" data-oil="CI4 5L">CI4 5L</div>
+              <div class="oil-item" data-oil="SJ 4L">SJ 4L</div>
+              <div class="oil-item" data-oil="SJ 1L">SJ 1L</div>
+              <div class="oil-item" data-oil="CPC 8000 4L">CPC 8000 4L</div>
+              <div class="oil-item" data-oil="CPC 8000 5L">CPC 8000 5L</div>
+              <div class="oil-item" data-oil="XPL 4L">XPL 4L</div>
+              <div class="oil-item" data-oil="SF 20/50 4L">SF 20/50 4L</div>
+              <div class="oil-item" data-oil="SF 20/50 1L">SF 20/50 1L</div>
+              <div class="oil-item" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
+              <div class="oil-item" data-oil="DIXERON 1L">DIXERON 1L</div>
+              <div class="oil-item" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
+              <div class="oil-item" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
+              <div class="oil-item" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
+              <div class="oil-item" data-oil="سايب ١ ك">سايب ١ ك</div>
+              <div class="oil-item" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
+              <div class="oil-item" data-oil="شامبو سيارات">شامبو سيارات</div>
+              <div class="oil-item" data-oil="ماء مقطر">ماء مقطر</div>
+              <div class="oil-item" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
+              <div class="oil-item" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
+              <div class="oil-item" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
+              <div class="oil-item" data-oil="كورال بلومارين">كورال بلومارين</div>
+              <div class="oil-item" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
+              <div class="oil-item" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
+            </div>
+          </div>
+
+          <!-- Results Section -->
+          <div id="results-section" class="results-section" style="display: none;">
+            <!-- Stock Display Card -->
+            <div class="current-stock-card">
+              <div class="stock-card">
+                <div class="stock-header">
+                  <div class="stock-icon">📦</div>
+                  <div class="stock-info">
+                    <div class="stock-label">الرصيد الحالي</div>
+                    <div id="current-stock-amount" class="stock-amount">0</div>
+                    <div id="selected-oil-name" class="selected-oil">-- اختر نوع الزيت --</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Movements Table -->
+            <div class="movements-section">
+              <div id="movements-table"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Price History Modal -->
+      <div id="price-history-modal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+          <div class="modal-header">
+            <h3>سجل تغييرات الأسعار</h3>
+            <button class="close-modal" onclick="closePriceHistoryModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; direction: rtl;">
+              <div>
+                <label style="font-weight: 600; margin-left: 0.5rem;">نوع المنتج:</label>
+                <select id="history-product-filter" onchange="loadPriceHistory()" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 6px; font-family: 'Noto Naskh Arabic', serif; min-width: 200px;">
+                  <option value="">الكل</option>
+                  <optgroup label="الوقود">
+                    <option value="بنزين ٨٠">بنزين ٨٠</option>
+                    <option value="بنزين ٩٢">بنزين ٩٢</option>
+                    <option value="بنزين ٩٥">بنزين ٩٥</option>
+                    <option value="سولار">سولار</option>
+                  </optgroup>
+                  <optgroup label="الزيوت" id="oil-filter-group">
+                    <!-- Will be populated dynamically -->
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+            <div id="price-history-content">
+              <!-- History will be loaded here -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Movement Modal -->
+      <div id="movement-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>إضافة حركة مخزون</h3>
+            <button class="close-modal" onclick="closeMovementModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="movement-date">التاريخ:</label>
+                <input type="date" id="movement-date" required>
+              </div>
+              <div class="form-group">
+                <label for="movement-type">نوع الحركة:</label>
+                <select id="movement-type" required onchange="toggleInvoiceField()">
+                  <option value="">اختر نوع الحركة</option>
+                  <option value="in">دخول</option>
+                  <option value="out">خروج</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="movement-quantity">الكمية:</label>
+                <input type="number" id="movement-quantity" min="1" required>
+              </div>
+              <div class="form-group" id="invoice-field" style="display: none;">
+                <label for="movement-invoice">رقم الفاتورة:</label>
+                <input type="text" id="movement-invoice">
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveMovement()">حفظ</button>
+            <button class="btn btn-secondary" onclick="closeMovementModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Invoice Details Modal -->
+      <div id="invoice-details-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+          <div class="modal-header">
+            <h3>تفاصيل الفاتورة</h3>
+            <button class="close-modal" onclick="closeInvoiceDetailsModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div id="invoice-details-content">
+              <!-- Invoice details will be loaded here -->
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeInvoiceDetailsModal()">إغلاق</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Product Name Modal -->
+      <div id="edit-product-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>تعديل اسم المنتج</h3>
+            <button class="close-modal" onclick="closeEditProductModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="edit-product-current-name">الاسم الحالي:</label>
+              <input type="text" id="edit-product-current-name" readonly style="background-color: #f5f5f5;">
+            </div>
+            <div class="form-group">
+              <label for="edit-product-new-name">الاسم الجديد:</label>
+              <input type="text" id="edit-product-new-name" placeholder="أدخل الاسم الجديد" required>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveEditProductName()">حفظ</button>
+            <button class="btn btn-secondary" onclick="closeEditProductModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-navigation">
+      <button class="nav-btn active" data-screen="home">الرئيسية</button>
+      <button class="nav-btn" data-screen="invoice">فاتورة جديدة</button>
+      <button class="nav-btn" data-screen="charts">الرسوم البيانية</button>
+      <button class="nav-btn" data-screen="report">التقارير</button>
+      <button class="nav-btn" data-screen="settings">الإعدادات</button>
+    </nav>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+
+</html>
