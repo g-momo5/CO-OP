@@ -16,7 +16,7 @@
   "description": "Gas Station Management System",
   "repository": {
     "type": "git",
-    "url": "https://github.com/g-momo5/coop2.git"
+    "url": "https://github.com/g-momo5/CO-OP.git"
   },
   "build": {
     "appId": "com.coop2.gasstation",
@@ -52,7 +52,7 @@
     "publish": {
       "provider": "github",
       "owner": "g-momo5",
-      "repo": "coop2"
+      "repo": "CO-OP"
     },
     "npmRebuild": false,
     "buildDependenciesFromSource": false
