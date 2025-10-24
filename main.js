@@ -57,10 +57,17 @@ async function initializeDatabase() {
       throw error;
     }
   } else {
-    // SQLite configuration
-    const dbPath = path.join(__dirname, 'coop_database.db');
+    // SQLite configuration - use userData directory for writable access
+    const userDataPath = app.getPath('userData');
+    const dbPath = path.join(userDataPath, 'coop_database.db');
+
+    // Ensure the userData directory exists
+    if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+    }
+
     db = new sqlite3.Database(dbPath);
-    console.log('Connected to SQLite database');
+    console.log('Connected to SQLite database at:', dbPath);
     await createSQLiteTables();
   }
 }
