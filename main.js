@@ -23,7 +23,7 @@ function createWindow() {
       contextIsolation: false,
       enableRemoteModule: true
     },
-    icon: path.join(__dirname, 'assets/icon.png'),
+    icon: path.join(__dirname, 'assets/logo_cpc.png'),
     title: 'محطة بنزين سمنود - الجمعية التعاونية للبترول - مصر'
   });
 
@@ -57,17 +57,27 @@ async function initializeDatabase() {
       throw error;
     }
   } else {
-    // SQLite configuration - use userData directory for writable access
-    const userDataPath = app.getPath('userData');
-    const dbPath = path.join(userDataPath, 'coop_database.db');
+    // SQLite configuration
+    let dbPath;
 
-    // Ensure the userData directory exists
-    if (!fs.existsSync(userDataPath)) {
-      fs.mkdirSync(userDataPath, { recursive: true });
+    // In development, use __dirname; in production, use userData
+    if (!app.isPackaged) {
+      // Development mode: use local database
+      dbPath = path.join(__dirname, 'coop_database.db');
+      console.log('Development mode - Database:', dbPath);
+    } else {
+      // Production mode: use userData directory
+      const userDataPath = app.getPath('userData');
+      dbPath = path.join(userDataPath, 'coop_database.db');
+
+      // Ensure the userData directory exists
+      if (!fs.existsSync(userDataPath)) {
+        fs.mkdirSync(userDataPath, { recursive: true });
+      }
+      console.log('Production mode - Database:', dbPath);
     }
 
     db = new sqlite3.Database(dbPath);
-    console.log('Connected to SQLite database at:', dbPath);
     await createSQLiteTables();
   }
 }
@@ -180,6 +190,7 @@ async function createPostgreSQLTables() {
     sale_price REAL NOT NULL,
     total REAL NOT NULL,
     profit REAL NOT NULL,
+    invoice_total REAL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
@@ -306,6 +317,7 @@ function createSQLiteTables() {
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
         profit REAL NOT NULL,
+        invoice_total REAL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
 
@@ -322,9 +334,14 @@ function createSQLiteTables() {
         immediate_discount REAL DEFAULT 0,
         martyrs_tax REAL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`, (err) => {
-        if (err) reject(err);
-        else resolve();
+      )`);
+
+      // Add invoice_total column to fuel_invoices if it doesn't exist (migration)
+      db.run(`ALTER TABLE fuel_invoices ADD COLUMN invoice_total REAL DEFAULT 0`, (err) => {
+        if (err && !err.message.includes('duplicate column')) {
+          console.log('invoice_total column migration error:', err.message);
+        }
+        resolve();
       });
     });
   });
@@ -464,6 +481,30 @@ function setupIPCHandlers() {
       }
     } catch (error) {
       console.error('Error updating oil price:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('delete-oil-product', async (_event, oil_type) => {
+    try {
+      const deleteQuery = USE_POSTGRESQL
+        ? 'DELETE FROM oil_prices WHERE oil_type = $1'
+        : 'DELETE FROM oil_prices WHERE oil_type = ?';
+      return await executeUpdate(deleteQuery, [oil_type]);
+    } catch (error) {
+      console.error('Error deleting oil product:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('delete-fuel-product', async (_event, fuel_type) => {
+    try {
+      const deleteQuery = USE_POSTGRESQL
+        ? 'DELETE FROM fuel_prices WHERE fuel_type = $1'
+        : 'DELETE FROM fuel_prices WHERE fuel_type = ?';
+      return await executeUpdate(deleteQuery, [fuel_type]);
+    } catch (error) {
+      console.error('Error deleting fuel product:', error);
       throw error;
     }
   });
@@ -711,10 +752,17 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-fuel-movements', async (event, fuelType) => {
     try {
-      const movementsQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM fuel_movements WHERE fuel_type = $1 ORDER BY date DESC, created_at DESC'
-        : 'SELECT * FROM fuel_movements WHERE fuel_type = ? ORDER BY date DESC, created_at DESC';
-      return await executeQuery(movementsQuery, [fuelType]);
+      let movementsQuery, params;
+      if (fuelType) {
+        movementsQuery = USE_POSTGRESQL
+          ? 'SELECT * FROM fuel_movements WHERE fuel_type = $1 ORDER BY date DESC, created_at DESC'
+          : 'SELECT * FROM fuel_movements WHERE fuel_type = ? ORDER BY date DESC, created_at DESC';
+        params = [fuelType];
+      } else {
+        movementsQuery = 'SELECT * FROM fuel_movements ORDER BY date DESC, created_at DESC';
+        params = [];
+      }
+      return await executeQuery(movementsQuery, params);
     } catch (error) {
       console.error('Error getting fuel movements:', error);
       throw error;
@@ -745,13 +793,13 @@ function setupIPCHandlers() {
   // Fuel invoice handlers
   ipcMain.handle('add-fuel-invoice', async (event, invoiceData) => {
     try {
-      const { date, invoice_number, fuel_items } = invoiceData;
+      const { date, invoice_number, invoice_total, fuel_items } = invoiceData;
 
       // Save each fuel item as a separate record
       for (const item of fuel_items) {
         const invoiceQuery = USE_POSTGRESQL
-          ? 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
-          : 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          ? 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)'
+          : 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await executeInsert(invoiceQuery, [
           date,
           invoice_number,
@@ -761,7 +809,8 @@ function setupIPCHandlers() {
           item.purchase_price,
           item.sale_price || 0,
           item.total,
-          item.profit || 0
+          item.profit || 0,
+          invoice_total || 0
         ]);
       }
 

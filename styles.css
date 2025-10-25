@@ -851,6 +851,15 @@ body {
   height: 18px;
 }
 
+.btn-icon-danger {
+  color: #dc3545;
+}
+
+.btn-icon-danger:hover {
+  background: rgba(220, 53, 69, 0.1);
+  color: #c82333;
+}
+
 .btn-secondary {
   background: #6c757d;
   color: white;
@@ -1334,7 +1343,8 @@ body {
   box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
 }
 
-.prices-table-full {
+/* Base table style - uses إدارة المنتجات style */
+.base-table {
   width: 100%;
   border-collapse: collapse;
   background: white;
@@ -1343,45 +1353,55 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border: 1px solid #dee2e6;
   direction: rtl;
+  table-layout: auto;
 }
 
-.prices-table-full thead {
+.base-table thead {
   background: #2c3e50;
 }
 
-.prices-table-full th {
+.base-table th {
   padding: 1rem;
   text-align: right;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   color: white;
   border: none;
+  white-space: nowrap;
 }
 
-.prices-table-full tbody tr {
+.base-table tbody tr {
   border-bottom: 1px solid #e9ecef;
   transition: background 0.2s ease;
 }
 
-.prices-table-full tbody tr:hover {
+.base-table tbody tr:hover {
   background: #f8f9fa;
 }
 
-.prices-table-full tbody tr:last-child {
+.base-table tbody tr:last-child {
   border-bottom: none;
 }
 
-.prices-table-full td {
+.base-table td {
   padding: 0.875rem 1rem;
   text-align: right;
   font-size: 0.95rem;
   color: #2c3e50;
+  white-space: nowrap;
 }
 
-.prices-table-full td:first-child {
+.base-table td:first-child {
   color: #6c757d;
   font-weight: 500;
   width: 50px;
+}
+
+/* Products table - center السعر الحالي, الضريبة المضافة (%), الإجراءات */
+.prices-table-full th:nth-child(3),
+.prices-table-full th:nth-child(4),
+.prices-table-full th:nth-child(5) {
+  text-align: center !important;
 }
 
 .prices-table-full td:nth-child(3),
@@ -1390,9 +1410,16 @@ body {
   text-align: center !important;
 }
 
-.prices-table-full th:nth-child(3),
-.prices-table-full th:nth-child(4),
-.prices-table-full th:nth-child(5) {
+/* Invoices table - center النوع, الإجمالي, الإجراءات */
+.invoices-table th:nth-child(3),
+.invoices-table th:nth-child(4),
+.invoices-table th:nth-child(5) {
+  text-align: center !important;
+}
+
+.invoices-table td:nth-child(3),
+.invoices-table td:nth-child(4),
+.invoices-table td:nth-child(5) {
   text-align: center !important;
 }
 
@@ -1590,13 +1617,13 @@ body {
     padding: 0.3rem 0;
   }
 
-  .prices-table-full {
+  .base-table {
     width: 100%;
     table-layout: auto;
   }
 
-  .prices-table-full th,
-  .prices-table-full td {
+  .base-table th,
+  .base-table td {
     padding: 0.5rem;
     font-size: 0.85rem;
   }
@@ -1604,8 +1631,6 @@ body {
   .invoice-form {
     padding: 1rem;
   }
-
-
 
   .invoice-type-selector {
     flex-direction: column;
@@ -3093,39 +3118,7 @@ select option {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.invoices-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-  direction: rtl;
-}
-
-.invoices-table thead {
-  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
-  color: white;
-}
-
-.invoices-table th {
-  padding: 1rem;
-  text-align: right;
-  font-weight: 600;
-  font-size: 1rem;
-}
-
-.invoices-table tbody tr {
-  border-bottom: 1px solid #e9ecef;
-  transition: background-color 0.2s ease;
-}
-
-.invoices-table tbody tr:hover {
-  background-color: #f8f9fa;
-}
-
-.invoices-table td {
-  padding: 1rem;
-  text-align: right;
-  color: #333;
-}
+/* Invoices table - no specific customizations needed */
 
 .invoices-table .btn-sm {
   padding: 0.4rem 1rem;
@@ -3178,7 +3171,7 @@ select option {
 }
 
 .invoice-summary-details {
-  background: #f8f9fa;
+  background: #f8f9fa00;
   padding: 1rem;
   border-radius: 8px;
   direction: rtl;
@@ -3199,15 +3192,6 @@ select option {
   .filter-group select,
   .filter-group input[type="date"] {
     width: 100%;
-  }
-
-  .invoices-table {
-    font-size: 0.9rem;
-  }
-
-  .invoices-table th,
-  .invoices-table td {
-    padding: 0.6rem;
   }
 }
 

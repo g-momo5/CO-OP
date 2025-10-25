@@ -412,8 +412,17 @@ async function loadTodayStats() {
 
 async function loadHomeChart() {
   try {
-    const sales = await ipcRenderer.invoke('get-sales');
-    createMonthlyFuelSalesChart(sales);
+    // Get fuel movements (purchases) instead of sales
+    const movements = await ipcRenderer.invoke('get-fuel-movements');
+
+    if (!movements || !Array.isArray(movements)) {
+      console.error('Invalid movements data');
+      return;
+    }
+
+    // Filter only 'in' movements (purchases)
+    const purchases = movements.filter(m => m.type === 'in');
+    createMonthlyFuelSalesChart(purchases);
   } catch (error) {
     console.error('Error loading home chart:', error);
   }
@@ -464,9 +473,13 @@ async function loadPurchasePrices() {
 
 
 async function saveFuelInvoice() {
+  const actualTotalInput = document.getElementById('actual-invoice-total');
+  const invoiceTotal = parseFloat(actualTotalInput?.value) || 0;
+
   const invoiceData = {
     date: document.getElementById('fuel-invoice-date').value,
     invoice_number: document.getElementById('fuel-invoice-number').value,
+    invoice_total: invoiceTotal,
     fuel_items: []
   };
 
@@ -1033,17 +1046,9 @@ async function exportToPDF() {
 }
 
 // Format numbers in Arabic locale with Arabic numerals
+// Format number with decimals only if needed
+// Format number with Arabic numerals (default: no decimals unless needed)
 function formatArabicNumber(number) {
-  const formatted = new Intl.NumberFormat('ar-EG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false
-  }).format(number);
-  return convertToArabicNumerals(formatted);
-}
-
-// Format number with decimals only if needed (for VAT percentages)
-function formatArabicNumberOptional(number) {
   const hasDecimals = number % 1 !== 0;
   const formatted = new Intl.NumberFormat('ar-EG', {
     minimumFractionDigits: hasDecimals ? 2 : 0,
@@ -1053,25 +1058,35 @@ function formatArabicNumberOptional(number) {
   return convertToArabicNumerals(formatted);
 }
 
-// Format currency in Arabic locale with Arabic numerals
+// Format number with forced 2 decimals (use only when explicitly requested)
+function formatArabicNumberFixed(number) {
+  const formatted = new Intl.NumberFormat('ar-EG', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false
+  }).format(number);
+  return convertToArabicNumerals(formatted);
+}
+
+// Format currency with Arabic numerals (default: no decimals unless needed)
 function formatArabicCurrency(amount) {
+  const hasDecimals = amount % 1 !== 0;
   const formatted = new Intl.NumberFormat('ar-EG', {
     style: 'currency',
     currency: 'EGP',
-    minimumFractionDigits: 2,
+    minimumFractionDigits: hasDecimals ? 2 : 0,
     maximumFractionDigits: 2,
     useGrouping: false
   }).format(amount);
   return convertToArabicNumerals(formatted);
 }
 
-// Format currency with decimals only if needed (for oils)
-function formatArabicCurrencyOptional(amount) {
-  const hasDecimals = amount % 1 !== 0;
+// Format currency with forced 2 decimals (use only when explicitly requested)
+function formatArabicCurrencyFixed(amount) {
   const formatted = new Intl.NumberFormat('ar-EG', {
     style: 'currency',
     currency: 'EGP',
-    minimumFractionDigits: hasDecimals ? 2 : 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
     useGrouping: false
   }).format(amount);
@@ -2127,16 +2142,33 @@ async function loadManageProducts() {
 
         const td4 = document.createElement('td');
         td4.style.textAlign = 'center';
-        const btn = document.createElement('button');
-        btn.className = 'btn-icon';
-        btn.title = 'تعديل الاسم';
-        btn.onclick = () => editProductName('fuel', product.fuel_type, product.id);
-        btn.innerHTML = `
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-icon';
+        editBtn.title = 'تعديل الاسم';
+        editBtn.onclick = () => editProductName('fuel', product.fuel_type, product.id);
+        editBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
           </svg>
         `;
-        td4.appendChild(btn);
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-icon btn-icon-danger';
+        deleteBtn.title = 'حذف المنتج';
+        deleteBtn.style.marginLeft = '0.5rem';
+        deleteBtn.onclick = () => deleteFuelProduct(product.fuel_type);
+        deleteBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+          </svg>
+        `;
+
+        td4.appendChild(editBtn);
+        td4.appendChild(deleteBtn);
 
         row.appendChild(td1);
         row.appendChild(td2);
@@ -2176,24 +2208,41 @@ async function loadManageProducts() {
 
         const td3 = document.createElement('td');
         td3.style.textAlign = 'center';
-        td3.textContent = formatArabicCurrencyOptional(product.price) + updatedDate;
+        td3.textContent = formatArabicCurrency(product.price) + updatedDate;
 
         const td4 = document.createElement('td');
         td4.style.textAlign = 'center';
-        td4.textContent = formatArabicNumberOptional(vat) + '%';
+        td4.textContent = formatArabicNumber(vat) + '%';
 
         const td5 = document.createElement('td');
         td5.style.textAlign = 'center';
-        const btn = document.createElement('button');
-        btn.className = 'btn-icon';
-        btn.title = 'تعديل الاسم';
-        btn.onclick = () => editProductName('oil', product.oil_type, product.id);
-        btn.innerHTML = `
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-icon';
+        editBtn.title = 'تعديل الاسم';
+        editBtn.onclick = () => editProductName('oil', product.oil_type, product.id);
+        editBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
           </svg>
         `;
-        td5.appendChild(btn);
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-icon btn-icon-danger';
+        deleteBtn.title = 'حذف المنتج';
+        deleteBtn.style.marginLeft = '0.5rem';
+        deleteBtn.onclick = () => deleteOilProduct(product.oil_type);
+        deleteBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+          </svg>
+        `;
+
+        td5.appendChild(editBtn);
+        td5.appendChild(deleteBtn);
 
         row.appendChild(td1);
         row.appendChild(td2);
@@ -2282,6 +2331,50 @@ async function saveEditProductName() {
   } catch (error) {
     showMessage('حدث خطأ أثناء تحديث اسم المنتج: ' + error.message, 'error');
     console.error('Error updating product name:', error);
+  }
+}
+
+// Delete fuel product
+async function deleteFuelProduct(fuelType) {
+  // Confirm deletion
+  const confirmDelete = confirm(`هل أنت متأكد من حذف المنتج "${fuelType}"؟\n\nتحذير: لن تتمكن من التراجع عن هذا الإجراء.`);
+
+  if (!confirmDelete) {
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('delete-fuel-product', fuelType);
+    showMessage('تم حذف المنتج بنجاح', 'success');
+
+    // Reload tables
+    loadManageProducts();
+    loadFuelPrices();
+  } catch (error) {
+    showMessage('حدث خطأ أثناء حذف المنتج: ' + error.message, 'error');
+    console.error('Error deleting fuel product:', error);
+  }
+}
+
+// Delete oil product
+async function deleteOilProduct(oilType) {
+  // Confirm deletion
+  const confirmDelete = confirm(`هل أنت متأكد من حذف المنتج "${oilType}"؟\n\nتحذير: لن تتمكن من التراجع عن هذا الإجراء.`);
+
+  if (!confirmDelete) {
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('delete-oil-product', oilType);
+    showMessage('تم حذف المنتج بنجاح', 'success');
+
+    // Reload tables
+    loadManageProducts();
+    loadOilPrices();
+  } catch (error) {
+    showMessage('حدث خطأ أثناء حذف المنتج: ' + error.message, 'error');
+    console.error('Error deleting oil product:', error);
   }
 }
 
@@ -2502,7 +2595,7 @@ async function loadInvoicesList() {
           type: 'fuel',
           date: inv.date,
           invoice_number: inv.invoice_number,
-          total: inv.total || 0,
+          total: inv.invoice_total || 0,
           items: []
         };
       }
@@ -2704,11 +2797,11 @@ async function showInvoiceDetails(type, invoiceNumber) {
   html += '</div>';
 
   detailsContent.innerHTML = html;
-  document.getElementById('invoice-details-modal').style.display = 'flex';
+  document.getElementById('invoice-details-modal').classList.add('show');
 }
 
 function closeInvoiceDetailsModal() {
-  document.getElementById('invoice-details-modal').style.display = 'none';
+  document.getElementById('invoice-details-modal').classList.remove('show');
 }
 
 // Auto-update functionality
