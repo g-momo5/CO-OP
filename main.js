@@ -1,16 +1,12 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const sqlite3 = require('sqlite3').verbose();
 
 // Delay autoUpdater import to avoid initialization issues
 let autoUpdater;
 
-// Database configuration - change this to switch between SQLite and PostgreSQL
-const USE_POSTGRESQL = false; // Set to true when Supabase is ready
-
 let mainWindow;
-let db;
+let db; // PostgreSQL client (Supabase)
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -34,49 +30,24 @@ function createWindow() {
 }
 
 async function initializeDatabase() {
-  if (USE_POSTGRESQL) {
-    // PostgreSQL/Supabase configuration
-    const { Client } = require('pg');
-    const connectionString = 'postgresql://postgres.lryhwpadqrlnwjinxuqi:Ghaly1997.@aws-1-eu-central-1.pooler.supabase.com:6543/postgres';
-    
-    db = new Client({
-      connectionString: connectionString,
-      ssl: {
-        rejectUnauthorized: false
-      }
-    });
+  // PostgreSQL/Supabase configuration
+  const { Client } = require('pg');
+  const connectionString = 'postgresql://postgres.lryhwpadqrlnwjinxuqi:Ghaly1997.@aws-1-eu-central-1.pooler.supabase.com:6543/postgres';
 
-    try {
-      await db.connect();
-      console.log('Connected to Supabase PostgreSQL');
-      await createPostgreSQLTables();
-    } catch (error) {
-      console.error('PostgreSQL connection error:', error);
-      throw error;
+  db = new Client({
+    connectionString: connectionString,
+    ssl: {
+      rejectUnauthorized: false
     }
-  } else {
-    // SQLite configuration
-    let dbPath;
+  });
 
-    // In development, use __dirname; in production, use userData
-    if (!app.isPackaged) {
-      // Development mode: use local database
-      dbPath = path.join(__dirname, 'coop_database.db');
-      console.log('Development mode - Database:', dbPath);
-    } else {
-      // Production mode: use userData directory
-      const userDataPath = app.getPath('userData');
-      dbPath = path.join(userDataPath, 'coop_database.db');
-
-      // Ensure the userData directory exists
-      if (!fs.existsSync(userDataPath)) {
-        fs.mkdirSync(userDataPath, { recursive: true });
-      }
-      console.log('Production mode - Database:', dbPath);
-    }
-
-    db = new sqlite3.Database(dbPath);
-    await createSQLiteTables();
+  try {
+    await db.connect();
+    console.log('Connected to Supabase PostgreSQL');
+    await createPostgreSQLTables();
+  } catch (error) {
+    console.error('PostgreSQL connection error:', error);
+    throw error;
   }
 }
 
@@ -287,380 +258,17 @@ async function createPostgreSQLTables() {
   )`);
 }
 
-function createSQLiteTables() {
-  return new Promise((resolve, reject) => {
-    db.serialize(() => {
-      // Sales table
-      db.run(`CREATE TABLE IF NOT EXISTS sales (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        fuel_type TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        price_per_liter REAL NOT NULL,
-        total_amount REAL NOT NULL,
-        payment_method TEXT NOT NULL,
-        customer_name TEXT,
-        notes TEXT
-      )`);
-
-      // Fuel prices table
-      db.run(`CREATE TABLE IF NOT EXISTS fuel_prices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fuel_type TEXT NOT NULL UNIQUE,
-        price REAL NOT NULL,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Purchase prices table
-      db.run(`CREATE TABLE IF NOT EXISTS purchase_prices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fuel_type TEXT NOT NULL UNIQUE,
-        price REAL NOT NULL,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Insert default fuel prices if not exists
-      db.run(`INSERT OR IGNORE INTO fuel_prices (fuel_type, price) VALUES
-        ('بنزين ٨٠', 8.50),
-        ('بنزين ٩٢', 10.50),
-        ('بنزين ٩٥', 11.50),
-        ('سولار', 7.50)`);
-
-      // Insert default purchase prices if not exists
-      db.run(`INSERT OR IGNORE INTO purchase_prices (fuel_type, price) VALUES
-        ('بنزين ٨٠', 8.00),
-        ('بنزين ٩٢', 10.00),
-        ('بنزين ٩٥', 11.00),
-        ('سولار', 7.00)`);
-
-      // Products table (unified table for fuel and oil products) - CREATE FIRST!
-      db.run(`CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_type TEXT NOT NULL,
-        product_name TEXT NOT NULL,
-        current_price REAL NOT NULL,
-        effective_date DATE DEFAULT CURRENT_DATE,
-        vat REAL DEFAULT 0,
-        is_active INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(product_type, product_name)
-      )`, (err) => {
-        if (err) {
-          console.log('Error creating products table:', err.message);
-        } else {
-          console.log('Products table created/verified');
-        }
-      });
-
-      // Oil prices table
-      db.run(`CREATE TABLE IF NOT EXISTS oil_prices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        oil_type TEXT NOT NULL UNIQUE,
-        price REAL NOT NULL,
-        vat REAL DEFAULT 0,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Add vat column if it doesn't exist (migration)
-      db.run(`ALTER TABLE oil_prices ADD COLUMN vat REAL DEFAULT 0`, (err) => {
-        if (err && !err.message.includes('duplicate column')) {
-          console.log('VAT column migration error:', err.message);
-        }
-      });
-
-      // Add is_active column if it doesn't exist (migration)
-      db.run(`ALTER TABLE oil_prices ADD COLUMN is_active INTEGER DEFAULT 1`, (err) => {
-        if (err && !err.message.includes('duplicate column')) {
-          console.log('is_active column migration error:', err.message);
-        }
-      });
-
-      // Update existing oils to be active by default
-      db.run(`UPDATE oil_prices SET is_active = 1 WHERE is_active IS NULL`, (err) => {
-        if (err) {
-          console.log('Error setting existing oils as active:', err.message);
-        } else {
-          console.log('Existing oils set as active');
-        }
-      });
-
-      // Migrate fuel prices to products table if products is empty
-      db.get('SELECT COUNT(*) as count FROM products', (err, row) => {
-        if (err) {
-          console.log('Error checking products count:', err.message);
-        } else if (row.count === 0) {
-          // Migrate fuel prices
-          db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, is_active)
-            SELECT 'fuel', fuel_type, price, date('now'), 1 FROM fuel_prices`, (err) => {
-            if (err) {
-              console.log('Error migrating fuel prices:', err.message);
-            } else {
-              console.log('Migrated fuel prices to products table');
-            }
-          });
-
-          // Migrate oil prices
-          db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, vat, is_active)
-            SELECT 'oil', oil_type, price, date('now'), COALESCE(vat, 0), COALESCE(is_active, 1) FROM oil_prices`, (err) => {
-            if (err) {
-              console.log('Error migrating oil prices:', err.message);
-            } else {
-              console.log('Migrated oil prices to products table');
-            }
-          });
-        }
-      });
-
-      // Price history table
-      db.run(`CREATE TABLE IF NOT EXISTS price_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        product_type TEXT NOT NULL,
-        product_name TEXT NOT NULL,
-        price REAL NOT NULL,
-        start_date DATE NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`, (err) => {
-        if (err) {
-          console.log('Error creating price_history table:', err.message);
-        }
-
-        // Add product_id column if it doesn't exist (migration)
-        db.run(`ALTER TABLE price_history ADD COLUMN product_id INTEGER`, (err) => {
-          if (err && !err.message.includes('duplicate column')) {
-            console.log('product_id column migration error:', err.message);
-          }
-        });
-      });
-
-      // Oil movements table
-      db.run(`CREATE TABLE IF NOT EXISTS oil_movements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        oil_type TEXT NOT NULL,
-        date TEXT NOT NULL,
-        type TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        invoice_number TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Fuel movements table (for tank inventory tracking)
-      db.run(`CREATE TABLE IF NOT EXISTS fuel_movements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fuel_type TEXT NOT NULL,
-        date TEXT NOT NULL,
-        type TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        invoice_number TEXT,
-        notes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Fuel invoices table
-      db.run(`CREATE TABLE IF NOT EXISTS fuel_invoices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        invoice_number TEXT NOT NULL,
-        fuel_type TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        net_quantity REAL NOT NULL,
-        purchase_price REAL NOT NULL,
-        sale_price REAL NOT NULL,
-        total REAL NOT NULL,
-        profit REAL NOT NULL,
-        invoice_total REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Oil invoices table
-      db.run(`CREATE TABLE IF NOT EXISTS oil_invoices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        invoice_number TEXT NOT NULL,
-        oil_type TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        purchase_price REAL NOT NULL,
-        iva REAL NOT NULL,
-        total_purchase REAL NOT NULL,
-        immediate_discount REAL DEFAULT 0,
-        martyrs_tax REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-
-      // Shifts table for daily shift tracking
-      db.run(`CREATE TABLE IF NOT EXISTS shifts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        shift_number INTEGER NOT NULL,
-        fuel_data TEXT NOT NULL,
-        fuel_total REAL NOT NULL,
-        oil_data TEXT NOT NULL,
-        oil_total REAL NOT NULL,
-        grand_total REAL NOT NULL,
-        is_saved INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(date, shift_number)
-      )`);
-
-      // Add invoice_total column to fuel_invoices if it doesn't exist (migration)
-      db.run(`ALTER TABLE fuel_invoices ADD COLUMN invoice_total REAL DEFAULT 0`, (err) => {
-        if (err && !err.message.includes('duplicate column')) {
-          console.log('invoice_total column migration error:', err.message);
-        }
-        
-        // Run comprehensive database migration to ensure structure matches latest version
-        migrateDatabaseStructure().then(() => {
-          resolve();
-        }).catch((err) => {
-          console.error('Database migration error:', err);
-          resolve(); // Resolve anyway to not block app startup
-        });
-      });
-    });
-  });
-}
-
-// Comprehensive database migration function
-// Ensures all tables and columns exist with the latest structure
-function migrateDatabaseStructure() {
-  return new Promise((resolve, reject) => {
-    console.log('Starting database structure migration...');
-    
-    // Helper function to check and add column
-    function addColumnIfMissing(table, columnName, columnType, callback) {
-      db.all(`PRAGMA table_info(${table})`, (err, columns) => {
-        if (err) {
-          console.log(`Error checking table ${table}:`, err.message);
-          callback();
-          return;
-        }
-
-        const columnExists = columns.some(col => col.name === columnName);
-        
-        if (!columnExists) {
-          db.run(`ALTER TABLE ${table} ADD COLUMN ${columnName} ${columnType}`, (err) => {
-            if (err && !err.message.includes('duplicate column')) {
-              console.log(`Error adding column ${columnName} to ${table}:`, err.message);
-            } else if (!err) {
-              console.log(`✓ Added column ${columnName} to ${table}`);
-            }
-            callback();
-          });
-        } else {
-          callback();
-        }
-      });
-    }
-
-    // Migrate columns sequentially
-    db.serialize(() => {
-      // Products table columns
-      addColumnIfMissing('products', 'product_type', 'TEXT NOT NULL', () => {
-        addColumnIfMissing('products', 'product_name', 'TEXT NOT NULL', () => {
-          addColumnIfMissing('products', 'current_price', 'REAL NOT NULL', () => {
-            addColumnIfMissing('products', 'effective_date', 'DATE DEFAULT CURRENT_DATE', () => {
-              addColumnIfMissing('products', 'vat', 'REAL DEFAULT 0', () => {
-                addColumnIfMissing('products', 'is_active', 'INTEGER DEFAULT 1', () => {
-                  addColumnIfMissing('products', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP', () => {
-                    addColumnIfMissing('products', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP', () => {
-                      // Price history columns
-                      addColumnIfMissing('price_history', 'product_id', 'INTEGER', () => {
-                        // Oil prices columns (already handled above, but ensure)
-                        addColumnIfMissing('oil_prices', 'vat', 'REAL DEFAULT 0', () => {
-                          addColumnIfMissing('oil_prices', 'is_active', 'INTEGER DEFAULT 1', () => {
-                            // Fuel invoices columns (already handled above, but ensure)
-                            addColumnIfMissing('fuel_invoices', 'invoice_total', 'REAL DEFAULT 0', () => {
-                              // Ensure products table data is migrated if empty
-                              db.get('SELECT COUNT(*) as count FROM products', (err, row) => {
-                                if (!err && row && row.count === 0) {
-                                  console.log('Products table is empty, migrating data...');
-                                  
-                                  // Migrate fuel prices
-                                  db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, is_active)
-                                    SELECT 'fuel', fuel_type, price, date('now'), 1 FROM fuel_prices WHERE NOT EXISTS (
-                                      SELECT 1 FROM products WHERE products.product_type = 'fuel' AND products.product_name = fuel_prices.fuel_type
-                                    )`, (err) => {
-                                    if (err) {
-                                      console.log('Error migrating fuel prices to products:', err.message);
-                                    } else {
-                                      console.log('✓ Migrated fuel prices to products table');
-                                    }
-                                  });
-
-                                  // Migrate oil prices
-                                  db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, vat, is_active)
-                                    SELECT 'oil', oil_type, price, date('now'), COALESCE(vat, 0), COALESCE(is_active, 1) FROM oil_prices WHERE NOT EXISTS (
-                                      SELECT 1 FROM products WHERE products.product_type = 'oil' AND products.product_name = oil_prices.oil_type
-                                    )`, (err) => {
-                                    if (err) {
-                                      console.log('Error migrating oil prices to products:', err.message);
-                                    } else {
-                                      console.log('✓ Migrated oil prices to products table');
-                                    }
-                                    console.log('Database structure migration completed');
-                                    resolve();
-                                  });
-                                } else {
-                                  console.log('Database structure migration completed');
-                                  resolve();
-                                }
-                              });
-                            });
-                          });
-                        });
-                      });
-                    });
-                  });
-                });
-              });
-            });
-          });
-        });
-      });
-    });
-  });
-}
-
-// Database helper functions
+// Database helper functions (PostgreSQL only)
 function executeQuery(query, params = []) {
-  if (USE_POSTGRESQL) {
-    return db.query(query, params).then(result => result.rows);
-  } else {
-    return new Promise((resolve, reject) => {
-      db.all(query, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-  }
+  return db.query(query, params).then(result => result.rows);
 }
 
 function executeUpdate(query, params = []) {
-  if (USE_POSTGRESQL) {
-    return db.query(query, params).then(result => result.rowCount);
-  } else {
-    return new Promise((resolve, reject) => {
-      db.run(query, params, function(err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      });
-    });
-  }
+  return db.query(query, params).then(result => result.rowCount);
 }
 
 function executeInsert(query, params = []) {
-  if (USE_POSTGRESQL) {
-    return db.query(query + ' RETURNING id', params).then(result => result.rows[0].id);
-  } else {
-    return new Promise((resolve, reject) => {
-      db.run(query, params, function(err) {
-        if (err) reject(err);
-        else resolve(this.lastID);
-      });
-    });
-  }
+  return db.query(query + ' RETURNING id', params).then(result => result.rows[0].id);
 }
 
 // IPC Handlers setup function
@@ -696,9 +304,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('update-fuel-price', async (event, { fuel_type, price }) => {
     try {
-      const updateQuery = USE_POSTGRESQL
-        ? 'UPDATE fuel_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = $2'
-        : 'UPDATE fuel_prices SET price = ?, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = ?';
+      const updateQuery = 'UPDATE fuel_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = $2';
       return await executeUpdate(updateQuery, [price, fuel_type]);
     } catch (error) {
       console.error('Error updating fuel price:', error);
@@ -717,9 +323,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('update-purchase-price', async (event, { fuel_type, price }) => {
     try {
-      const updateQuery = USE_POSTGRESQL
-        ? 'UPDATE purchase_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = $2'
-        : 'UPDATE purchase_prices SET price = ?, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = ?';
+      const updateQuery = 'UPDATE purchase_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = $2';
       return await executeUpdate(updateQuery, [price, fuel_type]);
     } catch (error) {
       console.error('Error updating purchase price:', error);
@@ -739,20 +343,14 @@ function setupIPCHandlers() {
 
   ipcMain.handle('update-oil-price', async (event, { oil_type, price }) => {
     try {
-      const checkQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM oil_prices WHERE oil_type = $1'
-        : 'SELECT * FROM oil_prices WHERE oil_type = ?';
+      const checkQuery = 'SELECT * FROM oil_prices WHERE oil_type = $1';
       const existing = await executeQuery(checkQuery, [oil_type]);
 
       if (existing.length > 0) {
-        const updateQuery = USE_POSTGRESQL
-          ? 'UPDATE oil_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE oil_type = $2'
-          : 'UPDATE oil_prices SET price = ?, updated_at = CURRENT_TIMESTAMP WHERE oil_type = ?';
+        const updateQuery = 'UPDATE oil_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE oil_type = $2';
         return await executeUpdate(updateQuery, [price, oil_type]);
       } else {
-        const insertQuery = USE_POSTGRESQL
-          ? 'INSERT INTO oil_prices (oil_type, price) VALUES ($1, $2)'
-          : 'INSERT INTO oil_prices (oil_type, price) VALUES (?, ?)';
+        const insertQuery = 'INSERT INTO oil_prices (oil_type, price) VALUES ($1, $2)';
         return await executeInsert(insertQuery, [oil_type, price]);
       }
     } catch (error) {
@@ -763,9 +361,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('delete-oil-product', async (_event, oil_type) => {
     try {
-      const deleteQuery = USE_POSTGRESQL
-        ? "DELETE FROM products WHERE product_name = $1 AND product_type = 'oil'"
-        : "DELETE FROM products WHERE product_name = ? AND product_type = 'oil'";
+      const deleteQuery = "DELETE FROM products WHERE product_name = $1 AND product_type = 'oil'";
       const result = await executeUpdate(deleteQuery, [oil_type]);
       console.log(`Deleted oil product: ${oil_type}, result:`, result);
       return result;
@@ -787,9 +383,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('delete-fuel-product', async (_event, fuel_type) => {
     try {
-      const deleteQuery = USE_POSTGRESQL
-        ? "DELETE FROM products WHERE product_name = $1 AND product_type = 'fuel'"
-        : "DELETE FROM products WHERE product_name = ? AND product_type = 'fuel'";
+      const deleteQuery = "DELETE FROM products WHERE product_name = $1 AND product_type = 'fuel'";
       const result = await executeUpdate(deleteQuery, [fuel_type]);
       console.log(`Deleted fuel product: ${fuel_type}, result:`, result);
       return result;
@@ -803,9 +397,7 @@ function setupIPCHandlers() {
   ipcMain.handle('add-fuel-price', async (event, { fuel_type, price }) => {
     try {
       // Check if fuel type already exists
-      const checkQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM fuel_prices WHERE fuel_type = $1'
-        : 'SELECT * FROM fuel_prices WHERE fuel_type = ?';
+      const checkQuery = 'SELECT * FROM fuel_prices WHERE fuel_type = $1';
       const existing = await executeQuery(checkQuery, [fuel_type]);
 
       if (existing.length > 0) {
@@ -813,15 +405,11 @@ function setupIPCHandlers() {
       }
 
       // Insert new fuel price (with conflict handling to prevent duplicates)
-      const insertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO fuel_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2, updated_at = CURRENT_TIMESTAMP'
-        : 'INSERT OR REPLACE INTO fuel_prices (fuel_type, price) VALUES (?, ?)';
+      const insertQuery = 'INSERT INTO fuel_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2, updated_at = CURRENT_TIMESTAMP';
       const result = await executeInsert(insertQuery, [fuel_type, price]);
 
       // Also add to products table
-      const productInsertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES ($1, $2, $3, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3'
-        : 'INSERT OR REPLACE INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES (?, ?, ?, date(\'now\'), 1)';
+      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES ($1, $2, $3, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3'now\'), 1)';
       await executeInsert(productInsertQuery, ['fuel', fuel_type, price]);
 
       return result;
@@ -835,9 +423,7 @@ function setupIPCHandlers() {
   ipcMain.handle('add-oil-price', async (event, { oil_type, price, vat }) => {
     try {
       // Check if oil type already exists
-      const checkQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM oil_prices WHERE oil_type = $1'
-        : 'SELECT * FROM oil_prices WHERE oil_type = ?';
+      const checkQuery = 'SELECT * FROM oil_prices WHERE oil_type = $1';
       const existing = await executeQuery(checkQuery, [oil_type]);
 
       if (existing.length > 0) {
@@ -846,15 +432,11 @@ function setupIPCHandlers() {
 
       // Insert new oil price with VAT (with conflict handling to prevent duplicates)
       const vatValue = vat || 0;
-      const insertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO oil_prices (oil_type, price, vat) VALUES ($1, $2, $3) ON CONFLICT (oil_type) DO UPDATE SET price = $2, vat = $3, updated_at = CURRENT_TIMESTAMP'
-        : 'INSERT OR REPLACE INTO oil_prices (oil_type, price, vat) VALUES (?, ?, ?)';
+      const insertQuery = 'INSERT INTO oil_prices (oil_type, price, vat) VALUES ($1, $2, $3) ON CONFLICT (oil_type) DO UPDATE SET price = $2, vat = $3, updated_at = CURRENT_TIMESTAMP';
       const result = await executeInsert(insertQuery, [oil_type, price, vatValue]);
 
       // Also add to products table
-      const productInsertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES ($1, $2, $3, $4, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3, vat = $4'
-        : 'INSERT OR REPLACE INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES (?, ?, ?, ?, date(\'now\'), 1)';
+      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES ($1, $2, $3, $4, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3, vat = $4'now\'), 1)';
       await executeInsert(productInsertQuery, ['oil', oil_type, price, vatValue]);
 
       return result;
@@ -869,9 +451,7 @@ function setupIPCHandlers() {
   // Get all customers
   ipcMain.handle('get-customers', async () => {
     try {
-      const query = USE_POSTGRESQL
-        ? 'SELECT * FROM customers ORDER BY name'
-        : 'SELECT * FROM customers ORDER BY name';
+      const query = 'SELECT * FROM customers ORDER BY name';
       const customers = await executeQuery(query);
       return customers;
     } catch (error) {
@@ -883,9 +463,7 @@ function setupIPCHandlers() {
   // Add customer
   ipcMain.handle('add-customer', async (event, { name }) => {
     try {
-      const insertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO customers (name) VALUES ($1) RETURNING *'
-        : 'INSERT INTO customers (name) VALUES (?)';
+      const insertQuery = 'INSERT INTO customers (name) VALUES ($1) RETURNING *';
       const result = await executeInsert(insertQuery, [name]);
       return result;
     } catch (error) {
@@ -900,9 +478,7 @@ function setupIPCHandlers() {
   // Delete customer
   ipcMain.handle('delete-customer', async (event, { id }) => {
     try {
-      const deleteQuery = USE_POSTGRESQL
-        ? 'DELETE FROM customers WHERE id = $1'
-        : 'DELETE FROM customers WHERE id = ?';
+      const deleteQuery = 'DELETE FROM customers WHERE id = $1';
       await executeQuery(deleteQuery, [id]);
       return { success: true };
     } catch (error) {
@@ -915,9 +491,7 @@ function setupIPCHandlers() {
   ipcMain.handle('update-product-name', async (event, { type, oldName, newName, id }) => {
     try {
       // Check if new name already exists for this product type
-      const checkQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM products WHERE product_type = $1 AND product_name = $2'
-        : 'SELECT * FROM products WHERE product_type = ? AND product_name = ?';
+      const checkQuery = 'SELECT * FROM products WHERE product_type = $1 AND product_name = $2';
       const existing = await executeQuery(checkQuery, [type, newName]);
 
       if (existing.length > 0) {
@@ -926,9 +500,7 @@ function setupIPCHandlers() {
 
       // Update the product name in products table
       // The product_id remains the same, preserving price history
-      const updateQuery = USE_POSTGRESQL
-        ? 'UPDATE products SET product_name = $1 WHERE product_type = $2 AND product_name = $3'
-        : 'UPDATE products SET product_name = ? WHERE product_type = ? AND product_name = ?';
+      const updateQuery = 'UPDATE products SET product_name = $1 WHERE product_type = $2 AND product_name = $3';
       await executeQuery(updateQuery, [newName, type, oldName]);
 
       return { success: true };
@@ -961,9 +533,7 @@ function setupIPCHandlers() {
         }
 
         // Get product_id from products table
-        const productQuery = USE_POSTGRESQL
-          ? 'SELECT id FROM products WHERE product_type = $1 AND product_name = $2'
-          : 'SELECT id FROM products WHERE product_type = ? AND product_name = ?';
+        const productQuery = 'SELECT id FROM products WHERE product_type = $1 AND product_name = $2';
         const productResult = await executeQuery(productQuery, [product_type, product_name]);
 
         if (productResult.length === 0) {
@@ -974,15 +544,11 @@ function setupIPCHandlers() {
         const product_id = productResult[0].id;
 
         // Save to history with product_id
-        const historyQuery = USE_POSTGRESQL
-          ? 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)'
-          : 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES (?, ?, ?, ?, ?)';
+        const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)';
         await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id]);
 
         // Update current price in products table
-        const updateQuery = USE_POSTGRESQL
-          ? 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3'
-          : 'UPDATE products SET current_price = ?, effective_date = ? WHERE id = ?';
+        const updateQuery = 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3';
         await executeUpdate(updateQuery, [price, start_date, product_id]);
       }
       return { success: true };
@@ -999,7 +565,7 @@ function setupIPCHandlers() {
       const params = [];
 
       if (filter) {
-        query += USE_POSTGRESQL ? ' WHERE product_name = $1' : ' WHERE product_name = ?';
+        query += ' WHERE product_name = $1';
         params.push(filter);
       }
 
@@ -1016,9 +582,7 @@ function setupIPCHandlers() {
   ipcMain.handle('get-price-by-date', async (event, { product_name, date }) => {
     try {
       // First check price_history for a price effective on or before the given date
-      const historyQuery = USE_POSTGRESQL
-        ? 'SELECT price FROM price_history WHERE product_name = $1 AND start_date <= $2 ORDER BY start_date DESC LIMIT 1'
-        : 'SELECT price FROM price_history WHERE product_name = ? AND start_date <= ? ORDER BY start_date DESC LIMIT 1';
+      const historyQuery = 'SELECT price FROM price_history WHERE product_name = $1 AND start_date <= $2 ORDER BY start_date DESC LIMIT 1';
 
       const historyResult = await executeQuery(historyQuery, [product_name, date]);
 
@@ -1027,9 +591,7 @@ function setupIPCHandlers() {
       }
 
       // If no history found, get current price from products table
-      const currentQuery = USE_POSTGRESQL
-        ? "SELECT current_price FROM products WHERE product_name = $1"
-        : "SELECT current_price FROM products WHERE product_name = ?";
+      const currentQuery = "SELECT current_price FROM products WHERE product_name = $1";
 
       const currentResult = await executeQuery(currentQuery, [product_name]);
 
@@ -1046,9 +608,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-sales-report', async (event, { startDate, endDate }) => {
     try {
-      const reportQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date DESC'
-        : 'SELECT * FROM sales WHERE date BETWEEN ? AND ? ORDER BY date DESC';
+      const reportQuery = 'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
       console.error('Error getting sales report:', error);
@@ -1078,9 +638,7 @@ function setupIPCHandlers() {
   ipcMain.handle('add-oil-movement', async (event, movementData) => {
     try {
       const { oil_type, date, type, quantity, invoice_number } = movementData;
-      const insertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)'
-        : 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES (?, ?, ?, ?, ?)';
+      const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
       return await executeInsert(insertQuery, [oil_type, date, type, quantity, invoice_number]);
     } catch (error) {
       console.error('Error adding oil movement:', error);
@@ -1090,9 +648,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-oil-movements', async (event, oilType) => {
     try {
-      const movementsQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM oil_movements WHERE oil_type = $1 ORDER BY date DESC, created_at DESC'
-        : 'SELECT * FROM oil_movements WHERE oil_type = ? ORDER BY date DESC, created_at DESC';
+      const movementsQuery = 'SELECT * FROM oil_movements WHERE oil_type = $1 ORDER BY date DESC, created_at DESC';
       return await executeQuery(movementsQuery, [oilType]);
     } catch (error) {
       console.error('Error getting oil movements:', error);
@@ -1102,9 +658,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-current-oil-stock', async (event, oilType) => {
     try {
-      const stockQuery = USE_POSTGRESQL
-        ? 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = $1 GROUP BY type'
-        : 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = ? GROUP BY type';
+      const stockQuery = 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = $1 GROUP BY type';
       const result = await executeQuery(stockQuery, [oilType]);
       let stock = 0;
       result.forEach(row => {
@@ -1125,9 +679,7 @@ function setupIPCHandlers() {
   ipcMain.handle('add-fuel-movement', async (event, movementData) => {
     try {
       const { fuel_type, date, type, quantity, invoice_number, notes } = movementData;
-      const insertQuery = USE_POSTGRESQL
-        ? 'INSERT INTO fuel_movements (fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6)'
-        : 'INSERT INTO fuel_movements (fuel_type, date, type, quantity, invoice_number, notes) VALUES (?, ?, ?, ?, ?, ?)';
+      const insertQuery = 'INSERT INTO fuel_movements (fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6)';
       return await executeInsert(insertQuery, [fuel_type, date, type, quantity, invoice_number, notes]);
     } catch (error) {
       console.error('Error adding fuel movement:', error);
@@ -1139,9 +691,7 @@ function setupIPCHandlers() {
     try {
       let movementsQuery, params;
       if (fuelType) {
-        movementsQuery = USE_POSTGRESQL
-          ? 'SELECT * FROM fuel_movements WHERE fuel_type = $1 ORDER BY date DESC, created_at DESC'
-          : 'SELECT * FROM fuel_movements WHERE fuel_type = ? ORDER BY date DESC, created_at DESC';
+        movementsQuery = 'SELECT * FROM fuel_movements WHERE fuel_type = $1 ORDER BY date DESC, created_at DESC';
         params = [fuelType];
       } else {
         movementsQuery = 'SELECT * FROM fuel_movements ORDER BY date DESC, created_at DESC';
@@ -1156,9 +706,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-current-fuel-stock', async (event, fuelType) => {
     try {
-      const stockQuery = USE_POSTGRESQL
-        ? 'SELECT type, SUM(quantity) as total FROM fuel_movements WHERE fuel_type = $1 GROUP BY type'
-        : 'SELECT type, SUM(quantity) as total FROM fuel_movements WHERE fuel_type = ? GROUP BY type';
+      const stockQuery = 'SELECT type, SUM(quantity) as total FROM fuel_movements WHERE fuel_type = $1 GROUP BY type';
       const result = await executeQuery(stockQuery, [fuelType]);
       let stock = 0;
       result.forEach(row => {
@@ -1182,9 +730,7 @@ function setupIPCHandlers() {
 
       // Save each fuel item as a separate record
       for (const item of fuel_items) {
-        const invoiceQuery = USE_POSTGRESQL
-          ? 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)'
-          : 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const invoiceQuery = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)';
         await executeInsert(invoiceQuery, [
           date,
           invoice_number,
@@ -1213,9 +759,7 @@ function setupIPCHandlers() {
 
       // Save each oil item as a separate record
       for (const item of oil_items) {
-        const invoiceQuery = USE_POSTGRESQL
-          ? 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
-          : 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const invoiceQuery = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)';
         await executeInsert(invoiceQuery, [date, invoice_number, item.oil_type, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0]);
       }
 
@@ -1246,9 +790,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-oil-invoices-report', async (event, { startDate, endDate }) => {
     try {
-      const reportQuery = USE_POSTGRESQL
-        ? 'SELECT * FROM oil_invoices WHERE date BETWEEN $1 AND $2 ORDER BY date DESC'
-        : 'SELECT * FROM oil_invoices WHERE date BETWEEN ? AND ? ORDER BY date DESC';
+      const reportQuery = 'SELECT * FROM oil_invoices WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
       console.error('Error getting oil invoices report:', error);
@@ -1355,9 +897,7 @@ function setupIPCHandlers() {
       // Import fuel invoices
       if (backupData.fuelInvoices) {
         for (const invoice of backupData.fuelInvoices) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING'
-            : 'INSERT OR IGNORE INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          const query = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING';
           await executeInsert(query, [
             invoice.date,
             invoice.invoice_number,
@@ -1375,9 +915,7 @@ function setupIPCHandlers() {
       // Import oil invoices
       if (backupData.oilInvoices) {
         for (const invoice of backupData.oilInvoices) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING'
-            : 'INSERT OR IGNORE INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          const query = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING';
           await executeInsert(query, [
             invoice.date,
             invoice.invoice_number,
@@ -1395,9 +933,7 @@ function setupIPCHandlers() {
       // Import fuel prices
       if (backupData.fuelPrices) {
         for (const price of backupData.fuelPrices) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO fuel_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2'
-            : 'INSERT OR REPLACE INTO fuel_prices (fuel_type, price) VALUES (?, ?)';
+          const query = 'INSERT INTO fuel_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2';
           await executeInsert(query, [price.fuel_type, price.price]);
         }
       }
@@ -1405,9 +941,7 @@ function setupIPCHandlers() {
       // Import purchase prices
       if (backupData.purchasePrices) {
         for (const price of backupData.purchasePrices) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO purchase_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2'
-            : 'INSERT OR REPLACE INTO purchase_prices (fuel_type, price) VALUES (?, ?)';
+          const query = 'INSERT INTO purchase_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2';
           await executeInsert(query, [price.fuel_type, price.price]);
         }
       }
@@ -1415,9 +949,7 @@ function setupIPCHandlers() {
       // Import oil prices
       if (backupData.oilPrices) {
         for (const price of backupData.oilPrices) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO oil_prices (oil_type, price) VALUES ($1, $2) ON CONFLICT (oil_type) DO UPDATE SET price = $2'
-            : 'INSERT OR REPLACE INTO oil_prices (oil_type, price) VALUES (?, ?)';
+          const query = 'INSERT INTO oil_prices (oil_type, price) VALUES ($1, $2) ON CONFLICT (oil_type) DO UPDATE SET price = $2';
           await executeInsert(query, [price.oil_type, price.price]);
         }
       }
@@ -1425,9 +957,7 @@ function setupIPCHandlers() {
       // Import price history
       if (backupData.priceHistory) {
         for (const item of backupData.priceHistory) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at) VALUES ($1, $2, $3, $4, $5)'
-            : 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at) VALUES (?, ?, ?, ?, ?)';
+          const query = 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at) VALUES ($1, $2, $3, $4, $5)';
           await executeInsert(query, [item.product_type, item.product_name, item.price, item.start_date, item.created_at]);
         }
       }
@@ -1435,9 +965,7 @@ function setupIPCHandlers() {
       // Import depot movements
       if (backupData.depotMovements) {
         for (const movement of backupData.depotMovements) {
-          const query = USE_POSTGRESQL
-            ? 'INSERT INTO depot_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING'
-            : 'INSERT OR IGNORE INTO depot_movements (oil_type, date, type, quantity, invoice_number) VALUES (?, ?, ?, ?, ?)';
+          const query = 'INSERT INTO depot_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING';
           await executeInsert(query, [
             movement.oil_type,
             movement.date,
@@ -1470,7 +998,6 @@ function setupIPCHandlers() {
     try {
       const { date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved } = shiftData;
 
-      if (USE_POSTGRESQL) {
         // PostgreSQL: Use INSERT ... ON CONFLICT
         const query = `
           INSERT INTO shifts (date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved, updated_at)
@@ -1486,14 +1013,6 @@ function setupIPCHandlers() {
             updated_at = CURRENT_TIMESTAMP
         `;
         await db.query(query, [date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved]);
-      } else {
-        // SQLite: Use INSERT OR REPLACE
-        const query = `
-          INSERT OR REPLACE INTO shifts (date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `;
-        await executeInsert(query, [date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved]);
-      }
 
       return { success: true };
     } catch (error) {
@@ -1505,9 +1024,7 @@ function setupIPCHandlers() {
   // Get shift by date and shift number
   ipcMain.handle('get-shift', async (_event, { date, shift_number }) => {
     try {
-      const query = USE_POSTGRESQL
-        ? 'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2'
-        : 'SELECT * FROM shifts WHERE date = ? AND shift_number = ?';
+      const query = 'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2';
 
       const results = await executeQuery(query, [date, shift_number]);
       return results.length > 0 ? results[0] : null;
@@ -1524,25 +1041,13 @@ function setupIPCHandlers() {
       const params = [];
 
       if (startDate && endDate) {
-        if (USE_POSTGRESQL) {
           query += ' AND date BETWEEN $1 AND $2';
-        } else {
-          query += ' AND date BETWEEN ? AND ?';
-        }
         params.push(startDate, endDate);
       } else if (startDate) {
-        if (USE_POSTGRESQL) {
           query += ' AND date >= $1';
-        } else {
-          query += ' AND date >= ?';
-        }
         params.push(startDate);
       } else if (endDate) {
-        if (USE_POSTGRESQL) {
           query += ' AND date <= $1';
-        } else {
-          query += ' AND date <= ?';
-        }
         params.push(endDate);
       }
 
@@ -1696,12 +1201,6 @@ app.on('window-all-closed', function () {
 
 app.on('before-quit', async () => {
   if (db) {
-    if (USE_POSTGRESQL) {
       await db.end();
-    } else {
-      await new Promise((resolve) => {
-        db.close(resolve);
-      });
-    }
   }
 });
