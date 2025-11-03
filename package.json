@@ -61,11 +61,7 @@
       ],
       "category": "Office"
     },
-    "publish": {
-      "provider": "github",
-      "owner": "g-momo5",
-      "repo": "CO-OP"
-    }
+    "publish": null
   },
   "devDependencies": {
     "@electron/remote": "^2.1.3",
