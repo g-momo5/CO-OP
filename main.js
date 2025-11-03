@@ -32,7 +32,7 @@ function createWindow() {
 async function initializeDatabase() {
   // PostgreSQL/Supabase configuration
   const { Client } = require('pg');
-  const connectionString = 'postgresql://postgres:Ghaly1997.@db.ihajlcodsypvjwfnkcjc.supabase.co:5432/postgres';
+  const connectionString = 'postgresql://postgres.ihajlcodsypvjwfnkcjc:Ghaly1997.@aws-1-eu-west-2.pooler.supabase.com:6543/postgres';
 
   db = new Client({
     connectionString: connectionString,
