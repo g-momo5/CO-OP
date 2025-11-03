@@ -409,7 +409,7 @@ function setupIPCHandlers() {
       const result = await executeInsert(insertQuery, [fuel_type, price]);
 
       // Also add to products table
-      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES ($1, $2, $3, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3'now\'), 1)';
+      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES ($1, $2, $3, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3';
       await executeInsert(productInsertQuery, ['fuel', fuel_type, price]);
 
       return result;
@@ -436,7 +436,7 @@ function setupIPCHandlers() {
       const result = await executeInsert(insertQuery, [oil_type, price, vatValue]);
 
       // Also add to products table
-      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES ($1, $2, $3, $4, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3, vat = $4'now\'), 1)';
+      const productInsertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES ($1, $2, $3, $4, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3, vat = $4';
       await executeInsert(productInsertQuery, ['oil', oil_type, price, vatValue]);
 
       return result;
