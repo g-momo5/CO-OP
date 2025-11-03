@@ -65,11 +65,7 @@
       "provider": "github",
       "owner": "g-momo5",
       "repo": "CO-OP"
-    },
-    "npmRebuild": false,
-    "buildDependenciesFromSource": false,
-    "nodeGypRebuild": false,
-    "includePruneAsarElectronUnpacked": false
+    }
   },
   "devDependencies": {
     "@electron/remote": "^2.1.3",
