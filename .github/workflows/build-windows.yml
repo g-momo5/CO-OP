@@ -19,8 +19,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v1.1
+      - name: Install Windows Build Tools
+        run: |
+          choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --passive"
 
       - name: Install dependencies
         run: npm install
