@@ -1,18 +1,16 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
+
+// Delay autoUpdater import to avoid initialization issues
+let autoUpdater;
 
 // Database configuration - change this to switch between SQLite and PostgreSQL
 const USE_POSTGRESQL = false; // Set to true when Supabase is ready
 
 let mainWindow;
 let db;
-
-// Auto-updater configuration
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -134,6 +132,7 @@ async function createPostgreSQLTables() {
     oil_type TEXT NOT NULL UNIQUE,
     price REAL NOT NULL,
     vat REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
@@ -145,15 +144,77 @@ async function createPostgreSQLTables() {
     console.log('VAT column migration: ', err.message);
   }
 
+  // Add is_active column if it doesn't exist (migration)
+  try {
+    await db.query(`ALTER TABLE oil_prices ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1`);
+  } catch (err) {
+    // Column might already exist, ignore error
+    console.log('is_active column migration: ', err.message);
+  }
+
+  // Update existing oils to be active by default
+  try {
+    await db.query(`UPDATE oil_prices SET is_active = 1 WHERE is_active IS NULL`);
+    console.log('Existing oils set as active');
+  } catch (err) {
+    console.log('Error setting existing oils as active:', err.message);
+  }
+
+  // Products table (unified table for fuel and oil products)
+  await db.query(`CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    product_type TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    current_price REAL NOT NULL,
+    effective_date DATE DEFAULT CURRENT_DATE,
+    vat REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(product_type, product_name)
+  )`);
+
+  // Migrate fuel prices to products table if products is empty
+  try {
+    const productCount = await db.query('SELECT COUNT(*) FROM products');
+    if (productCount.rows[0].count === '0') {
+      await db.query(`INSERT INTO products (product_type, product_name, current_price, effective_date, is_active)
+        SELECT 'fuel', fuel_type, price, CURRENT_DATE, 1 FROM fuel_prices
+        ON CONFLICT (product_type, product_name) DO NOTHING`);
+      await db.query(`INSERT INTO products (product_type, product_name, current_price, effective_date, vat, is_active)
+        SELECT 'oil', oil_type, price, CURRENT_DATE, COALESCE(vat, 0), COALESCE(is_active, 1) FROM oil_prices
+        ON CONFLICT (product_type, product_name) DO NOTHING`);
+      console.log('Migrated existing fuel and oil prices to products table');
+    }
+  } catch (err) {
+    console.log('Error migrating to products table:', err.message);
+  }
+
+  // Customers table
+  await db.query(`CREATE TABLE IF NOT EXISTS customers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // Price history table
   await db.query(`CREATE TABLE IF NOT EXISTS price_history (
     id SERIAL PRIMARY KEY,
+    product_id INTEGER,
     product_type TEXT NOT NULL,
     product_name TEXT NOT NULL,
     price REAL NOT NULL,
     start_date DATE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // Add product_id column if it doesn't exist (migration)
+  try {
+    await db.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS product_id INTEGER`);
+  } catch (err) {
+    // Column might already exist, ignore error
+    console.log('product_id column migration: ', err.message);
+  }
 
   // Oil movements table
   await db.query(`CREATE TABLE IF NOT EXISTS oil_movements (
@@ -208,6 +269,22 @@ async function createPostgreSQLTables() {
     martyrs_tax REAL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // Shifts table for daily shift tracking
+  await db.query(`CREATE TABLE IF NOT EXISTS shifts (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    shift_number INTEGER NOT NULL,
+    fuel_data TEXT NOT NULL,
+    fuel_total REAL NOT NULL,
+    oil_data TEXT NOT NULL,
+    oil_total REAL NOT NULL,
+    grand_total REAL NOT NULL,
+    is_saved INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(date, shift_number)
+  )`);
 }
 
 function createSQLiteTables() {
@@ -256,6 +333,26 @@ function createSQLiteTables() {
         ('بنزين ٩٥', 11.00),
         ('سولار', 7.00)`);
 
+      // Products table (unified table for fuel and oil products) - CREATE FIRST!
+      db.run(`CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_type TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        current_price REAL NOT NULL,
+        effective_date DATE DEFAULT CURRENT_DATE,
+        vat REAL DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(product_type, product_name)
+      )`, (err) => {
+        if (err) {
+          console.log('Error creating products table:', err.message);
+        } else {
+          console.log('Products table created/verified');
+        }
+      });
+
       // Oil prices table
       db.run(`CREATE TABLE IF NOT EXISTS oil_prices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -272,15 +369,70 @@ function createSQLiteTables() {
         }
       });
 
+      // Add is_active column if it doesn't exist (migration)
+      db.run(`ALTER TABLE oil_prices ADD COLUMN is_active INTEGER DEFAULT 1`, (err) => {
+        if (err && !err.message.includes('duplicate column')) {
+          console.log('is_active column migration error:', err.message);
+        }
+      });
+
+      // Update existing oils to be active by default
+      db.run(`UPDATE oil_prices SET is_active = 1 WHERE is_active IS NULL`, (err) => {
+        if (err) {
+          console.log('Error setting existing oils as active:', err.message);
+        } else {
+          console.log('Existing oils set as active');
+        }
+      });
+
+      // Migrate fuel prices to products table if products is empty
+      db.get('SELECT COUNT(*) as count FROM products', (err, row) => {
+        if (err) {
+          console.log('Error checking products count:', err.message);
+        } else if (row.count === 0) {
+          // Migrate fuel prices
+          db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, is_active)
+            SELECT 'fuel', fuel_type, price, date('now'), 1 FROM fuel_prices`, (err) => {
+            if (err) {
+              console.log('Error migrating fuel prices:', err.message);
+            } else {
+              console.log('Migrated fuel prices to products table');
+            }
+          });
+
+          // Migrate oil prices
+          db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, vat, is_active)
+            SELECT 'oil', oil_type, price, date('now'), COALESCE(vat, 0), COALESCE(is_active, 1) FROM oil_prices`, (err) => {
+            if (err) {
+              console.log('Error migrating oil prices:', err.message);
+            } else {
+              console.log('Migrated oil prices to products table');
+            }
+          });
+        }
+      });
+
       // Price history table
       db.run(`CREATE TABLE IF NOT EXISTS price_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER,
         product_type TEXT NOT NULL,
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
         start_date DATE NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
+      )`, (err) => {
+        if (err) {
+          console.log('Error creating price_history table:', err.message);
+        }
+
+        // Add product_id column if it doesn't exist (migration)
+        db.run(`ALTER TABLE price_history ADD COLUMN product_id INTEGER`, (err) => {
+          if (err && !err.message.includes('duplicate column')) {
+            console.log('product_id column migration error:', err.message);
+          }
+        });
+      });
 
       // Oil movements table
       db.run(`CREATE TABLE IF NOT EXISTS oil_movements (
@@ -336,12 +488,136 @@ function createSQLiteTables() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
 
+      // Shifts table for daily shift tracking
+      db.run(`CREATE TABLE IF NOT EXISTS shifts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        shift_number INTEGER NOT NULL,
+        fuel_data TEXT NOT NULL,
+        fuel_total REAL NOT NULL,
+        oil_data TEXT NOT NULL,
+        oil_total REAL NOT NULL,
+        grand_total REAL NOT NULL,
+        is_saved INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(date, shift_number)
+      )`);
+
       // Add invoice_total column to fuel_invoices if it doesn't exist (migration)
       db.run(`ALTER TABLE fuel_invoices ADD COLUMN invoice_total REAL DEFAULT 0`, (err) => {
         if (err && !err.message.includes('duplicate column')) {
           console.log('invoice_total column migration error:', err.message);
         }
-        resolve();
+        
+        // Run comprehensive database migration to ensure structure matches latest version
+        migrateDatabaseStructure().then(() => {
+          resolve();
+        }).catch((err) => {
+          console.error('Database migration error:', err);
+          resolve(); // Resolve anyway to not block app startup
+        });
+      });
+    });
+  });
+}
+
+// Comprehensive database migration function
+// Ensures all tables and columns exist with the latest structure
+function migrateDatabaseStructure() {
+  return new Promise((resolve, reject) => {
+    console.log('Starting database structure migration...');
+    
+    // Helper function to check and add column
+    function addColumnIfMissing(table, columnName, columnType, callback) {
+      db.all(`PRAGMA table_info(${table})`, (err, columns) => {
+        if (err) {
+          console.log(`Error checking table ${table}:`, err.message);
+          callback();
+          return;
+        }
+
+        const columnExists = columns.some(col => col.name === columnName);
+        
+        if (!columnExists) {
+          db.run(`ALTER TABLE ${table} ADD COLUMN ${columnName} ${columnType}`, (err) => {
+            if (err && !err.message.includes('duplicate column')) {
+              console.log(`Error adding column ${columnName} to ${table}:`, err.message);
+            } else if (!err) {
+              console.log(`✓ Added column ${columnName} to ${table}`);
+            }
+            callback();
+          });
+        } else {
+          callback();
+        }
+      });
+    }
+
+    // Migrate columns sequentially
+    db.serialize(() => {
+      // Products table columns
+      addColumnIfMissing('products', 'product_type', 'TEXT NOT NULL', () => {
+        addColumnIfMissing('products', 'product_name', 'TEXT NOT NULL', () => {
+          addColumnIfMissing('products', 'current_price', 'REAL NOT NULL', () => {
+            addColumnIfMissing('products', 'effective_date', 'DATE DEFAULT CURRENT_DATE', () => {
+              addColumnIfMissing('products', 'vat', 'REAL DEFAULT 0', () => {
+                addColumnIfMissing('products', 'is_active', 'INTEGER DEFAULT 1', () => {
+                  addColumnIfMissing('products', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP', () => {
+                    addColumnIfMissing('products', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP', () => {
+                      // Price history columns
+                      addColumnIfMissing('price_history', 'product_id', 'INTEGER', () => {
+                        // Oil prices columns (already handled above, but ensure)
+                        addColumnIfMissing('oil_prices', 'vat', 'REAL DEFAULT 0', () => {
+                          addColumnIfMissing('oil_prices', 'is_active', 'INTEGER DEFAULT 1', () => {
+                            // Fuel invoices columns (already handled above, but ensure)
+                            addColumnIfMissing('fuel_invoices', 'invoice_total', 'REAL DEFAULT 0', () => {
+                              // Ensure products table data is migrated if empty
+                              db.get('SELECT COUNT(*) as count FROM products', (err, row) => {
+                                if (!err && row && row.count === 0) {
+                                  console.log('Products table is empty, migrating data...');
+                                  
+                                  // Migrate fuel prices
+                                  db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, is_active)
+                                    SELECT 'fuel', fuel_type, price, date('now'), 1 FROM fuel_prices WHERE NOT EXISTS (
+                                      SELECT 1 FROM products WHERE products.product_type = 'fuel' AND products.product_name = fuel_prices.fuel_type
+                                    )`, (err) => {
+                                    if (err) {
+                                      console.log('Error migrating fuel prices to products:', err.message);
+                                    } else {
+                                      console.log('✓ Migrated fuel prices to products table');
+                                    }
+                                  });
+
+                                  // Migrate oil prices
+                                  db.run(`INSERT OR IGNORE INTO products (product_type, product_name, current_price, effective_date, vat, is_active)
+                                    SELECT 'oil', oil_type, price, date('now'), COALESCE(vat, 0), COALESCE(is_active, 1) FROM oil_prices WHERE NOT EXISTS (
+                                      SELECT 1 FROM products WHERE products.product_type = 'oil' AND products.product_name = oil_prices.oil_type
+                                    )`, (err) => {
+                                    if (err) {
+                                      console.log('Error migrating oil prices to products:', err.message);
+                                    } else {
+                                      console.log('✓ Migrated oil prices to products table');
+                                    }
+                                    console.log('Database structure migration completed');
+                                    resolve();
+                                  });
+                                } else {
+                                  console.log('Database structure migration completed');
+                                  resolve();
+                                }
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
       });
     });
   });
@@ -454,7 +730,7 @@ function setupIPCHandlers() {
   // Oil Prices Handlers
   ipcMain.handle('get-oil-prices', async () => {
     try {
-      return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, effective_date FROM products WHERE product_type = 'oil' ORDER BY product_name");
+      return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, effective_date, is_active FROM products WHERE product_type = 'oil' ORDER BY product_name");
     } catch (error) {
       console.error('Error getting oil prices:', error);
       throw error;
@@ -488,11 +764,23 @@ function setupIPCHandlers() {
   ipcMain.handle('delete-oil-product', async (_event, oil_type) => {
     try {
       const deleteQuery = USE_POSTGRESQL
-        ? 'DELETE FROM oil_prices WHERE oil_type = $1'
-        : 'DELETE FROM oil_prices WHERE oil_type = ?';
-      return await executeUpdate(deleteQuery, [oil_type]);
+        ? "DELETE FROM products WHERE product_name = $1 AND product_type = 'oil'"
+        : "DELETE FROM products WHERE product_name = ? AND product_type = 'oil'";
+      const result = await executeUpdate(deleteQuery, [oil_type]);
+      console.log(`Deleted oil product: ${oil_type}, result:`, result);
+      return result;
     } catch (error) {
       console.error('Error deleting oil product:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('toggle-oil-active', async (_event, oil_type, isActive) => {
+    try {
+      const updateQuery = "UPDATE products SET is_active = ? WHERE product_name = ? AND product_type = 'oil'";
+      return await executeUpdate(updateQuery, [isActive ? 1 : 0, oil_type]);
+    } catch (error) {
+      console.error('Error toggling oil active status:', error);
       throw error;
     }
   });
@@ -500,9 +788,11 @@ function setupIPCHandlers() {
   ipcMain.handle('delete-fuel-product', async (_event, fuel_type) => {
     try {
       const deleteQuery = USE_POSTGRESQL
-        ? 'DELETE FROM fuel_prices WHERE fuel_type = $1'
-        : 'DELETE FROM fuel_prices WHERE fuel_type = ?';
-      return await executeUpdate(deleteQuery, [fuel_type]);
+        ? "DELETE FROM products WHERE product_name = $1 AND product_type = 'fuel'"
+        : "DELETE FROM products WHERE product_name = ? AND product_type = 'fuel'";
+      const result = await executeUpdate(deleteQuery, [fuel_type]);
+      console.log(`Deleted fuel product: ${fuel_type}, result:`, result);
+      return result;
     } catch (error) {
       console.error('Error deleting fuel product:', error);
       throw error;
@@ -526,7 +816,15 @@ function setupIPCHandlers() {
       const insertQuery = USE_POSTGRESQL
         ? 'INSERT INTO fuel_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2, updated_at = CURRENT_TIMESTAMP'
         : 'INSERT OR REPLACE INTO fuel_prices (fuel_type, price) VALUES (?, ?)';
-      return await executeInsert(insertQuery, [fuel_type, price]);
+      const result = await executeInsert(insertQuery, [fuel_type, price]);
+
+      // Also add to products table
+      const productInsertQuery = USE_POSTGRESQL
+        ? 'INSERT INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES ($1, $2, $3, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3'
+        : 'INSERT OR REPLACE INTO products (product_type, product_name, current_price, effective_date, is_active) VALUES (?, ?, ?, date(\'now\'), 1)';
+      await executeInsert(productInsertQuery, ['fuel', fuel_type, price]);
+
+      return result;
     } catch (error) {
       console.error('Error adding fuel price:', error);
       throw error;
@@ -551,9 +849,64 @@ function setupIPCHandlers() {
       const insertQuery = USE_POSTGRESQL
         ? 'INSERT INTO oil_prices (oil_type, price, vat) VALUES ($1, $2, $3) ON CONFLICT (oil_type) DO UPDATE SET price = $2, vat = $3, updated_at = CURRENT_TIMESTAMP'
         : 'INSERT OR REPLACE INTO oil_prices (oil_type, price, vat) VALUES (?, ?, ?)';
-      return await executeInsert(insertQuery, [oil_type, price, vatValue]);
+      const result = await executeInsert(insertQuery, [oil_type, price, vatValue]);
+
+      // Also add to products table
+      const productInsertQuery = USE_POSTGRESQL
+        ? 'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES ($1, $2, $3, $4, CURRENT_DATE, 1) ON CONFLICT (product_type, product_name) DO UPDATE SET current_price = $3, vat = $4'
+        : 'INSERT OR REPLACE INTO products (product_type, product_name, current_price, vat, effective_date, is_active) VALUES (?, ?, ?, ?, date(\'now\'), 1)';
+      await executeInsert(productInsertQuery, ['oil', oil_type, price, vatValue]);
+
+      return result;
     } catch (error) {
       console.error('Error adding oil price:', error);
+      throw error;
+    }
+  });
+
+  // ============= CUSTOMERS HANDLERS =============
+
+  // Get all customers
+  ipcMain.handle('get-customers', async () => {
+    try {
+      const query = USE_POSTGRESQL
+        ? 'SELECT * FROM customers ORDER BY name'
+        : 'SELECT * FROM customers ORDER BY name';
+      const customers = await executeQuery(query);
+      return customers;
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      throw error;
+    }
+  });
+
+  // Add customer
+  ipcMain.handle('add-customer', async (event, { name }) => {
+    try {
+      const insertQuery = USE_POSTGRESQL
+        ? 'INSERT INTO customers (name) VALUES ($1) RETURNING *'
+        : 'INSERT INTO customers (name) VALUES (?)';
+      const result = await executeInsert(insertQuery, [name]);
+      return result;
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      if (error.message.includes('UNIQUE')) {
+        throw new Error('عميل بهذا الاسم موجود بالفعل');
+      }
+      throw error;
+    }
+  });
+
+  // Delete customer
+  ipcMain.handle('delete-customer', async (event, { id }) => {
+    try {
+      const deleteQuery = USE_POSTGRESQL
+        ? 'DELETE FROM customers WHERE id = $1'
+        : 'DELETE FROM customers WHERE id = ?';
+      await executeQuery(deleteQuery, [id]);
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting customer:', error);
       throw error;
     }
   });
@@ -655,6 +1008,38 @@ function setupIPCHandlers() {
       return await executeQuery(query, params);
     } catch (error) {
       console.error('Error getting price history:', error);
+      throw error;
+    }
+  });
+
+  // Get price by date - finds the price valid for a given date
+  ipcMain.handle('get-price-by-date', async (event, { product_name, date }) => {
+    try {
+      // First check price_history for a price effective on or before the given date
+      const historyQuery = USE_POSTGRESQL
+        ? 'SELECT price FROM price_history WHERE product_name = $1 AND start_date <= $2 ORDER BY start_date DESC LIMIT 1'
+        : 'SELECT price FROM price_history WHERE product_name = ? AND start_date <= ? ORDER BY start_date DESC LIMIT 1';
+
+      const historyResult = await executeQuery(historyQuery, [product_name, date]);
+
+      if (historyResult && historyResult.length > 0) {
+        return historyResult[0].price;
+      }
+
+      // If no history found, get current price from products table
+      const currentQuery = USE_POSTGRESQL
+        ? "SELECT current_price FROM products WHERE product_name = $1"
+        : "SELECT current_price FROM products WHERE product_name = ?";
+
+      const currentResult = await executeQuery(currentQuery, [product_name]);
+
+      if (currentResult && currentResult.length > 0) {
+        return currentResult[0].current_price;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error getting price by date:', error);
       throw error;
     }
   });
@@ -1075,12 +1460,225 @@ function setupIPCHandlers() {
       return { success: false, error: error.message };
     }
   });
+
+  // ============================================================
+  // SHIFT ENTRY IPC HANDLERS
+  // ============================================================
+
+  // Save or update shift
+  ipcMain.handle('save-shift', async (_event, shiftData) => {
+    try {
+      const { date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved } = shiftData;
+
+      if (USE_POSTGRESQL) {
+        // PostgreSQL: Use INSERT ... ON CONFLICT
+        const query = `
+          INSERT INTO shifts (date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+          ON CONFLICT (date, shift_number)
+          DO UPDATE SET
+            fuel_data = $3,
+            fuel_total = $4,
+            oil_data = $5,
+            oil_total = $6,
+            grand_total = $7,
+            is_saved = $8,
+            updated_at = CURRENT_TIMESTAMP
+        `;
+        await db.query(query, [date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved]);
+      } else {
+        // SQLite: Use INSERT OR REPLACE
+        const query = `
+          INSERT OR REPLACE INTO shifts (date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `;
+        await executeInsert(query, [date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved]);
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error saving shift:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get shift by date and shift number
+  ipcMain.handle('get-shift', async (_event, { date, shift_number }) => {
+    try {
+      const query = USE_POSTGRESQL
+        ? 'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2'
+        : 'SELECT * FROM shifts WHERE date = ? AND shift_number = ?';
+
+      const results = await executeQuery(query, [date, shift_number]);
+      return results.length > 0 ? results[0] : null;
+    } catch (error) {
+      console.error('Error getting shift:', error);
+      throw error;
+    }
+  });
+
+  // Get shifts history with optional date filters
+  ipcMain.handle('get-shifts-history', async (_event, { startDate, endDate } = {}) => {
+    try {
+      let query = 'SELECT * FROM shifts WHERE is_saved = 1';
+      const params = [];
+
+      if (startDate && endDate) {
+        if (USE_POSTGRESQL) {
+          query += ' AND date BETWEEN $1 AND $2';
+        } else {
+          query += ' AND date BETWEEN ? AND ?';
+        }
+        params.push(startDate, endDate);
+      } else if (startDate) {
+        if (USE_POSTGRESQL) {
+          query += ' AND date >= $1';
+        } else {
+          query += ' AND date >= ?';
+        }
+        params.push(startDate);
+      } else if (endDate) {
+        if (USE_POSTGRESQL) {
+          query += ' AND date <= $1';
+        } else {
+          query += ' AND date <= ?';
+        }
+        params.push(endDate);
+      }
+
+      query += ' ORDER BY date DESC, shift_number DESC';
+
+      return await executeQuery(query, params);
+    } catch (error) {
+      console.error('Error getting shifts history:', error);
+      throw error;
+    }
+  });
+
+  // Get app version
+  ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
+  });
 } // End of setupIPCHandlers
 
 app.whenReady().then(async () => {
+  // Import and configure autoUpdater after app is ready
+  const { autoUpdater: au } = require('electron-updater');
+  autoUpdater = au;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  // Enable updates in development mode
+  if (!app.isPackaged) {
+    autoUpdater.updateConfigPath = path.join(__dirname, 'dev-app-update.yml');
+    console.log('AutoUpdater: Using dev config from', path.join(__dirname, 'dev-app-update.yml'));
+  } else {
+    // In production, explicitly set the provider configuration
+    try {
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'g-momo5',
+        repo: 'CO-OP'
+      });
+      console.log('AutoUpdater: Configured for GitHub repository g-momo5/CO-OP');
+    } catch (error) {
+      console.error('AutoUpdater: Error setting feed URL:', error);
+    }
+  }
+
   await initializeDatabase();
   setupIPCHandlers();
   createWindow();
+
+  // Auto-updater event handlers
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for updates...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available', info);
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('Update not available');
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Error in auto-updater:', err);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', {
+        message: err.message || 'حدث خطأ أثناء تحديث التطبيق',
+        error: err.toString()
+      });
+    }
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    console.log(`Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`);
+    if (mainWindow) {
+      mainWindow.webContents.send('download-progress', progressObj);
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-downloaded', info);
+    }
+  });
+
+  // IPC handlers for manual update actions
+  ipcMain.on('download-update', async () => {
+    console.log('AutoUpdater: Starting download...');
+    try {
+      const result = await autoUpdater.downloadUpdate();
+      console.log('AutoUpdater: Download initiated successfully', result);
+    } catch (error) {
+      console.error('AutoUpdater: Error downloading update:', error);
+      console.error('AutoUpdater: Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        errno: error.errno
+      });
+      if (mainWindow) {
+        mainWindow.webContents.send('update-error', {
+          message: error.message || 'فشل تنزيل التحديث',
+          error: error.toString(),
+          code: error.code
+        });
+      }
+    }
+  });
+
+  ipcMain.on('install-update', () => {
+    autoUpdater.quitAndInstall();
+  });
+
+  // Manual update check from settings
+  ipcMain.on('check-for-updates-manual', () => {
+    autoUpdater.checkForUpdates().then(result => {
+      if (mainWindow) {
+        mainWindow.webContents.send('update-check-result', {
+          available: result.updateInfo.version !== app.getVersion(),
+          version: result.updateInfo.version,
+          releaseNotes: result.updateInfo.releaseNotes
+        });
+      }
+    }).catch(err => {
+      console.error('Error checking for updates:', err);
+      if (mainWindow) {
+        mainWindow.webContents.send('update-check-result', {
+          available: false,
+          error: err.message
+        });
+      }
+    });
+  });
 
   // Check for updates after window is created (if auto-check is enabled)
   setTimeout(() => {
@@ -1090,75 +1688,6 @@ app.whenReady().then(async () => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
-
-// Auto-updater event handlers
-autoUpdater.on('checking-for-update', () => {
-  console.log('Checking for updates...');
-});
-
-autoUpdater.on('update-available', (info) => {
-  console.log('Update available:', info.version);
-  if (mainWindow) {
-    mainWindow.webContents.send('update-available', info);
-  }
-});
-
-autoUpdater.on('update-not-available', (info) => {
-  console.log('Update not available');
-});
-
-autoUpdater.on('error', (err) => {
-  console.error('Error in auto-updater:', err);
-});
-
-autoUpdater.on('download-progress', (progressObj) => {
-  console.log(`Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`);
-  if (mainWindow) {
-    mainWindow.webContents.send('download-progress', progressObj);
-  }
-});
-
-autoUpdater.on('update-downloaded', (info) => {
-  console.log('Update downloaded');
-  if (mainWindow) {
-    mainWindow.webContents.send('update-downloaded', info);
-  }
-});
-
-// IPC handlers for manual update actions
-ipcMain.on('download-update', () => {
-  autoUpdater.downloadUpdate();
-});
-
-ipcMain.on('install-update', () => {
-  autoUpdater.quitAndInstall();
-});
-
-// Manual update check from settings
-ipcMain.on('check-for-updates-manual', () => {
-  autoUpdater.checkForUpdates().then(result => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-check-result', {
-        available: result.updateInfo.version !== app.getVersion(),
-        version: result.updateInfo.version,
-        releaseNotes: result.updateInfo.releaseNotes
-      });
-    }
-  }).catch(err => {
-    console.error('Error checking for updates:', err);
-    if (mainWindow) {
-      mainWindow.webContents.send('update-check-result', {
-        available: false,
-        error: err.message
-      });
-    }
-  });
-});
-
-// Get app version
-ipcMain.handle('get-app-version', () => {
-  return app.getVersion();
 });
 
 app.on('window-all-closed', function () {

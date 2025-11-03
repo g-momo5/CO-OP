@@ -95,7 +95,7 @@ function configureRTLElements() {
   });
   
   // Configura i bottoni
-  const buttons = document.querySelectorAll('button, .btn, .nav-btn, .type-btn');
+  const buttons = document.querySelectorAll('button, .btn, .nav-btn');
   buttons.forEach(button => {
     button.style.direction = RTL_CONFIG.direction;
     button.style.textAlign = 'center';

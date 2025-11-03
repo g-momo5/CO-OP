@@ -15,11 +15,9 @@ body {
 }
 
 .app-container {
-  max-width: 1400px;
-  margin: 0 auto;
+  margin: 0;
   background: white;
   min-height: 100vh;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
 }
 
 /* Header */
@@ -115,7 +113,7 @@ body {
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  padding: 0.2rem 0.4rem;
+  padding: 0.2rem 0.2rem;
   border-radius: 4px;
 }
 
@@ -127,6 +125,7 @@ body {
 .breadcrumb-item.current {
   color: #2c3e50;
   font-weight: 600;
+  padding: 0.2rem 0.2rem;
 }
 
 .breadcrumb-separator {
@@ -239,57 +238,83 @@ body {
 }
 
 /* Home Screen */
+/* Home Layout - 2 Column Layout */
+.home-layout {
+  display: flex;
+  gap: 2rem;
+  direction: rtl;
+  align-items: flex-start;
+}
+
+/* Left Column - Chart (60%) */
+.home-chart-column {
+  flex: 6;
+  min-width: 0;
+}
+
 .home-chart-container {
-  margin-bottom: 3rem;
   background: white;
   padding: 2rem;
   border-radius: 15px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   direction: rtl;
+  height: 100%;
 }
 
-/* Depot Management Section */
-.depot-management {
-  display: flex;
-  justify-content: center;
-  margin-top: 2rem;
+/* Right Column - Action Cards (40%) */
+.home-cards-column {
+  flex: 4;
+  min-width: 0;
+}
+
+/* Action Cards Grid - 2x2 */
+.action-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
   direction: rtl;
 }
 
-.depot-card {
+/* Action Card Style */
+.action-card {
   background: white;
   color: #333;
-  padding: 2rem;
+  padding: 1.2rem;
   border-radius: 15px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   text-align: center;
   transition: all 0.3s ease;
   direction: rtl;
-  width: 280px;
   border: 2px solid #f8f9fa;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  min-height: 140px;
 }
 
-.depot-card:hover {
+.action-card:hover {
   transform: translateY(-5px);
   box-shadow: 0 8px 25px rgba(196, 41, 29, 0.15);
   border-color: #c4291d;
 }
 
-.depot-card h3 {
-  font-size: 1.5rem;
+.action-card .card-icon {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+.action-card h3 {
+  font-size: 1.2rem;
   font-weight: 600;
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.5rem;
   direction: rtl;
   color: #c4291d;
 }
 
-.depot-card p {
-  font-size: 1rem;
+.action-card p {
+  font-size: 0.9rem;
   margin-bottom: 0;
   color: #666;
   direction: rtl;
@@ -343,6 +368,365 @@ body {
   font-weight: 700;
   color: #333;
   direction: rtl;
+}
+
+/* Shift Entry Screen */
+.shift-info-section {
+  background: white;
+  padding: 1rem 1rem 0rem 1rem;
+  border-radius: 15px;
+  direction: rtl;
+}
+
+.shift-content {
+  background: white;
+  padding: 0rem;
+  border-radius: 15px;
+  direction: rtl;
+}
+
+/* Fuel section with side-by-side tables */
+.fuel-tables-wrapper {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  overflow-x: auto;
+}
+
+.customers-table-container {
+  flex-shrink: 0;
+}
+
+.fuel-tables-left {
+  flex-shrink: 0;
+}
+
+.shift-tab-section {
+  display: none;
+}
+
+.shift-tab-section.active {
+  display: block;
+}
+
+/* Auto-calculated Fields */
+.auto-calculated {
+  background-color: #f5f5f5 !important;
+  cursor: not-allowed;
+  color: #666;
+}
+
+/* Shift Fuel Grid */
+.shift-fuel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.shift-fuel-card {
+  background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+}
+
+.shift-fuel-card:hover {
+  border-color: #c4291d;
+  box-shadow: 0 4px 12px rgba(196, 41, 29, 0.15);
+  transform: translateY(-2px);
+}
+
+.fuel-card-title {
+  text-align: center;
+  color: #c4291d;
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #c4291d;
+}
+
+.shift-fuel-card .form-group {
+  margin-bottom: 1rem;
+}
+
+.shift-fuel-card .form-group label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.shift-fuel-card input {
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: border-color 0.3s;
+}
+
+.shift-fuel-card input:focus:not(.auto-calculated) {
+  outline: none;
+  border-color: #c4291d;
+  box-shadow: 0 0 0 2px rgba(196, 41, 29, 0.1);
+}
+
+/* Shift Oil Table - Same style as Fuel Tables */
+.shift-oil-table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 2rem;
+}
+
+.shift-oil-table {
+  width: auto;
+  border-collapse: collapse;
+  direction: rtl;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.shift-oil-table thead {
+  background: #2c3e50;
+  color: white;
+}
+
+.shift-oil-table th {
+  padding: 4px 4px;
+  text-align: center !important;
+  font-weight: 600;
+  border: none;
+  font-size: 16px;
+  color: white !important;
+}
+
+.shift-oil-table td {
+  padding: 1px 2px;
+  border: none;
+  text-align: center;
+}
+
+.shift-oil-table tbody tr:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+.shift-oil-table tbody tr:hover {
+  background-color: #fff3f0;
+}
+
+.shift-oil-table input {
+  width: 3.5rem;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  text-align: center;
+  font-size: 13px;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.shift-oil-table input::-webkit-outer-spin-button,
+.shift-oil-table input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.shift-oil-table input:focus:not(.auto-calculated) {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.shift-oil-table input.auto-calculated {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+  color: #495057;
+}
+
+.shift-oil-table input:read-only {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+}
+
+/* Oil table first header (نوع الزيت) - centered */
+.shift-oil-table th:first-child {
+  text-align: center;
+}
+
+/* Oil table row labels */
+.shift-oil-table .oil-name-cell {
+  background: #ecf0f1;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px;
+  min-width: 120px;
+}
+
+/* Total Cards */
+.shift-total-card {
+  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(196, 41, 29, 0.3);
+  text-align: center;
+  margin-top: 2rem;
+}
+
+.shift-total-card h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.total-amount {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* Grand Total Summary */
+.shift-grand-total-container {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.shift-summary-card {
+  background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+  border: 3px solid #c4291d;
+  border-radius: 15px;
+  padding: 2rem;
+  box-shadow: 0 6px 20px rgba(196, 41, 29, 0.2);
+  margin-bottom: 2rem;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.summary-label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.summary-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #c4291d;
+  padding: 0.5rem 1rem;
+  background: #f5f5f5;
+  border-radius: 8px;
+  min-width: 150px;
+  text-align: center;
+}
+
+.summary-divider {
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #c4291d 50%, transparent 100%);
+  margin: 1rem 0;
+}
+
+.grand-total-row {
+  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  margin-top: 1rem;
+}
+
+.grand-total-row .summary-label {
+  color: white;
+  font-size: 1.3rem;
+}
+
+.grand-total-row .summary-value {
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 1.5rem;
+  border: 2px solid white;
+}
+
+/* Shift Action Buttons */
+.shift-action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.btn-large {
+  padding: 1.2rem 2rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s ease;
+  font-family: 'Noto Naskh Arabic', serif;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(196, 41, 29, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(196, 41, 29, 0.4);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: white;
+  color: #c4291d;
+  border: 2px solid #c4291d;
+}
+
+.btn-secondary:hover {
+  background: #c4291d;
+  color: white;
+}
+
+/* Input Validation States */
+.input-error {
+  border-color: #dc3545 !important;
+  background-color: #fff5f5 !important;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.85rem;
+  margin-top: 0.3rem;
+  display: block;
+}
+
+/* Read-only Mode */
+.shift-readonly .shift-fuel-input,
+.shift-readonly input:not([type="date"]):not(#shift-number) {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.shift-readonly #save-shift-btn {
+  display: none;
 }
 
 /* Invoice Type Selector */
@@ -1004,15 +1388,20 @@ body {
 
 /* Settings Screen Layout */
 /* Hide settings title since sidebar shows we're in settings */
-#settings-screen h2 {
-  display: none;
+.settings-content h2 {
+  color: #2c3e50;
+  font-size: 1.5rem;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  text-align: right;
+  padding: 0;
+  margin-top: 0;
 }
 
 .settings-layout {
   display: flex;
   gap: 0;
   margin: -2rem;
-  margin-top: -2rem;
   min-height: 100vh;
   padding-top: 0;
 }
@@ -1263,13 +1652,13 @@ body {
 .price-type-tabs {
   display: flex;
   gap: 0;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   direction: rtl;
   border-bottom: 2px solid #e9ecef;
 }
 
 .price-type-tab {
-  padding: 0.75rem 1.5rem;
+  padding: 0.4rem 1.5rem;
   font-size: 1rem;
   font-weight: 600;
   color: #6c757d;
@@ -1397,17 +1786,27 @@ body {
   width: 50px;
 }
 
-/* Products table - center السعر الحالي, الضريبة المضافة (%), الإجراءات */
+/* Products table - center السعر الحالي, الضريبة المضافة (%), الإجراءات, في البيع */
 .prices-table-full th:nth-child(3),
 .prices-table-full th:nth-child(4),
-.prices-table-full th:nth-child(5) {
+.prices-table-full th:nth-child(5),
+.prices-table-full th:nth-child(6) {
   text-align: center !important;
 }
 
 .prices-table-full td:nth-child(3),
 .prices-table-full td:nth-child(4),
-.prices-table-full td:nth-child(5) {
+.prices-table-full td:nth-child(5),
+.prices-table-full td:nth-child(6) {
   text-align: center !important;
+}
+
+/* Checkbox styling for oil products table */
+#manage-oil-section input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #c4291d;
 }
 
 /* Invoices table - center النوع, الإجمالي, الإجراءات */
@@ -1547,6 +1946,22 @@ body {
 }
 
 @media (max-width: 768px) {
+  /* Home Layout - Stack vertically on mobile */
+  .home-layout {
+    flex-direction: column;
+  }
+
+  .home-chart-column,
+  .home-cards-column {
+    flex: 1;
+    width: 100%;
+  }
+
+  /* Action Cards - Single column on mobile */
+  .action-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-title {
     font-size: 2rem;
   }
@@ -1743,7 +2158,7 @@ td {
 
 th {
   background: transparent;
-  color: #c4291d;
+  color: white;
   font-weight: 600;
   direction: rtl;
   border: 2px solid #c4291d;
@@ -1907,8 +2322,8 @@ select option {
 
 /* Depot Management Styles - Complete Redesign */
 .depot-container {
-  max-width: 100%;
-  margin: 0;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: 2rem;
   direction: rtl;
 }
@@ -1927,24 +2342,20 @@ select option {
 }
 
 .current-stock-card {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   display: flex;
   justify-content: flex-start;
 }
 
 .stock-card {
-  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
-  color: white;
-  border-radius: 8px;
-  padding: 0.25rem 0.6rem;
-  box-shadow: 0 2px 8px rgba(196, 41, 29, 0.2);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.5rem 1rem;
+  box-shadow: none;
   text-align: center;
   direction: rtl;
   display: inline-block;
-  margin: 0 auto;
-  line-height: 1;
-  height: auto;
-  min-height: 0;
 }
 
 .stock-header {
@@ -1953,7 +2364,6 @@ select option {
   align-items: center;
   gap: 0.5rem;
   justify-content: center;
-  width: 100%;
 }
 
 .stock-icon {
@@ -1966,34 +2376,34 @@ select option {
   gap: 0.5rem;
   text-align: center;
   direction: rtl;
-  justify-content: center;
   flex-direction: row;
 }
 
 .stock-label {
-  font-size: 1rem;
+  font-size: 0.95rem;
   margin-bottom: 0;
   font-weight: 500;
   white-space: nowrap;
-  margin-right: 0.3rem;
+  color: #666;
 }
 
 .stock-amount {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 0.95rem;
+  font-weight: 500;
   margin-bottom: 0;
   line-height: 1;
+  color: #2c3e50;
 }
 
 .selected-oil {
-  display: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: white;
+  margin-right: 0.5rem;
 }
 
 .movements-section {
-  background: white;
-  border-radius: 15px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Right Sidebar Styles */
@@ -2057,20 +2467,20 @@ select option {
 
 .depot-header {
   text-align: center;
-  margin-bottom: 2.5rem;
+  margin-bottom: 2rem;
   direction: rtl;
 }
 
 .depot-header h2 {
-  color: #c4291d;
-  font-size: 2.2rem;
+  color: #2c3e50;
+  font-size: 2rem;
   margin-bottom: 0.5rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .depot-subtitle {
   color: #666;
-  font-size: 1.1rem;
+  font-size: 1rem;
   margin-bottom: 0;
   font-weight: 400;
 }
@@ -2284,11 +2694,11 @@ select option {
   background: transparent;
   color: #c4291d;
   padding: 0.5rem 0.8rem;
-  border-radius: 10px;
+  border-radius: 0;
   text-align: center;
-  box-shadow: 0 4px 15px rgba(196, 41, 29, 0.2);
+  box-shadow: none;
   direction: rtl;
-  border: 2px solid #c4291d;
+  border: none;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -2356,6 +2766,8 @@ select option {
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(5px);
+  align-items: center;
+  justify-content: center;
 }
 
 .modal.show {
@@ -2453,7 +2865,7 @@ select option {
 
 .movements-table th {
   background: transparent;
-  color: #c4291d;
+  color: white;
   font-weight: 600;
   border: 2px solid #c4291d;
   border-bottom: 2px solid #c4291d;
@@ -2489,11 +2901,7 @@ select option {
   .oil-selector {
     min-width: auto;
   }
-  
-  .stock-card {
-    padding: 1.5rem 2rem;
-  }
-  
+
   .stock-amount {
     font-size: 2.5rem;
   }
@@ -2551,11 +2959,7 @@ select option {
     order: -1;
     max-height: 300px;
   }
-  
-  .stock-card {
-    padding: 1.5rem;
-  }
-  
+
   .stock-amount {
     font-size: 2.5rem;
   }
@@ -2913,9 +3317,11 @@ select option {
 }
 
 .movements-table-modern {
-  width: 100%;
+  width: auto;
+  max-width: 800px;
   border-collapse: collapse;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  table-layout: auto;
 }
 
 .movements-table-modern thead {
@@ -2923,12 +3329,14 @@ select option {
 }
 
 .movements-table-modern th {
-  padding: 1.2rem 1rem;
+  padding: 0.8rem 1rem;
   text-align: right;
   font-weight: 600;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   border: none;
-  color: #f8f9fa;
+  color: white;
+  white-space: nowrap;
+  width: 1%;
 }
 
 .movements-table-modern tbody tr {
@@ -2940,9 +3348,10 @@ select option {
 }
 
 .movements-table-modern td {
-  padding: 1rem;
+  padding: 0.7rem 1rem;
   text-align: right;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .date-cell {
@@ -2950,16 +3359,19 @@ select option {
   color: #495057;
   background: #f8f9fa;
   font-family: monospace;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .type-badge {
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.9rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 15px;
+  font-size: 0.8rem;
   font-weight: 500;
   display: inline-block;
-  min-width: 60px;
+  min-width: 50px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .badge-in {
@@ -2976,7 +3388,7 @@ select option {
 
 .quantity-value {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .quantity-value.positive {
@@ -2990,6 +3402,7 @@ select option {
 .invoice-cell {
   color: #6c757d;
   font-family: monospace;
+  font-size: 0.85rem;
 }
 
 /* Empty state styling */
@@ -3003,69 +3416,182 @@ select option {
   border: 2px dashed #dee2e6;
 }
 
-/* New Oil Selection Box Layout */
-.oil-selection-box {
-  background: white;
-  border-radius: 15px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  padding: 2rem;
-  margin-bottom: 2rem;
+/* Depot Layout - Con sidebar fixed */
+.depot-layout {
+  margin-right: 300px;
   direction: rtl;
-  width: 100%;
 }
 
-.oil-selection-box h3 {
-  color: #c4291d;
+/* Area principale (sinistra) */
+.depot-main-content {
+  width: 100%;
+  max-width: 1200px;
+  margin-left: 0;
+  margin-right: auto;
+  padding: 0 0.5rem 0 2rem;
+}
+
+.depot-main-content h3 {
+  color: #2c3e50;
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Breadcrumb container */
+.breadcrumb-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  direction: rtl;
+  text-align: right;
+}
+
+.breadcrumb-container h3 {
+  margin-bottom: 0;
+}
+
+.breadcrumb-separator {
+  color: #999;
+  font-size: 1.2rem;
+  font-weight: 400;
+}
+
+.breadcrumb-product {
+  color: #c4291d;
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+/* Sidebar prodotti (destra) - FIXED alla finestra */
+.depot-sidebar {
+  width: 300px;
+  background: white;
+  border-left: 1px solid #e9ecef;
+  position: fixed;
+  right: 0;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  z-index: 999;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  padding-top: 140px;
+}
+
+.sidebar-header {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.sidebar-header h4 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.1rem;
+  font-weight: 600;
   text-align: center;
+  direction: rtl;
+}
+
+.oil-list {
+  overflow-y: auto;
+  height: calc(100vh - 200px);
+  direction: rtl;
+}
+
+.oil-list .oil-item {
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid #f1f1f1;
+  font-size: 0.9rem;
+  color: #2c3e50;
+  direction: rtl;
+  text-align: right;
+}
+
+.oil-list .oil-item:hover {
+  background: #f8f9fa;
+  color: #c4291d;
+}
+
+.oil-list .oil-item.selected {
+  background: #c4291d;
+  color: white !important;
   font-weight: 600;
 }
 
-.oil-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 1rem;
-  direction: rtl;
+.oil-list .oil-item:last-child {
+  border-bottom: none;
 }
 
-.oil-grid .oil-item {
-  background: #f8f9fa;
-  border: 2px solid #e9ecef;
-  border-radius: 20px;
-  padding: 0.6rem;
-  text-align: center;
+/* Pulsante mobile (nascosto su desktop) */
+.mobile-products-btn {
+  display: none;
+  width: 100%;
+  padding: 1rem;
+  background: #c4291d;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
-  font-weight: 500;
-  direction: rtl;
-  display: flex;
+  margin-bottom: 1.5rem;
   align-items: center;
   justify-content: center;
-  line-height: 1.3;
-  font-size: 0.9rem;
-  min-height: 45px;
+  gap: 0.5rem;
+  font-family: 'Noto Naskh Arabic', serif;
 }
 
-.oil-grid .oil-item:hover {
-  border-color: #c4291d;
-  background: #fff5f4;
-  color: #c4291d;
-  transform: translateY(-2px);
-  text-decoration: none;
-  box-shadow: 0 4px 12px rgba(196, 41, 29, 0.15);
+.mobile-products-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: white;
 }
 
-.oil-grid .oil-item.selected {
-  background: #c4291d !important;
-  border-color: #c4291d !important;
-  color: white !important;
-  font-weight: 600 !important;
-  box-shadow: 0 4px 12px rgba(196, 41, 29, 0.3) !important;
+.mobile-products-btn:active {
+  background: #a02318;
 }
 
+/* Results section sempre visibile */
 .results-section {
-  margin-top: 2rem;
+  display: block !important;
+  margin-top: 0;
+}
+
+/* Modal prodotti mobile */
+.oil-list-modal {
+  max-height: 60vh;
+  overflow-y: auto;
+  direction: rtl;
+}
+
+.oil-item-modal {
+  padding: 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid #e9ecef;
+  font-size: 1rem;
+  color: #2c3e50;
+  text-align: right;
+  direction: rtl;
+  transition: all 0.2s ease;
+}
+
+.oil-item-modal:hover {
+  background: #f8f9fa;
+}
+
+.oil-item-modal.selected {
+  background: #c4291d;
+  color: white;
+  font-weight: 600;
+}
+
+.oil-item-modal:last-child {
+  border-bottom: none;
 }
 
 /* Invoices List Section */
@@ -3272,6 +3798,188 @@ select option {
   }
 }
 
+/* Download Toast Notification - Bottom Left */
+.download-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 10000;
+  background: white;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  min-width: 350px;
+  max-width: 450px;
+  direction: rtl;
+  text-align: right;
+  animation: slideInFromLeft 0.4s ease-out;
+  border: 1px solid #e9ecef;
+}
+
+@keyframes slideInFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.download-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  direction: rtl;
+}
+
+.download-toast-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #c4291d;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.download-toast-title.completed {
+  color: #2d7a2d;
+}
+
+.download-toast-icon {
+  width: 20px;
+  height: 20px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.download-toast-close {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.download-toast-close:hover {
+  color: #c4291d;
+}
+
+.download-toast-body {
+  direction: rtl;
+}
+
+.download-toast-progress {
+  margin-bottom: 0.5rem;
+}
+
+.download-toast-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e9ecef;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.download-toast-progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
+  transition: width 0.3s ease;
+  width: 0%;
+  border-radius: 4px;
+}
+
+.download-toast-text {
+  color: #666;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  direction: rtl;
+  text-align: right;
+}
+
+.download-toast-percentage {
+  color: #333;
+  font-weight: 600;
+  font-size: 0.875rem;
+  direction: rtl;
+  text-align: right;
+}
+
+/* Draggable Oil Rows */
+.draggable-oil-row {
+  cursor: move;
+  transition: background-color 0.2s ease;
+}
+
+.draggable-oil-row:hover {
+  background-color: #f8f9fa;
+}
+
+.draggable-oil-row.dragging {
+  opacity: 0.5;
+}
+
+.drag-handle {
+  display: inline-block;
+  margin-right: 0.4rem;
+  color: #999;
+  cursor: grab;
+  font-weight: bold;
+  user-select: none;
+  font-size: 0.9rem;
+  vertical-align: middle;
+  letter-spacing: -2px;
+  line-height: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle:hover {
+  color: #c4291d;
+}
+
+.oil-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Spacer column for oil table */
+.shift-oil-table .spacer-column {
+  width: 20px;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.shift-oil-table .spacer-cell {
+  width: 20px;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
 /* Update Settings Section */
 .settings-divider {
   height: 2px;
@@ -3334,4 +4042,306 @@ select option {
 .update-actions-group .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Responsive: Depot Management */
+/* Tablet */
+@media (max-width: 1024px) {
+  .depot-sidebar {
+    width: 250px;
+  }
+
+  .depot-layout {
+    margin-right: 250px;
+  }
+
+  .oil-list .oil-item {
+    font-size: 0.85rem;
+    padding: 0.7rem 0.8rem;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .depot-layout {
+    margin-right: 0;
+  }
+
+  .depot-sidebar {
+    display: none;
+  }
+
+  .mobile-products-btn {
+    display: flex;
+  }
+
+  .depot-main-content {
+    width: 100%;
+    padding: 0 1rem;
+  }
+
+  .depot-main-content h3 {
+    font-size: 1.3rem;
+  }
+
+  .stock-card {
+    width: 100%;
+  }
+
+  .movements-section {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .movements-table {
+    min-width: 600px;
+  }
+
+  .oil-item-modal {
+    padding: 1.2rem;
+    font-size: 1.05rem;
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 480px) {
+  .depot-container {
+    padding: 1rem;
+  }
+
+  .depot-main-content h3 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+  }
+
+  .mobile-products-btn {
+    font-size: 1rem;
+    padding: 0.9rem;
+  }
+
+  .stock-label {
+    font-size: 0.85rem;
+  }
+
+  .stock-amount {
+    font-size: 1.1rem;
+  }
+
+  .selected-oil {
+    font-size: 0.8rem;
+  }
+}
+
+/* ============================================
+   SHIFT FUEL TABLE STYLES
+   ============================================ */
+
+.shift-fuel-table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 2rem;
+}
+
+.shift-fuel-table {
+  width: auto;
+  border-collapse: collapse;
+  direction: rtl;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.shift-fuel-table th {
+  background: #2c3e50;
+  color: white;
+  padding: 6px 4px;
+  text-align: center;
+  font-weight: 600;
+  border: none;
+  font-size: 16px;
+}
+
+.shift-fuel-table td {
+  padding: 2px 2px;
+  border: none;
+  text-align: center;
+}
+
+/* Separatore verticale tra Diesel e Gas - Prima tabella */
+/* Separatore a sinistra del primo contatore gas (dopo l'ultimo diesel) */
+/* Per le righe con celle singole */
+.diesel-gas-table tbody tr td:nth-child(6) {
+  border-right: 1px solid #34495e;
+}
+/* Per le righe con colspan (dove gas è nella colonna 3 dopo row-label e diesel) */
+.diesel-gas-table tbody tr td[colspan="2"] {
+  border-right: 1px solid #34495e;
+}
+
+/* Separatori verticali tra benzine - Seconda tabella */
+/* Separatore a sinistra del primo contatore 92 e del primo contatore 80 */
+/* Per le righe con celle singole */
+.benzine-table tbody tr td:nth-child(4),
+.benzine-table tbody tr td:nth-child(6) {
+  border-right: 1px solid #34495e;
+}
+/* Per le righe con colspan */
+.benzine-table tbody tr td[colspan="2"]:nth-child(3),
+.benzine-table tbody tr td[colspan="2"]:nth-child(4) {
+  border-right: 1px solid #34495e;
+}
+
+.shift-fuel-table .row-label {
+  background: #ecf0f1;
+  font-weight: 600;
+  text-align: right;
+  padding-right: 10px;
+  min-width: 100px;
+}
+
+.fuel-table-input {
+  width: 60%;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  font-size: 13px;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Forza il centraggio del testo in tutti i browser */
+.fuel-table-input,
+.fuel-table-input[type="number"] {
+  text-align: center !important;
+  text-align-last: center !important;
+}
+
+/* Rimuove le frecce su/giù dai campi number in Chrome, Safari, Edge */
+.fuel-table-input::-webkit-outer-spin-button,
+.fuel-table-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Larghezza specifica per campi singoli contatori */
+.fuel-table-input-single {
+  width: 6rem;
+}
+
+/* Larghezza per campi diesel con colspan="4" */
+/* 6rem × 4 campi + 12px (3 spazi da 4px tra i campi) */
+.fuel-table-input-diesel {
+  width: calc(24rem + 12px);
+}
+
+/* Larghezza per campi gas/benzine con colspan="2" */
+/* 6rem × 2 campi + 4px (1 spazio da 4px tra i campi) */
+.fuel-table-input-gas-benzine {
+  width: calc(12rem + 4px);
+}
+
+.fuel-table-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.fuel-table-input.auto-calculated {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+  color: #495057;
+}
+
+.fuel-table-input:read-only {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+}
+
+/* Customers Table */
+.customers-table {
+  width: auto;
+  border-collapse: collapse;
+  direction: rtl;
+  text-align: center;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.customers-table thead tr:first-child th {
+  background: #2c3e50;
+  color: white;
+  padding: 6px 1px;
+  text-align: center !important;
+  font-weight: 600;
+  border: none;
+  font-size: 16px;
+}
+
+.customers-table thead tr:nth-child(2) th {
+  background: #2c3e50;
+  color: white;
+  padding: 3px 1px;
+  text-align: center !important;
+  font-weight: 600;
+  border: none;
+  font-size: 14px;
+}
+
+.customers-table tbody td {
+  padding: 2px;
+  border: none;
+  text-align: center !important;
+}
+
+.customers-table input[type="number"] {
+  width: 3.5rem;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  font-size: 13px;
+  text-align: center !important;
+  direction: ltr;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.customers-table input[type="number"]::-webkit-outer-spin-button,
+.customers-table input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.customers-table input[type="text"] {
+  width: 6rem;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  font-size: 13px;
+  text-align: center !important;
+}
+
+.customers-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  vertical-align: middle;
+  margin: 0;
+}
+
+.customers-table td:last-child {
+  width: 2.5rem;
+}
+
+.customers-table input[type="number"]:focus,
+.customers-table input[type="text"]:focus {
+  outline: 2px solid #c4291d;
+  outline-offset: -1px;
+}
+
+.customers-table tbody tr:last-child {
+  background-color: #fff9e6;
 }

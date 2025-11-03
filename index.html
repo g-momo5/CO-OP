@@ -41,17 +41,334 @@
     <main class="main-content">
       <!-- Home Screen -->
       <div id="home-screen" class="screen active">
-        <div class="home-chart-container">
-          <h2>كميات المشتريات الشهرية حسب نوع الوقود</h2>
-          <div class="chart-wrapper">
-            <canvas id="monthly-fuel-sales-chart"></canvas>
+        <div class="home-layout">
+          <!-- Left Column: Chart -->
+          <div class="home-chart-column">
+            <div class="home-chart-container">
+              <h2>كميات المشتريات الشهرية حسب نوع الوقود</h2>
+              <div class="chart-wrapper">
+                <canvas id="monthly-fuel-sales-chart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Action Cards Grid -->
+          <div class="home-cards-column">
+            <div class="action-cards-grid">
+              <!-- Card 1 - New Invoice -->
+              <div class="action-card" onclick="showScreen('invoice', 'home')">
+                <div class="card-icon">📝</div>
+                <h3>فاتورة جديدة</h3>
+                <p>إنشاء فاتورة وقود أو زيوت</p>
+              </div>
+
+              <!-- Card 2 - Depot Management -->
+              <div class="action-card" onclick="showDepotScreen()">
+                <div class="card-icon">📦</div>
+                <h3>إدارة المخزن</h3>
+                <p>تتبع مخزون الوقود والزيوت</p>
+              </div>
+
+              <!-- Card 3 - Shift Entry -->
+              <div class="action-card" onclick="showScreen('shift-entry', 'home')">
+                <div class="card-icon">🔄</div>
+                <h3>إدخال وردية جديدة</h3>
+                <p>تسجيل مبيعات الوردية</p>
+              </div>
+
+              <!-- Card 4 - Placeholder -->
+              <div class="action-card">
+                <div class="card-icon">⚙️</div>
+                <h3>Card 4</h3>
+                <p>وصف الوظيفة</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shift Entry Screen -->
+      <div id="shift-entry-screen" class="screen">
+        <h2>إدخال وردية جديدة</h2>
+
+        <!-- Shift Info Section -->
+        <div class="shift-info-section">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="shift-date">التاريخ:</label>
+              <input type="date" id="shift-date" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="shift-number">رقم الوردية:</label>
+              <select id="shift-number" class="form-control">
+                <option value="1">الوردية الأولى (صباحي)</option>
+                <option value="2">الوردية الثانية (مسائي)</option>
+              </select>
+            </div>
           </div>
         </div>
 
-        <div class="depot-management">
-          <div class="depot-card" onclick="showDepotScreen()">
-            <h3>إدارة المخزن</h3>
-            <p>تتبع مخزون الوقود والزيوت</p>
+        <!-- Shift Tabs -->
+        <div class="price-type-tabs">
+          <div class="price-type-tab active" data-shift-tab="fuel" onclick="switchShiftTab('fuel')">
+            الوقود
+          </div>
+          <div class="price-type-tab" data-shift-tab="oil" onclick="switchShiftTab('oil')">
+            الزيوت
+          </div>
+          <div class="price-type-tab" data-shift-tab="total" onclick="switchShiftTab('total')">
+            الإجمالي
+          </div>
+        </div>
+
+        <!-- Shift Content Sections -->
+        <div id="shift-fuel-section" class="shift-tab-section active">
+          <div class="shift-content">
+            <div class="fuel-tables-wrapper">
+              <!-- Left side: Fuel tables -->
+              <div class="fuel-tables-left">
+                <!-- Tabella Diesel e Gas -->
+                <div class="shift-fuel-table-container">
+              <table class="shift-fuel-table diesel-gas-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th colspan="4">سولار</th>
+                    <th colspan="2">غاز سيارات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- آخر الوردية -->
+                  <tr>
+                    <td class="row-label">آخر الوردية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-1" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-2" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-3" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-4" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                  </tr>
+                  <!-- أول الوردية -->
+                  <tr>
+                    <td class="row-label">أول الوردية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-1" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-2" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-3" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-4" oninput="calculateDieselQuantity()"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                  </tr>
+                  <!-- الكمية -->
+                  <tr>
+                    <td class="row-label">الكمية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-3" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-4" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-2" readonly></td>
+                  </tr>
+                  <!-- إجمالي الكمية -->
+                  <tr>
+                    <td class="row-label">إجمالي الكمية</td>
+                    <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-gas-total-qty" readonly></td>
+                  </tr>
+                  <!-- عملاء -->
+                  <tr>
+                    <td class="row-label">عملاء</td>
+                    <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel" id="fuel-diesel-clients" oninput="calculateCashForFuel('diesel')"></td>
+                    <td colspan="2"></td>
+                  </tr>
+                  <!-- عيارات -->
+                  <tr>
+                    <td class="row-label">عيارات</td>
+                    <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel" id="fuel-diesel-cars" oninput="calculateCashForFuel('diesel')"></td>
+                    <td colspan="2"></td>
+                  </tr>
+                  <!-- السعر -->
+                  <tr>
+                    <td class="row-label">السعر</td>
+                    <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-price" readonly></td>
+                    <td colspan="2"></td>
+                  </tr>
+                  <!-- نقدى -->
+                  <tr>
+                    <td class="row-label">نقدى</td>
+                    <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-cash" readonly></td>
+                    <td colspan="2"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            
+            <!-- Tabella Benzine -->
+            <div class="shift-fuel-table-container" style="margin-top: 2rem;">
+              <table class="shift-fuel-table benzine-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th colspan="2">بنزين ٩٥</th>
+                    <th colspan="2">بنزين ٩٢</th>
+                    <th colspan="2">بنزين ٨٠</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- آخر الوردية -->
+                  <tr>
+                    <td class="row-label">آخر الوردية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-2" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-1" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                  </tr>
+                  <!-- أول الوردية -->
+                  <tr>
+                    <td class="row-label">أول الوردية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-2" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-1" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                  </tr>
+                  <!-- الكمية -->
+                  <tr>
+                    <td class="row-label">الكمية</td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-1" readonly></td>
+                  </tr>
+                  <!-- إجمالي الكمية -->
+                  <tr>
+                    <td class="row-label">إجمالي الكمية</td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-total-qty" readonly></td>
+                  </tr>
+                  <!-- عملاء -->
+                  <tr>
+                    <td class="row-label">عملاء</td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-clients" oninput="calculateCashForFuel('95')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-clients" oninput="calculateCashForFuel('92')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-80-clients" oninput="calculateCashForFuel('80')"></td>
+                  </tr>
+                  <!-- عيارات -->
+                  <tr>
+                    <td class="row-label">عيارات</td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-cars" oninput="calculateCashForFuel('95')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-cars" oninput="calculateCashForFuel('92')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-80-cars" oninput="calculateCashForFuel('80')"></td>
+                  </tr>
+                  <!-- السعر -->
+                  <tr>
+                    <td class="row-label">السعر</td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-price" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-price" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-price" readonly></td>
+                  </tr>
+                  <!-- نقدى -->
+                  <tr>
+                    <td class="row-label">نقدى</td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-cash" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-cash" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-cash" readonly></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right side: Customers table -->
+          <div class="customers-table-container">
+            <table class="customers-table">
+              <thead>
+                <tr>
+                  <th colspan="6">عملاء</th>
+                </tr>
+                <tr>
+                  <th>سولار</th>
+                  <th>٨٠</th>
+                  <th>٩٢</th>
+                  <th>٩٥</th>
+                  <th>العميل</th>
+                  <th>بونات</th>
+                </tr>
+              </thead>
+              <tbody id="customers-table-body">
+                <!-- Rows will be generated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+          </div>
+        </div>
+
+        <div id="shift-oil-section" class="shift-tab-section">
+          <div class="shift-content">
+            <!-- Oil Table -->
+            <div class="shift-oil-table-container">
+              <table class="shift-oil-table">
+                <thead>
+                  <tr>
+                    <th>نوع الزيت</th>
+                    <th>رصيد</th>
+                    <th>وارد</th>
+                    <th>الاجمالى</th>
+                    <th>المباع</th>
+                    <th>المتبقي</th>
+                    <th class="spacer-column"></th>
+                    <th>مفتوح</th>
+                    <th>عملاء</th>
+                    <th>السعر</th>
+                    <th>الاجمالى</th>
+                  </tr>
+                </thead>
+                <tbody id="shift-oil-table-body">
+                  <!-- Oil rows will be loaded dynamically -->
+                  <tr>
+                    <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+                      جاري تحميل الزيوت النشطة...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+
+        <div id="shift-total-section" class="shift-tab-section">
+          <div class="shift-content">
+            <!-- Grand Total Summary -->
+            <div class="shift-grand-total-container">
+              <div class="shift-summary-card">
+                <div class="summary-row">
+                  <span class="summary-label">إجمالي إيرادات الوقود:</span>
+                  <span class="summary-value auto-calculated" id="summary-fuel-total">0.00 جنيه</span>
+                </div>
+                <div class="summary-divider"></div>
+                <div class="summary-row grand-total-row">
+                  <span class="summary-label">الإجمالي الكلي:</span>
+                  <span class="summary-value auto-calculated" id="summary-grand-total">0.00 جنيه</span>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="shift-action-buttons">
+                <button class="btn-primary btn-large" id="save-shift-btn" onclick="saveShift()">
+                  حفظ الوردية نهائياً
+                </button>
+                <button class="btn-secondary btn-large" id="view-history-btn" onclick="showShiftHistory()">
+                  عرض سجل الورديات
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -61,9 +378,9 @@
         <h2>فاتورة جديدة</h2>
         
         <!-- Invoice Type Selection -->
-        <div class="invoice-type-selector">
-          <button class="type-btn active" data-type="fuel">فاتورة وقود</button>
-          <button class="type-btn" data-type="oil">فاتورة زيوت</button>
+        <div class="price-type-tabs">
+          <div class="price-type-tab active" data-type="fuel">فاتورة وقود</div>
+          <div class="price-type-tab" data-type="oil">فاتورة زيوت</div>
         </div>
 
         <!-- Fuel Invoice Form -->
@@ -270,17 +587,18 @@
 
       <!-- Settings Screen -->
       <div id="settings-screen" class="screen">
-        <h2>الإعدادات</h2>
         <div class="settings-layout">
           <aside class="settings-sidebar">
             <ul class="settings-menu">
               <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
+              <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
             </ul>
           </aside>
           <div class="settings-content">
+            <h2>الإعدادات</h2>
             <section id="settings-section-sale-prices" class="settings-section">
               <!-- Header with actions -->
               <div class="prices-header">
@@ -450,6 +768,7 @@
                         <th>السعر الحالي</th>
                         <th>الضريبة المضافة (%)</th>
                         <th>الإجراءات</th>
+                        <th style="width: 80px;">في البيع</th>
                       </tr>
                     </thead>
                     <tbody id="manage-oil-table-body">
@@ -457,6 +776,34 @@
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </section>
+
+            <!-- Manage Customers Section -->
+            <section id="settings-section-manage-customers" class="settings-section">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h3 style="color: #2c3e50; margin: 0;">إدارة العملاء</h3>
+                <button class="btn btn-primary" onclick="addNewCustomer()" style="display: flex; align-items: center; gap: 0.5rem;">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                  </svg>
+                  إضافة عميل جديد
+                </button>
+              </div>
+
+              <div class="prices-table-wrapper">
+                <table class="base-table prices-table-full">
+                  <thead>
+                    <tr>
+                      <th style="width: 50px;">#</th>
+                      <th>اسم العميل</th>
+                      <th>الإجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody id="manage-customers-table-body">
+                    <!-- Customers will be added here dynamically -->
+                  </tbody>
+                </table>
               </div>
             </section>
 
@@ -583,73 +930,136 @@
       <!-- Depot Management Screen -->
       <div id="depot-screen" class="screen">
         <div class="depot-container">
-          <!-- Header Section -->
-          <div class="depot-header">
-            <h2>🏪 إدارة المخزن</h2>
-            <p class="depot-subtitle">تتبع مخزون الزيوت</p>
-          </div>
-          
-          <!-- Oil Selection Box -->
-          <div class="oil-selection-box">
-            <h3>اختر نوع الزيت</h3>
-            <div class="oil-grid">
-              <div class="oil-item" data-oil="COOP FACT 20L">COOP FACT 20L</div>
-              <div class="oil-item" data-oil="COOP FACT 8L">COOP FACT 8L</div>
-              <div class="oil-item" data-oil="COOP FACT 5L">COOP FACT 5L</div>
-              <div class="oil-item" data-oil="COOP FACT 4L">COOP FACT 4L</div>
-              <div class="oil-item" data-oil="COOP FACT 1L">COOP FACT 1L</div>
-              <div class="oil-item" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
-              <div class="oil-item" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
-              <div class="oil-item" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
-              <div class="oil-item" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
-              <div class="oil-item" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
-              <div class="oil-item" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
-              <div class="oil-item" data-oil="CI4 5L">CI4 5L</div>
-              <div class="oil-item" data-oil="SJ 4L">SJ 4L</div>
-              <div class="oil-item" data-oil="SJ 1L">SJ 1L</div>
-              <div class="oil-item" data-oil="CPC 8000 4L">CPC 8000 4L</div>
-              <div class="oil-item" data-oil="CPC 8000 5L">CPC 8000 5L</div>
-              <div class="oil-item" data-oil="XPL 4L">XPL 4L</div>
-              <div class="oil-item" data-oil="SF 20/50 4L">SF 20/50 4L</div>
-              <div class="oil-item" data-oil="SF 20/50 1L">SF 20/50 1L</div>
-              <div class="oil-item" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
-              <div class="oil-item" data-oil="DIXERON 1L">DIXERON 1L</div>
-              <div class="oil-item" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
-              <div class="oil-item" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
-              <div class="oil-item" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
-              <div class="oil-item" data-oil="سايب ١ ك">سايب ١ ك</div>
-              <div class="oil-item" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
-              <div class="oil-item" data-oil="شامبو سيارات">شامبو سيارات</div>
-              <div class="oil-item" data-oil="ماء مقطر">ماء مقطر</div>
-              <div class="oil-item" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
-              <div class="oil-item" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
-              <div class="oil-item" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
-              <div class="oil-item" data-oil="كورال بلومارين">كورال بلومارين</div>
-              <div class="oil-item" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
-              <div class="oil-item" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
-            </div>
-          </div>
+          <!-- Mobile: Pulsante per aprire modal prodotti -->
+          <button id="mobile-products-btn" class="mobile-products-btn">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2 2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
+            </svg>
+            اختر المنتج
+          </button>
 
-          <!-- Results Section -->
-          <div id="results-section" class="results-section" style="display: none;">
-            <!-- Stock Display Card -->
-            <div class="current-stock-card">
-              <div class="stock-card">
-                <div class="stock-header">
-                  <div class="stock-icon">📦</div>
-                  <div class="stock-info">
-                    <div class="stock-label">الرصيد الحالي</div>
-                    <div id="current-stock-amount" class="stock-amount">0</div>
-                    <div id="selected-oil-name" class="selected-oil">-- اختر نوع الزيت --</div>
+          <div class="depot-layout">
+            <!-- Area principale (sinistra) -->
+            <div class="depot-main-content">
+              <div class="breadcrumb-container">
+                <h3>إدارة المخزن</h3>
+                <span id="breadcrumb-separator" class="breadcrumb-separator" style="display: none;"> > </span>
+                <span id="breadcrumb-product" class="breadcrumb-product"></span>
+              </div>
+
+              <div id="results-section" class="results-section">
+                <!-- Stock Display Card -->
+                <div class="current-stock-card">
+                  <div class="stock-card">
+                    <div class="stock-header">
+                      <div class="stock-info">
+                        <div class="stock-label">الرصيد الحالي:</div>
+                        <div id="current-stock-amount" class="stock-amount">0</div>
+                      </div>
+                    </div>
                   </div>
+                </div>
+
+                <!-- Movements Table -->
+                <div class="movements-section">
+                  <div id="movements-table"></div>
                 </div>
               </div>
             </div>
 
-            <!-- Movements Table -->
-            <div class="movements-section">
-              <div id="movements-table"></div>
+            <!-- Sidebar (destra) -->
+            <aside class="depot-sidebar">
+              <div class="sidebar-header">
+                <h4>المنتجات</h4>
+              </div>
+              <div class="oil-list">
+                <div class="oil-item" data-oil="COOP FACT 20L">COOP FACT 20L</div>
+                <div class="oil-item" data-oil="COOP FACT 8L">COOP FACT 8L</div>
+                <div class="oil-item" data-oil="COOP FACT 5L">COOP FACT 5L</div>
+                <div class="oil-item" data-oil="COOP FACT 4L">COOP FACT 4L</div>
+                <div class="oil-item" data-oil="COOP FACT 1L">COOP FACT 1L</div>
+                <div class="oil-item" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
+                <div class="oil-item" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
+                <div class="oil-item" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
+                <div class="oil-item" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
+                <div class="oil-item" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
+                <div class="oil-item" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
+                <div class="oil-item" data-oil="CI4 5L">CI4 5L</div>
+                <div class="oil-item" data-oil="SJ 4L">SJ 4L</div>
+                <div class="oil-item" data-oil="SJ 1L">SJ 1L</div>
+                <div class="oil-item" data-oil="CPC 8000 4L">CPC 8000 4L</div>
+                <div class="oil-item" data-oil="CPC 8000 5L">CPC 8000 5L</div>
+                <div class="oil-item" data-oil="XPL 4L">XPL 4L</div>
+                <div class="oil-item" data-oil="SF 20/50 4L">SF 20/50 4L</div>
+                <div class="oil-item" data-oil="SF 20/50 1L">SF 20/50 1L</div>
+                <div class="oil-item" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
+                <div class="oil-item" data-oil="DIXERON 1L">DIXERON 1L</div>
+                <div class="oil-item" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
+                <div class="oil-item" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
+                <div class="oil-item" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
+                <div class="oil-item" data-oil="سايب ١ ك">سايب ١ ك</div>
+                <div class="oil-item" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
+                <div class="oil-item" data-oil="شامبو سيارات">شامبو سيارات</div>
+                <div class="oil-item" data-oil="ماء مقطر">ماء مقطر</div>
+                <div class="oil-item" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
+                <div class="oil-item" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
+                <div class="oil-item" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
+                <div class="oil-item" data-oil="كورال بلومارين">كورال بلومارين</div>
+                <div class="oil-item" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
+                <div class="oil-item" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal prodotti per mobile -->
+      <div id="products-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>المنتجات</h3>
+            <button class="close-modal" onclick="closeProductsModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="oil-list-modal">
+              <div class="oil-item-modal" data-oil="COOP FACT 20L">COOP FACT 20L</div>
+              <div class="oil-item-modal" data-oil="COOP FACT 8L">COOP FACT 8L</div>
+              <div class="oil-item-modal" data-oil="COOP FACT 5L">COOP FACT 5L</div>
+              <div class="oil-item-modal" data-oil="COOP FACT 4L">COOP FACT 4L</div>
+              <div class="oil-item-modal" data-oil="COOP FACT 1L">COOP FACT 1L</div>
+              <div class="oil-item-modal" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
+              <div class="oil-item-modal" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
+              <div class="oil-item-modal" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
+              <div class="oil-item-modal" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
+              <div class="oil-item-modal" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
+              <div class="oil-item-modal" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
+              <div class="oil-item-modal" data-oil="CI4 5L">CI4 5L</div>
+              <div class="oil-item-modal" data-oil="SJ 4L">SJ 4L</div>
+              <div class="oil-item-modal" data-oil="SJ 1L">SJ 1L</div>
+              <div class="oil-item-modal" data-oil="CPC 8000 4L">CPC 8000 4L</div>
+              <div class="oil-item-modal" data-oil="CPC 8000 5L">CPC 8000 5L</div>
+              <div class="oil-item-modal" data-oil="XPL 4L">XPL 4L</div>
+              <div class="oil-item-modal" data-oil="SF 20/50 4L">SF 20/50 4L</div>
+              <div class="oil-item-modal" data-oil="SF 20/50 1L">SF 20/50 1L</div>
+              <div class="oil-item-modal" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
+              <div class="oil-item-modal" data-oil="DIXERON 1L">DIXERON 1L</div>
+              <div class="oil-item-modal" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
+              <div class="oil-item-modal" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
+              <div class="oil-item-modal" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
+              <div class="oil-item-modal" data-oil="سايب ١ ك">سايب ١ ك</div>
+              <div class="oil-item-modal" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
+              <div class="oil-item-modal" data-oil="شامبو سيارات">شامبو سيارات</div>
+              <div class="oil-item-modal" data-oil="ماء مقطر">ماء مقطر</div>
+              <div class="oil-item-modal" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
+              <div class="oil-item-modal" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
+              <div class="oil-item-modal" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
+              <div class="oil-item-modal" data-oil="كورال بلومارين">كورال بلومارين</div>
+              <div class="oil-item-modal" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
+              <div class="oil-item-modal" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
             </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeProductsModal()">إغلاق</button>
           </div>
         </div>
       </div>
@@ -769,10 +1179,29 @@
       </div>
     </main>
 
+    <!-- Add Customer Modal -->
+    <div id="add-customer-modal" class="modal">
+      <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+          <h3>إضافة عميل جديد</h3>
+          <button class="close-modal" onclick="closeAddCustomerModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="customer-name-input">اسم العميل:</label>
+            <input type="text" id="customer-name-input" class="form-input" placeholder="أدخل اسم العميل" style="width: 100%; padding: 0.75rem; font-size: 1rem;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onclick="saveNewCustomer()">حفظ</button>
+          <button class="btn btn-secondary" onclick="closeAddCustomerModal()">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Bottom Navigation -->
     <nav class="bottom-navigation">
       <button class="nav-btn active" data-screen="home">الرئيسية</button>
-      <button class="nav-btn" data-screen="invoice">فاتورة جديدة</button>
       <button class="nav-btn" data-screen="charts">الرسوم البيانية</button>
       <button class="nav-btn" data-screen="report">التقارير</button>
       <button class="nav-btn" data-screen="settings">الإعدادات</button>
