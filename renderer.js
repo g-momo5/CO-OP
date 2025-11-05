@@ -20,6 +20,7 @@ const screenTitles = {
 
 const settingsSectionTitles = {
   'manage-products': 'إدارة المنتجات',
+  'manage-customers': 'إدارة العملاء',
   'sale-prices': 'تعديل سعر البيع',
   'add-product': 'إضافة منتج جديد',
   'invoices-list': 'عرض الفواتير',
@@ -3801,8 +3802,16 @@ async function loadCustomersSettings() {
         <td style="text-align: center;">${index + 1}</td>
         <td>${customer.name}</td>
         <td style="text-align: center;">
-          <button class="btn btn-danger btn-sm" onclick="deleteCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}')">
-            حذف
+          <button class="btn-icon" title="تعديل العميل" onclick="editCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}')">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
+            </svg>
+          </button>
+          <button class="btn-icon btn-icon-danger" title="حذف العميل" style="margin-left: 0.5rem;" onclick="deleteCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}')">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+              <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+            </svg>
           </button>
         </td>
       `;
@@ -3810,7 +3819,7 @@ async function loadCustomersSettings() {
     });
   } catch (error) {
     console.error('Error loading customers:', error);
-    showToast('خطأ في تحميل العملاء', 'error');
+    showMessage('خطأ في تحميل العملاء', 'error');
   }
 }
 
@@ -3840,18 +3849,26 @@ async function saveNewCustomer() {
   const name = input ? input.value.trim() : '';
 
   if (!name) {
-    showToast('الرجاء إدخال اسم العميل', 'error');
+    showMessage('الرجاء إدخال اسم العميل', 'error');
     return;
   }
 
   try {
-    await ipcRenderer.invoke('add-customer', { name });
-    showToast('تم إضافة العميل بنجاح', 'success');
+    // Save customer
+    const result = await ipcRenderer.invoke('add-customer', { name });
+    console.log('Customer added successfully, ID:', result);
+
+    // Close modal
     closeAddCustomerModal();
+
+    // Reload customers list
     await loadCustomersSettings();
+
+    // Show success message
+    showMessage('تم إضافة العميل بنجاح', 'success');
   } catch (error) {
     console.error('Error adding customer:', error);
-    showToast(error.message || 'خطأ في إضافة العميل', 'error');
+    showMessage(error.message || 'خطأ في إضافة العميل', 'error');
   }
 }
 
@@ -3863,11 +3880,40 @@ async function deleteCustomer(id, name) {
 
   try {
     await ipcRenderer.invoke('delete-customer', { id });
-    showToast('تم حذف العميل بنجاح', 'success');
     await loadCustomersSettings();
+    showMessage('تم حذف العميل بنجاح', 'success');
   } catch (error) {
     console.error('Error deleting customer:', error);
-    showToast('خطأ في حذف العميل', 'error');
+    showMessage('خطأ في حذف العميل', 'error');
+  }
+}
+
+// Edit customer
+function editCustomer(id, currentName) {
+  const newName = prompt('تعديل اسم العميل:', currentName);
+
+  if (newName === null) {
+    // User cancelled
+    return;
+  }
+
+  if (!newName || !newName.trim()) {
+    showMessage('الرجاء إدخال اسم صحيح', 'error');
+    return;
+  }
+
+  updateCustomerName(id, newName.trim());
+}
+
+// Update customer name
+async function updateCustomerName(id, newName) {
+  try {
+    await ipcRenderer.invoke('update-customer', { id, name: newName });
+    await loadCustomersSettings();
+    showMessage('تم تحديث اسم العميل بنجاح', 'success');
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    showMessage(error.message || 'خطأ في تحديث اسم العميل', 'error');
   }
 }
 
