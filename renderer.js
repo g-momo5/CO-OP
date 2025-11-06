@@ -3060,7 +3060,19 @@ function downloadUpdate() {
 }
 
 function installUpdate() {
-  ipcRenderer.send('install-update');
+  // Close notification if exists
+  const notification = document.querySelector('.update-notification');
+  if (notification) {
+    notification.remove();
+  }
+
+  // Show installing message
+  showMessage('جاري إغلاق البرنامج وتثبيت التحديث...', 'info');
+
+  // Send install command
+  setTimeout(() => {
+    ipcRenderer.send('install-update');
+  }, 500);
 }
 
 function updateUpdatesPageUI() {

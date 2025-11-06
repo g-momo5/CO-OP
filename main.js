@@ -25,6 +25,14 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
 
+  // Prevent close dialog when installing update
+  mainWindow.on('close', (e) => {
+    if (app.isQuitting) {
+      // Allow close when quitting for update
+      return;
+    }
+  });
+
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
@@ -1040,7 +1048,22 @@ ipcMain.on('download-update', () => {
 
 ipcMain.on('install-update', () => {
   if (autoUpdater) {
-    autoUpdater.quitAndInstall();
+    console.log('User requested update installation, quitting and installing...');
+    // Close all windows first
+    const allWindows = BrowserWindow.getAllWindows();
+    allWindows.forEach(win => {
+      if (win !== mainWindow) {
+        win.close();
+      }
+    });
+
+    // quitAndInstall parameters:
+    // isSilent: false (show installation progress)
+    // isForceRunAfter: true (force app to run after update)
+    setImmediate(() => {
+      app.isQuitting = true;
+      autoUpdater.quitAndInstall(false, true);
+    });
   } else {
     console.log('AutoUpdater not available');
   }
@@ -1074,14 +1097,6 @@ ipcMain.on('check-for-updates-manual', () => {
         error: 'AutoUpdater not available'
       });
     }
-  }
-});
-
-// Install downloaded update
-ipcMain.on('install-update', () => {
-  if (autoUpdater) {
-    console.log('Installing update and restarting...');
-    autoUpdater.quitAndInstall();
   }
 });
 
@@ -1172,7 +1187,13 @@ app.on('window-all-closed', function () {
 });
 
 app.on('before-quit', async () => {
-  if (db) {
-    await db.end();
+  // Stop connection monitoring
+  if (connectionCheckInterval) {
+    clearInterval(connectionCheckInterval);
+  }
+
+  // Close database connections
+  if (dbManager) {
+    dbManager.close();
   }
 });
