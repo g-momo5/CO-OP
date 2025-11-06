@@ -4573,4 +4573,222 @@ async function initializeShiftEntry() {
 // Initialize depot event listeners quando DOM è pronto
 document.addEventListener('DOMContentLoaded', () => {
   setupDepotEventListeners();
+  initializeConnectionMonitoring();
 });
+
+// ============================================
+// CONNECTION AND SYNC MONITORING
+// ============================================
+
+function initializeConnectionMonitoring() {
+  // Get UI elements
+  const connectionIndicator = document.getElementById('connection-indicator');
+  const connectionText = document.getElementById('connection-text');
+  const syncStatus = document.getElementById('sync-status');
+  const pendingCount = document.getElementById('pending-count');
+  const lastSyncTime = document.getElementById('last-sync-time');
+  const manualSyncBtn = document.getElementById('manual-sync-btn');
+
+  // Initial status check
+  updateConnectionStatus();
+
+  // Manual sync button handler
+  if (manualSyncBtn) {
+    manualSyncBtn.addEventListener('click', async () => {
+      manualSyncBtn.disabled = true;
+      manualSyncBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="animation: rotate 1.5s linear infinite;">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+        جاري المزامنة...
+      `;
+
+      try {
+        const result = await ipcRenderer.invoke('manual-sync');
+
+        if (result.success) {
+          showMessage(`تمت مزامنة ${result.synced} عملية بنجاح`, 'success');
+          if (result.failed > 0) {
+            showMessage(`فشلت ${result.failed} عملية`, 'warning');
+          }
+        } else {
+          showMessage('فشلت المزامنة: ' + result.error, 'error');
+        }
+      } catch (error) {
+        showMessage('خطأ في المزامنة: ' + error.message, 'error');
+      }
+
+      manualSyncBtn.disabled = false;
+      manualSyncBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+        مزامنة الآن
+      `;
+    });
+  }
+
+  // Update status every 5 seconds
+  setInterval(updateConnectionStatus, 5000);
+}
+
+async function updateConnectionStatus() {
+  try {
+    const status = await ipcRenderer.invoke('get-connection-status');
+    const syncStatus = await ipcRenderer.invoke('get-sync-status');
+
+    const connectionIndicator = document.getElementById('connection-indicator');
+    const connectionText = document.getElementById('connection-text');
+    const syncStatusDiv = document.getElementById('sync-status');
+    const pendingCountSpan = document.getElementById('pending-count');
+    const lastSyncTimeSpan = document.getElementById('last-sync-time');
+    const manualSyncBtn = document.getElementById('manual-sync-btn');
+
+    // Update connection indicator
+    if (connectionIndicator && connectionText) {
+      connectionIndicator.className = 'connection-indicator';
+
+      if (status.online) {
+        connectionIndicator.classList.add('connection-online');
+        connectionText.textContent = 'متصل';
+      } else {
+        connectionIndicator.classList.add('connection-offline');
+        connectionText.textContent = 'غير متصل';
+      }
+    }
+
+    // Update sync status
+    if (syncStatusDiv && pendingCountSpan) {
+      if (syncStatus.pending > 0) {
+        syncStatusDiv.style.display = 'block';
+        pendingCountSpan.textContent = syncStatus.pending;
+      } else {
+        syncStatusDiv.style.display = 'none';
+      }
+    }
+
+    // Update last sync time
+    if (lastSyncTimeSpan && status.lastSync) {
+      const lastSyncDate = new Date(status.lastSync);
+      const now = new Date();
+      const diffMinutes = Math.floor((now - lastSyncDate) / 60000);
+
+      if (diffMinutes < 1) {
+        lastSyncTimeSpan.textContent = 'الآن';
+      } else if (diffMinutes < 60) {
+        lastSyncTimeSpan.textContent = `منذ ${diffMinutes} دقيقة`;
+      } else {
+        const diffHours = Math.floor(diffMinutes / 60);
+        lastSyncTimeSpan.textContent = `منذ ${diffHours} ساعة`;
+      }
+    } else if (lastSyncTimeSpan) {
+      lastSyncTimeSpan.textContent = '-';
+    }
+
+    // Show/hide manual sync button
+    if (manualSyncBtn) {
+      if (!status.online) {
+        manualSyncBtn.style.display = 'none';
+      } else if (syncStatus.pending > 0) {
+        manualSyncBtn.style.display = 'inline-flex';
+      } else {
+        manualSyncBtn.style.display = 'none';
+      }
+    }
+  } catch (error) {
+    console.error('Failed to update connection status:', error);
+  }
+}
+
+// IPC Event Listeners for sync events
+ipcRenderer.on('offline-mode-warning', (event, data) => {
+  showOfflineWarning(data.message);
+});
+
+ipcRenderer.on('connection-status', (event, status) => {
+  const connectionIndicator = document.getElementById('connection-indicator');
+  const connectionText = document.getElementById('connection-text');
+
+  if (connectionIndicator && connectionText) {
+    connectionIndicator.className = 'connection-indicator';
+
+    if (status.syncing) {
+      connectionIndicator.classList.add('connection-syncing');
+      connectionText.textContent = 'جاري المزامنة...';
+    } else if (status.online) {
+      connectionIndicator.classList.add('connection-online');
+      connectionText.textContent = 'متصل';
+    } else {
+      connectionIndicator.classList.add('connection-offline');
+      connectionText.textContent = 'غير متصل';
+    }
+  }
+});
+
+ipcRenderer.on('sync-completed', (event, result) => {
+  if (result.success) {
+    showMessage(`تمت المزامنة بنجاح: ${result.synced} عملية`, 'success');
+    updateConnectionStatus();
+  } else {
+    showMessage('فشلت المزامنة', 'error');
+  }
+});
+
+ipcRenderer.on('sync-status-update', (event, status) => {
+  const syncStatusDiv = document.getElementById('sync-status');
+  const pendingCountSpan = document.getElementById('pending-count');
+
+  if (syncStatusDiv && pendingCountSpan && status.pending > 0) {
+    syncStatusDiv.style.display = 'block';
+    pendingCountSpan.textContent = status.pending;
+  } else if (syncStatusDiv) {
+    syncStatusDiv.style.display = 'none';
+  }
+});
+
+function showOfflineWarning(message) {
+  // Create a persistent warning banner
+  const existingBanner = document.getElementById('offline-warning-banner');
+  if (existingBanner) {
+    return; // Don't show duplicate
+  }
+
+  const banner = document.createElement('div');
+  banner.id = 'offline-warning-banner';
+  banner.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #ff9800;
+    color: white;
+    padding: 1rem;
+    text-align: center;
+    font-weight: 600;
+    z-index: 10000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  `;
+  banner.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: center; gap: 1rem;">
+      <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      <span>${message}</span>
+      <button onclick="document.getElementById('offline-warning-banner').remove()"
+              style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: 600;">
+        فهمت
+      </button>
+    </div>
+  `;
+
+  document.body.prepend(banner);
+
+  // Auto-remove after 10 seconds
+  setTimeout(() => {
+    if (banner.parentElement) {
+      banner.remove();
+    }
+  }, 10000);
+}

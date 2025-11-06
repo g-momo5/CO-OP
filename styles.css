@@ -39,10 +39,105 @@ body {
 .app-title {
   font-size: 2.5rem;
   font-weight: 700;
-  margin-bottom: 1rem; /* Space between title and breadcrumb */
+  margin-bottom: 0.5rem;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
   direction: rtl;
   /* No transition - controlled by JS for smooth scroll-based resize */
+}
+
+/* Header Top - Contains title and connection status */
+.header-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+/* Connection Status Bar */
+.connection-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.connection-indicator .status-icon {
+  flex-shrink: 0;
+}
+
+.connection-online {
+  color: #d4f4dd;
+}
+
+.connection-offline {
+  color: #ffcccc;
+  animation: pulse 2s infinite;
+}
+
+.connection-syncing {
+  color: #fff3cd;
+}
+
+.connection-syncing .status-icon {
+  animation: rotate 1.5s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sync-status {
+  color: #fff3cd;
+  font-weight: 500;
+  padding: 0.25rem 0.75rem;
+  background: rgba(255, 193, 7, 0.2);
+  border-radius: 12px;
+}
+
+.last-sync {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+}
+
+.manual-sync-btn {
+  font-size: 0.85rem;
+  height: 32px !important;
+  padding: 0 16px !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+}
+
+.manual-sync-btn:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
 }
 
 /* Breadcrumb Navigation - now inside header */

@@ -1,10 +1,14 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 // Note: autoUpdater initialized after app.whenReady() to avoid initialization issues
 const path = require('path');
+const DatabaseManager = require('./database-manager');
+const SyncManager = require('./sync-manager');
 
 let mainWindow;
-let db;
+let dbManager; // DatabaseManager instance (replaces db)
+let syncManager; // SyncManager instance
 let autoUpdater; // Initialized after app is ready
+let connectionCheckInterval; // Interval for checking connection status
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -28,48 +32,28 @@ function createWindow() {
 }
 
 async function initializeDatabase() {
-  // PostgreSQL/Supabase configuration
-  const { Pool } = require('pg');
-  const connectionString = 'postgresql://postgres.ihajlcodsypvjwfnkcjc:Ghaly1997.@aws-1-eu-west-2.pooler.supabase.com:6543/postgres';
+  // Initialize DatabaseManager with 5 second timeout
+  dbManager = new DatabaseManager(app);
+  syncManager = new SyncManager(dbManager);
 
-  db = new Pool({
-    connectionString: connectionString,
-    ssl: {
-      rejectUnauthorized: false
-    },
-    // Connection pool configuration
-    max: 20, // Maximum number of clients in the pool
-    idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-    connectionTimeoutMillis: 30000, // Wait 30 seconds before timing out when connecting
-    // Query timeout
-    query_timeout: 30000, // Query timeout in milliseconds
-    statement_timeout: 30000, // Statement timeout in milliseconds
-    // Keep-alive configuration
-    keepAlive: true,
-    keepAliveInitialDelayMillis: 10000 // Start keep-alive after 10 seconds
-  });
+  const result = await dbManager.initialize(5000);
 
-  // Handle pool errors
-  db.on('error', (err) => {
-    console.error('Unexpected database pool error:', err);
-    // Don't exit the process, just log the error
-  });
-
-  try {
-    // Test connection
-    const client = await db.connect();
-    console.log('Connected to Supabase PostgreSQL');
-    client.release();
-    await createPostgreSQLTables();
-  } catch (error) {
-    console.error('PostgreSQL connection error:', error);
-    throw error;
+  if (!result.online) {
+    // Show offline warning to user after window is created
+    console.log('تحذير: التطبيق يعمل في وضع عدم الاتصال');
   }
+
+  // Create PostgreSQL tables if online
+  if (dbManager.isOnline && dbManager.pgPool) {
+    await createPostgreSQLTables();
+  }
+
+  return result;
 }
 
 async function createPostgreSQLTables() {
   // Sales table
-  await db.query(`CREATE TABLE IF NOT EXISTS sales (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS sales (
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL,
     fuel_type TEXT NOT NULL,
@@ -82,7 +66,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Purchase prices table (for purchase costs - different from selling prices in products)
-  await db.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
     id SERIAL PRIMARY KEY,
     fuel_type TEXT NOT NULL UNIQUE,
     price REAL NOT NULL,
@@ -90,7 +74,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Insert default purchase prices if not exists
-  await db.query(`INSERT INTO purchase_prices (fuel_type, price) VALUES
+  await dbManager.pgPool.query(`INSERT INTO purchase_prices (fuel_type, price) VALUES
     ('بنزين ٨٠', 8.00),
     ('بنزين ٩٢', 10.00),
     ('بنزين ٩٥', 11.00),
@@ -98,7 +82,7 @@ async function createPostgreSQLTables() {
   ON CONFLICT (fuel_type) DO NOTHING`);
 
   // Products table (unified product management)
-  await db.query(`CREATE TABLE IF NOT EXISTS products (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     product_type TEXT NOT NULL,
     product_name TEXT NOT NULL UNIQUE,
@@ -111,13 +95,13 @@ async function createPostgreSQLTables() {
 
   // Create index on product_type for faster queries
   try {
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
+    await dbManager.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
   } catch (err) {
     console.log('Index creation: ', err.message);
   }
 
   // Price history table
-  await db.query(`CREATE TABLE IF NOT EXISTS price_history (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS price_history (
     id SERIAL PRIMARY KEY,
     product_type TEXT NOT NULL,
     product_name TEXT NOT NULL,
@@ -127,7 +111,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Oil movements table
-  await db.query(`CREATE TABLE IF NOT EXISTS oil_movements (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_movements (
     id SERIAL PRIMARY KEY,
     oil_type TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -138,7 +122,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Fuel movements table (for tank inventory tracking)
-  await db.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
     id SERIAL PRIMARY KEY,
     fuel_type TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -150,7 +134,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Fuel invoices table
-  await db.query(`CREATE TABLE IF NOT EXISTS fuel_invoices (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_invoices (
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL,
     invoice_number TEXT NOT NULL,
@@ -166,7 +150,7 @@ async function createPostgreSQLTables() {
   )`);
 
   // Oil invoices table
-  await db.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL,
     invoice_number TEXT NOT NULL,
@@ -181,14 +165,14 @@ async function createPostgreSQLTables() {
   )`);
 
   // Customers table
-  await db.query(`CREATE TABLE IF NOT EXISTS customers (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS customers (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
   // Shifts table (for shift management)
-  await db.query(`CREATE TABLE IF NOT EXISTS shifts (
+  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS shifts (
     id SERIAL PRIMARY KEY,
     date DATE NOT NULL,
     shift_number INTEGER NOT NULL,
@@ -199,55 +183,17 @@ async function createPostgreSQLTables() {
   )`);
 }
 
-// Database helper functions with retry logic
-async function executeWithRetry(operation, maxRetries = 3) {
-  let lastError;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-
-      // Check if error is recoverable (network/timeout issues)
-      const isRecoverable = error.code === 'ETIMEDOUT' ||
-                           error.code === 'ECONNREFUSED' ||
-                           error.code === 'ECONNRESET' ||
-                           error.code === 'EPIPE';
-
-      if (!isRecoverable || attempt === maxRetries) {
-        throw error;
-      }
-
-      // Wait before retrying (exponential backoff)
-      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-      console.log(`Query failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-
-  throw lastError;
-}
-
+// Database helper functions - Now delegated to DatabaseManager
 function executeQuery(query, params = []) {
-  return executeWithRetry(async () => {
-    const result = await db.query(query, params);
-    return result.rows;
-  });
+  return dbManager.executeQuery(query, params);
 }
 
 function executeUpdate(query, params = []) {
-  return executeWithRetry(async () => {
-    const result = await db.query(query, params);
-    return result.rowCount;
-  });
+  return dbManager.executeUpdate(query, params);
 }
 
-function executeInsert(query, params = []) {
-  return executeWithRetry(async () => {
-    const result = await db.query(query + ' RETURNING id', params);
-    return result.rows[0].id;
-  });
+function executeInsert(query, params = [], tableName = 'unknown') {
+  return dbManager.executeInsert(query, params, tableName);
 }
 
 // IPC Handlers setup function
@@ -928,14 +874,108 @@ function setupIPCHandlers() {
       return { success: false, error: error.message };
     }
   });
+
+  // Sync-related IPC handlers
+  ipcMain.handle('manual-sync', async () => {
+    try {
+      if (!dbManager.isOnline) {
+        return { success: false, error: 'لا يوجد اتصال بالإنترنت' };
+      }
+
+      const result = await syncManager.syncAll();
+      return result;
+    } catch (error) {
+      console.error('Manual sync failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-sync-status', async () => {
+    return syncManager.getSyncStatus();
+  });
+
+  ipcMain.handle('get-connection-status', async () => {
+    return {
+      online: dbManager.isOnline,
+      lastSync: dbManager.lastSyncTime,
+      pending: dbManager.getPendingSyncCount()
+    };
+  });
 } // End of setupIPCHandlers
 
 app.whenReady().then(async () => {
-  await initializeDatabase();
+  // Initialize database (with 5 second timeout)
+  const dbResult = await initializeDatabase();
+
   setupIPCHandlers();
   createWindow();
 
-  // Initialize autoUpdater after app is ready
+  // Show offline warning if needed (after 2 seconds to let UI load)
+  if (!dbResult.online) {
+    setTimeout(() => {
+      if (mainWindow) {
+        mainWindow.webContents.send('offline-mode-warning', {
+          message: 'تعمل في وضع عدم الاتصال. سيتم مزامنة البيانات عند استعادة الاتصال بالإنترنت.',
+          offline: true
+        });
+      }
+    }, 2000);
+  }
+
+  // Start connection monitoring (check every 10 seconds)
+  connectionCheckInterval = setInterval(async () => {
+    const wasOnline = dbManager.isOnline;
+    const isNowOnline = net.isOnline() && await dbManager.checkConnection();
+
+    if (!wasOnline && isNowOnline) {
+      // Connection restored!
+      dbManager.isOnline = true;
+      console.log('📡 Connection restored, starting automatic sync...');
+
+      if (mainWindow) {
+        mainWindow.webContents.send('connection-status', {
+          online: true,
+          syncing: true
+        });
+      }
+
+      // Trigger automatic sync
+      try {
+        const syncResult = await syncManager.syncAll();
+        console.log('✅ Auto-sync completed:', syncResult);
+
+        if (mainWindow) {
+          mainWindow.webContents.send('sync-completed', {
+            success: syncResult.success,
+            synced: syncResult.synced,
+            failed: syncResult.failed,
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.error('❌ Auto-sync failed:', error);
+      }
+    } else if (wasOnline && !isNowOnline) {
+      // Connection lost
+      dbManager.isOnline = false;
+      console.log('📡 Connection lost, switching to offline mode');
+
+      if (mainWindow) {
+        mainWindow.webContents.send('connection-status', {
+          online: false,
+          syncing: false
+        });
+      }
+    }
+
+    // Send status update to renderer
+    if (mainWindow) {
+      const status = syncManager.getSyncStatus();
+      mainWindow.webContents.send('sync-status-update', status);
+    }
+  }, 10000);
+
+  // Initialize autoUpdater after app is ready (only if online)
   try {
     const { autoUpdater: au } = require('electron-updater');
     autoUpdater = au;
