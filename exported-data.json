@@ -1,0 +1,1029 @@
+{
+  "products": [
+    {
+      "id": 1,
+      "product_type": "fuel",
+      "product_name": "بنزين ٨",
+      "current_price": 8.5,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 2,
+      "product_type": "fuel",
+      "product_name": "بنزين ٨٠",
+      "current_price": 8.5,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 3,
+      "product_type": "fuel",
+      "product_name": "بنزين ٩٢",
+      "current_price": 10.5,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 4,
+      "product_type": "fuel",
+      "product_name": "بنزين ٩٥",
+      "current_price": 11.5,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 5,
+      "product_type": "fuel",
+      "product_name": "سولار",
+      "current_price": 7.5,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 6,
+      "product_type": "oil",
+      "product_name": "COOP FACT 20L",
+      "current_price": 2198,
+      "vat": 14,
+      "effective_date": "2025-10-20",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 7,
+      "product_type": "oil",
+      "product_name": "COOP FACT 8L",
+      "current_price": 890,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 8,
+      "product_type": "oil",
+      "product_name": "COOP FACT 5L",
+      "current_price": 555,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 9,
+      "product_type": "oil",
+      "product_name": "COOP FACT 4L",
+      "current_price": 4450,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 10,
+      "product_type": "oil",
+      "product_name": "COOP FACT 1L",
+      "current_price": 119,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 11,
+      "product_type": "oil",
+      "product_name": "SUPER STAN 180L",
+      "current_price": 18468,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 12,
+      "product_type": "oil",
+      "product_name": "SUPER STAN 20L",
+      "current_price": 1850,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 13,
+      "product_type": "oil",
+      "product_name": "SUPER STAN 4L",
+      "current_price": 385,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 14,
+      "product_type": "oil",
+      "product_name": "ONE EXTRA 5W/40",
+      "current_price": 1450,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 15,
+      "product_type": "oil",
+      "product_name": "ONE EXTRA 5W/40 5L",
+      "current_price": 1700,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 16,
+      "product_type": "oil",
+      "product_name": "CI4 15W/40 20L",
+      "current_price": 3050,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 17,
+      "product_type": "oil",
+      "product_name": "CI4 5L",
+      "current_price": 750,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 18,
+      "product_type": "oil",
+      "product_name": "SJ 4L",
+      "current_price": 545,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 19,
+      "product_type": "oil",
+      "product_name": "SJ 1L",
+      "current_price": 145,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 20,
+      "product_type": "oil",
+      "product_name": "CPC 8000 4L",
+      "current_price": 900,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 21,
+      "product_type": "oil",
+      "product_name": "CPC 8000 5L",
+      "current_price": 1125,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 22,
+      "product_type": "oil",
+      "product_name": "XPL 4L",
+      "current_price": 650,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 23,
+      "product_type": "oil",
+      "product_name": "SF 20/50 4L",
+      "current_price": 470,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 24,
+      "product_type": "oil",
+      "product_name": "SF 20/50 1L",
+      "current_price": 125,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 25,
+      "product_type": "oil",
+      "product_name": "HYDRAULIC 68",
+      "current_price": 1150,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 26,
+      "product_type": "oil",
+      "product_name": "DIXERON 1L",
+      "current_price": 240,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 27,
+      "product_type": "oil",
+      "product_name": "تروس ١٦٠ HP ١٨ لتر",
+      "current_price": 1700,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 28,
+      "product_type": "oil",
+      "product_name": "ماء أحمر راديتير",
+      "current_price": 295,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 29,
+      "product_type": "oil",
+      "product_name": "باكم ١\\٤ لتر",
+      "current_price": 0,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 30,
+      "product_type": "oil",
+      "product_name": "سايب ١ ك",
+      "current_price": 98,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 31,
+      "product_type": "oil",
+      "product_name": "رويال كلين ٨٠٠م",
+      "current_price": 0,
+      "vat": 5,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 32,
+      "product_type": "oil",
+      "product_name": "شامبو سيارات",
+      "current_price": 35,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 33,
+      "product_type": "oil",
+      "product_name": "ماء مقطر",
+      "current_price": 15,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 34,
+      "product_type": "oil",
+      "product_name": "نيو فاست رائحة التفاح",
+      "current_price": 85,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 35,
+      "product_type": "oil",
+      "product_name": "منظف الايدي بالمضخة",
+      "current_price": 50,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 36,
+      "product_type": "oil",
+      "product_name": "ملمع كاوتش سيارة",
+      "current_price": 75,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 37,
+      "product_type": "oil",
+      "product_name": "كورال بلومارين",
+      "current_price": 190,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 38,
+      "product_type": "oil",
+      "product_name": "ملمع تابلوه الترشاين",
+      "current_price": 75,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 39,
+      "product_type": "oil",
+      "product_name": "ماء أخضر راديتير",
+      "current_price": 220,
+      "vat": 14,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 40,
+      "product_type": "oil",
+      "product_name": "باكم ١٤ لتر",
+      "current_price": 85,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    },
+    {
+      "id": 41,
+      "product_type": "oil",
+      "product_name": "رويال كلين ٣٢ كيلو",
+      "current_price": 30,
+      "vat": 0,
+      "effective_date": "2025-10-17",
+      "created_at": "2025-10-23 08:37:00"
+    }
+  ],
+  "fuel_prices": [
+    {
+      "id": 1,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8.5,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 2,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10.5,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 3,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11.5,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 4,
+      "fuel_type": "سولار",
+      "price": 7.5,
+      "updated_at": "2025-10-23 08:44:29"
+    }
+  ],
+  "purchase_prices": [
+    {
+      "id": 128,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-21 23:38:16"
+    },
+    {
+      "id": 129,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-21 23:38:16"
+    },
+    {
+      "id": 130,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-21 23:38:16"
+    },
+    {
+      "id": 131,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-21 23:38:16"
+    },
+    {
+      "id": 132,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-22 15:45:56"
+    },
+    {
+      "id": 133,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-22 15:45:56"
+    },
+    {
+      "id": 134,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-22 15:45:56"
+    },
+    {
+      "id": 135,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-22 15:45:56"
+    },
+    {
+      "id": 136,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-22 17:03:08"
+    },
+    {
+      "id": 137,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-22 17:03:08"
+    },
+    {
+      "id": 138,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-22 17:03:08"
+    },
+    {
+      "id": 139,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-22 17:03:08"
+    },
+    {
+      "id": 140,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-22 17:07:55"
+    },
+    {
+      "id": 141,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-22 17:07:55"
+    },
+    {
+      "id": 142,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-22 17:07:55"
+    },
+    {
+      "id": 143,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-22 17:07:55"
+    },
+    {
+      "id": 144,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-22 19:33:29"
+    },
+    {
+      "id": 145,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-22 19:33:29"
+    },
+    {
+      "id": 146,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-22 19:33:29"
+    },
+    {
+      "id": 147,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-22 19:33:29"
+    },
+    {
+      "id": 148,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-22 20:13:42"
+    },
+    {
+      "id": 149,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-22 20:13:42"
+    },
+    {
+      "id": 150,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-22 20:13:42"
+    },
+    {
+      "id": 151,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-22 20:13:42"
+    },
+    {
+      "id": 152,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 153,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 154,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 155,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-23 08:44:29"
+    },
+    {
+      "id": 156,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-23 08:47:52"
+    },
+    {
+      "id": 157,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-23 08:47:52"
+    },
+    {
+      "id": 158,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-23 08:47:52"
+    },
+    {
+      "id": 159,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-23 08:47:52"
+    },
+    {
+      "id": 160,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 09:13:53"
+    },
+    {
+      "id": 161,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 09:13:53"
+    },
+    {
+      "id": 162,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 09:13:53"
+    },
+    {
+      "id": 163,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 09:13:53"
+    },
+    {
+      "id": 164,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 09:16:31"
+    },
+    {
+      "id": 165,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 09:16:31"
+    },
+    {
+      "id": 166,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 09:16:31"
+    },
+    {
+      "id": 167,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 09:16:31"
+    },
+    {
+      "id": 168,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 09:19:29"
+    },
+    {
+      "id": 169,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 09:19:29"
+    },
+    {
+      "id": 170,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 09:19:29"
+    },
+    {
+      "id": 171,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 09:19:29"
+    },
+    {
+      "id": 172,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 12:25:17"
+    },
+    {
+      "id": 173,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 12:25:17"
+    },
+    {
+      "id": 174,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 12:25:17"
+    },
+    {
+      "id": 175,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 12:25:17"
+    },
+    {
+      "id": 176,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 13:03:27"
+    },
+    {
+      "id": 177,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 13:03:27"
+    },
+    {
+      "id": 178,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 13:03:27"
+    },
+    {
+      "id": 179,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 13:03:27"
+    },
+    {
+      "id": 180,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 13:09:24"
+    },
+    {
+      "id": 181,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 13:09:24"
+    },
+    {
+      "id": 182,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 13:09:24"
+    },
+    {
+      "id": 183,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 13:09:24"
+    },
+    {
+      "id": 184,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-24 20:52:36"
+    },
+    {
+      "id": 185,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-24 20:52:36"
+    },
+    {
+      "id": 186,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-24 20:52:36"
+    },
+    {
+      "id": 187,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-24 20:52:36"
+    },
+    {
+      "id": 188,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-25 21:44:04"
+    },
+    {
+      "id": 189,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-25 21:44:04"
+    },
+    {
+      "id": 190,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-25 21:44:04"
+    },
+    {
+      "id": 191,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-25 21:44:04"
+    },
+    {
+      "id": 192,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-25 22:18:16"
+    },
+    {
+      "id": 193,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-25 22:18:16"
+    },
+    {
+      "id": 194,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-25 22:18:16"
+    },
+    {
+      "id": 195,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-25 22:18:16"
+    },
+    {
+      "id": 196,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-25 22:23:20"
+    },
+    {
+      "id": 197,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-25 22:23:20"
+    },
+    {
+      "id": 198,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-25 22:23:20"
+    },
+    {
+      "id": 199,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-25 22:23:20"
+    },
+    {
+      "id": 200,
+      "fuel_type": "بنزين ٨٠",
+      "price": 8,
+      "updated_at": "2025-10-25 22:32:55"
+    },
+    {
+      "id": 201,
+      "fuel_type": "بنزين ٩٢",
+      "price": 10,
+      "updated_at": "2025-10-25 22:32:55"
+    },
+    {
+      "id": 202,
+      "fuel_type": "بنزين ٩٥",
+      "price": 11,
+      "updated_at": "2025-10-25 22:32:55"
+    },
+    {
+      "id": 203,
+      "fuel_type": "سولار",
+      "price": 7,
+      "updated_at": "2025-10-25 22:32:55"
+    }
+  ],
+  "sales": [
+    {
+      "id": 1,
+      "date": "2025-08-17",
+      "fuel_type": "بنزين 80",
+      "quantity": 1000,
+      "price_per_liter": 2.18,
+      "total_amount": 2180,
+      "payment_method": "نقداً",
+      "customer_name": "",
+      "notes": ""
+    }
+  ],
+  "oil_movements": [
+    {
+      "id": 1,
+      "oil_type": "COOP FACT 20L",
+      "date": "2025-09-07",
+      "type": "in",
+      "quantity": 100,
+      "invoice_number": "122",
+      "created_at": "2025-09-07 08:45:18"
+    },
+    {
+      "id": 2,
+      "oil_type": "COOP FACT 20L",
+      "date": "2025-09-07",
+      "type": "out",
+      "quantity": 15,
+      "invoice_number": null,
+      "created_at": "2025-09-07 08:45:35"
+    },
+    {
+      "id": 3,
+      "oil_type": "COOP FACT 20L",
+      "date": "2025-09-04",
+      "type": "in",
+      "quantity": 20,
+      "invoice_number": "19",
+      "created_at": "2025-09-07 08:46:00"
+    },
+    {
+      "id": 4,
+      "oil_type": "COOP FACT 20L",
+      "date": "2025-09-08",
+      "type": "out",
+      "quantity": 50,
+      "invoice_number": null,
+      "created_at": "2025-09-07 08:46:20"
+    }
+  ],
+  "fuel_movements": [
+    {
+      "id": 1,
+      "fuel_type": "بنزين ٨٠",
+      "date": "2025-10-25",
+      "type": "in",
+      "quantity": 100000,
+      "invoice_number": "INV-25102025-679",
+      "notes": "Acquisto - Prezzo: 9 جنيه/لتر - Totale: 0 جنيه",
+      "created_at": "2025-10-25 21:58:54"
+    },
+    {
+      "id": 2,
+      "fuel_type": "بنزين ٩٢",
+      "date": "2025-10-25",
+      "type": "in",
+      "quantity": 130000,
+      "invoice_number": "INV-25102025-679",
+      "notes": "Acquisto - Prezzo: 12 جنيه/لتر - Totale: 0 جنيه",
+      "created_at": "2025-10-25 21:58:54"
+    },
+    {
+      "id": 3,
+      "fuel_type": "بنزين ٨٠",
+      "date": "2025-10-23",
+      "type": "in",
+      "quantity": 120000,
+      "invoice_number": "INV-26102025-573",
+      "notes": "Acquisto - Prezzo: 9 جنيه/لتر - Totale: 0 جنيه",
+      "created_at": "2025-10-25 22:27:16"
+    },
+    {
+      "id": 4,
+      "fuel_type": "بنزين ٩٢",
+      "date": "2025-10-23",
+      "type": "in",
+      "quantity": 98000,
+      "invoice_number": "INV-26102025-573",
+      "notes": "Acquisto - Prezzo: 12 جنيه/لتر - Totale: 0 جنيه",
+      "created_at": "2025-10-25 22:27:16"
+    }
+  ],
+  "price_history": [
+    {
+      "id": 43,
+      "product_type": "oil",
+      "product_name": "COOP FACT 20L",
+      "price": 2190,
+      "start_date": "2025-10-19",
+      "created_at": "2025-10-23 08:44:47",
+      "product_id": 6
+    },
+    {
+      "id": 44,
+      "product_type": "oil",
+      "product_name": "COOP FACT 20L",
+      "price": 2198,
+      "start_date": "2025-10-20",
+      "created_at": "2025-10-23 08:48:10",
+      "product_id": 6
+    }
+  ],
+  "fuel_invoices": [
+    {
+      "id": 1,
+      "date": "2025-10-25",
+      "invoice_number": "INV-25102025-679",
+      "fuel_type": "بنزين ٨٠",
+      "quantity": 100000,
+      "net_quantity": 99500,
+      "purchase_price": 9,
+      "sale_price": 0,
+      "total": 0,
+      "profit": -895500,
+      "created_at": "2025-10-25 21:58:54",
+      "invoice_total": 2460000
+    },
+    {
+      "id": 2,
+      "date": "2025-10-25",
+      "invoice_number": "INV-25102025-679",
+      "fuel_type": "بنزين ٩٢",
+      "quantity": 130000,
+      "net_quantity": 129350,
+      "purchase_price": 12,
+      "sale_price": 0,
+      "total": 0,
+      "profit": -1552200,
+      "created_at": "2025-10-25 21:58:54",
+      "invoice_total": 2460000
+    },
+    {
+      "id": 3,
+      "date": "2025-10-23",
+      "invoice_number": "INV-26102025-573",
+      "fuel_type": "بنزين ٨٠",
+      "quantity": 120000,
+      "net_quantity": 119400,
+      "purchase_price": 9,
+      "sale_price": 0,
+      "total": 0,
+      "profit": -1074600,
+      "created_at": "2025-10-25 22:27:16",
+      "invoice_total": 2256000
+    },
+    {
+      "id": 4,
+      "date": "2025-10-23",
+      "invoice_number": "INV-26102025-573",
+      "fuel_type": "بنزين ٩٢",
+      "quantity": 98000,
+      "net_quantity": 97510,
+      "purchase_price": 12,
+      "sale_price": 0,
+      "total": 0,
+      "profit": -1170120,
+      "created_at": "2025-10-25 22:27:16",
+      "invoice_total": 2256000
+    }
+  ],
+  "oil_invoices": []
+}

@@ -677,34 +677,383 @@ body {
   font-family: 'Noto Naskh Arabic', serif;
 }
 
+/* ============================================
+   STANDARDIZED BUTTON SYSTEM - Minimal Flat
+   ============================================ */
+
+/* Base Button - Minimal Flat Design */
+.btn {
+  /* Size - Compact */
+  height: 36px;
+  padding: 0 24px;
+  min-width: fit-content;
+
+  /* Typography */
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 36px;
+
+  /* Shape - Pill (Very Rounded) */
+  border-radius: 20px;
+  border: none;
+
+  /* Layout */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  /* Interaction */
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  white-space: nowrap;
+
+  /* Transition - Smooth */
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Flat - No shadow initially */
+  box-shadow: none;
+
+  /* RTL Support */
+  direction: rtl;
+  text-align: center;
+}
+
+/* Icon inside button */
+.btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Primary Button - Brand Red */
 .btn-primary {
-  background: linear-gradient(135deg, #c4291d 0%, #a02318 100%);
+  background-color: #c4291d;
   color: white;
-  box-shadow: 0 4px 15px rgba(196, 41, 29, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
+  background-color: #a8241a;
+  /* Elevation on hover */
+  box-shadow: 0 4px 12px rgba(196, 41, 29, 0.3);
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(196, 41, 29, 0.4);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(196, 41, 29, 0.3);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
+  background-color: #e0e0e0;
+  color: #9e9e9e;
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
+/* Secondary Button - Gray Outline */
 .btn-secondary {
-  background: white;
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #5a6268;
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+  transform: translateY(-2px);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(108, 117, 125, 0.3);
+}
+
+.btn-secondary:disabled {
+  background-color: #e0e0e0;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Success Button - Green */
+.btn-success {
+  background-color: #28a745;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: #218838;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+  transform: translateY(-2px);
+}
+
+.btn-success:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(40, 167, 69, 0.3);
+}
+
+.btn-success:disabled {
+  background-color: #e0e0e0;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Danger Button - Dark Red */
+.btn-danger {
+  background-color: #dc3545;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #c82333;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+  transform: translateY(-2px);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(220, 53, 69, 0.3);
+}
+
+.btn-danger:disabled {
+  background-color: #e0e0e0;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Warning Button - Orange */
+.btn-warning {
+  background-color: #ff9800;
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #e68900;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+  transform: translateY(-2px);
+}
+
+.btn-warning:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(255, 152, 0, 0.3);
+}
+
+.btn-warning:disabled {
+  background-color: #e0e0e0;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Info Button - Light Gray */
+.btn-info {
+  background-color: #f5f5f5;
+  color: #424242;
+  border: 1px solid #e0e0e0;
+}
+
+.btn-info:hover:not(:disabled) {
+  background-color: #eeeeee;
+  border-color: #d0d0d0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.btn-info:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.btn-info:disabled {
+  background-color: #f5f5f5;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Outline Variants - For secondary actions */
+.btn-outline-primary {
+  background-color: transparent;
   color: #c4291d;
   border: 2px solid #c4291d;
 }
 
-.btn-secondary:hover {
-  background: #c4291d;
+.btn-outline-primary:hover:not(:disabled) {
+  background-color: #c4291d;
   color: white;
+  box-shadow: 0 4px 12px rgba(196, 41, 29, 0.3);
+  transform: translateY(-2px);
 }
 
-/* Input Validation States */
+.btn-outline-secondary {
+  background-color: transparent;
+  color: #6c757d;
+  border: 2px solid #6c757d;
+}
+
+.btn-outline-secondary:hover:not(:disabled) {
+  background-color: #6c757d;
+  color: white;
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Icon-only buttons (square for icons) */
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%; /* Circular for icon-only */
+  background-color: transparent;
+  color: #757575;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background-color: #f5f5f5;
+  color: #424242;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.btn-icon-danger {
+  color: #dc3545;
+}
+
+.btn-icon-danger:hover:not(:disabled) {
+  background-color: #fff5f5;
+  color: #c82333;
+}
+
+.btn-icon-primary {
+  color: #c4291d;
+}
+
+.btn-icon-primary:hover:not(:disabled) {
+  background-color: #fff5f5;
+  color: #a8241a;
+}
+
+/* Size Variants */
+.btn-sm {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+  line-height: 32px;
+}
+
+.btn-lg {
+  height: 44px;
+  padding: 0 32px;
+  font-size: 16px;
+  line-height: 44px;
+}
+
+/* Full width button */
+.btn-block {
+  width: 100%;
+  display: flex;
+}
+
+/* ============================================
+   STANDARDIZED INPUT SYSTEM - Minimal Flat
+   Note: Excludes shift entry page inputs
+   ============================================ */
+
+/* Base Input Style - NOT applied to shift entry page (except #shift-number and #shift-date) */
+.form-group input:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group select:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group textarea:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+#shift-number,
+#shift-date,
+.search-input,
+.filter-group input,
+.filter-group select,
+.price-input,
+.date-input-compact,
+.table-price-input {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 16px;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 14px;
+  line-height: 36px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  background-color: #ffffff;
+  color: #333333;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: none;
+  direction: rtl;
+  text-align: right;
+}
+
+/* Textarea */
+.form-group textarea:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]) {
+  height: auto;
+  min-height: 80px;
+  padding: 12px 16px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* Select */
+.form-group select:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.filter-group select,
+#shift-number {
+  padding-right: 40px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23757575' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 12px center;
+}
+
+/* Focus State */
+.form-group input:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]):focus,
+.form-group select:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]):focus,
+.form-group textarea:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]):focus,
+#shift-number:focus,
+#shift-date:focus,
+.search-input:focus,
+.filter-group input:focus,
+.filter-group select:focus,
+.price-input:focus,
+.date-input-compact:focus,
+.table-price-input:focus {
+  border-color: #c4291d;
+  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
+  transform: translateY(-1px);
+}
+
+/* Readonly State */
+.form-group input:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group select:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group textarea:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]) {
+  background-color: #f5f5f5;
+  color: #757575;
+  cursor: not-allowed;
+  border-color: #e0e0e0;
+}
+
+/* Disabled State */
+.form-group input:disabled:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group select:disabled:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group textarea:disabled:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]) {
+  background-color: #f5f5f5;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  border-color: #e0e0e0;
+  opacity: 0.6;
+}
+
+/* OLD Input Validation States - Kept for compatibility */
 .input-error {
   border-color: #dc3545 !important;
   background-color: #fff5f5 !important;
@@ -809,6 +1158,8 @@ body {
   flex-shrink: 0;
 }
 
+/* OLD form-group inputs - Replaced by standardized system above (line 969) */
+/*
 .form-group input,
 .form-group select,
 .form-group textarea {
@@ -834,6 +1185,7 @@ body {
   background: #f8f9fa;
   color: #666;
 }
+*/
 
 /* Fuel Items */
 .fuel-items-container {
@@ -1056,6 +1408,8 @@ body {
   min-width: auto;
 }
 
+/* OLD .btn-danger - Using standardized version above */
+/*
 .btn-danger {
   background: #dc3545;
   color: white;
@@ -1066,6 +1420,7 @@ body {
   background: #c82333;
   border-color: #bd2130;
 }
+*/
 
 /* Stili per il nuovo layout degli oli */
 .oil-type-group {
@@ -1178,13 +1533,15 @@ body {
 
 .form-actions {
   display: flex;
-  gap: 0.8rem;
+  gap: 0.75rem;
   justify-content: center;
-  margin-top: 1.2rem;
+  margin-top: 0.75rem;
   direction: rtl;
 }
 
-/* Buttons */
+/* OLD Button Styles - Replaced by Standardized System Above (line 680) */
+/* Kept here for reference only - can be deleted */
+/*
 .btn {
   padding: 0.6rem 1.5rem;
   border: none;
@@ -1253,6 +1610,7 @@ body {
   background: #5a6268;
   transform: translateY(-2px);
 }
+*/
 
 /* Charts */
 .charts-container {
@@ -1463,14 +1821,14 @@ body {
 }
 
 .settings-section .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .settings-section .form-group label {
   display: block;
   font-weight: 600;
   color: #333;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   direction: rtl;
   text-align: right;
 }
@@ -1629,8 +1987,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
-  padding: 1.25rem 0;
+  margin-bottom: 1.5rem;
+  padding: 0.75rem 0;
   background: transparent;
   direction: rtl;
 }
@@ -3597,12 +3955,12 @@ select option {
 /* Invoices List Section */
 .invoices-filters {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   align-items: flex-end;
-  margin-bottom: 2rem;
-  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.75rem;
   background: #f8f9fa;
-  border-radius: 8px;
+  border-radius: 12px;
   direction: rtl;
 }
 
@@ -3619,24 +3977,7 @@ select option {
   font-size: 0.9rem;
 }
 
-.filter-group select,
-.filter-group input[type="date"] {
-  padding: 0.6rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-family: 'Noto Naskh Arabic', serif;
-  font-size: 0.95rem;
-  min-width: 180px;
-  direction: rtl;
-  text-align: right;
-}
-
-.filter-group select:focus,
-.filter-group input[type="date"]:focus {
-  outline: none;
-  border-color: #c4291d;
-  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
-}
+/* filter-group select and input already handled by standardized input system above (line 974) */
 
 .invoices-table-wrapper {
   overflow-x: auto;
@@ -3644,12 +3985,7 @@ select option {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* Invoices table - no specific customizations needed */
-
-.invoices-table .btn-sm {
-  padding: 0.4rem 1rem;
-  font-size: 0.9rem;
-}
+/* Invoices table buttons use standard btn-sm class (line 849) */
 
 /* Invoice Details Modal */
 .invoice-details {

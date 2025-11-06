@@ -2158,6 +2158,7 @@ function showSettingsSectionWithoutHistory(sectionName) {
     } else if (sectionName === 'general') {
       loadGeneralSettings();
       loadUpdateSettings();
+      updateUpdatesPageUI(); // Show install button if update is ready
     } else if (sectionName === 'invoices-list') {
       loadInvoicesList();
     }
@@ -2928,7 +2929,20 @@ ipcRenderer.on('download-progress', (event, progressObj) => {
 });
 
 ipcRenderer.on('update-downloaded', (event, info) => {
-  showUpdateNotification('التحديث جاهز', 'تم تنزيل التحديث. سيتم تثبيته عند إعادة تشغيل التطبيق.', false);
+  // Save update ready state
+  updateInfo = info;
+  updateInfo.downloaded = true;
+
+  // Show notification with install button
+  showUpdateNotification(
+    'التحديث جاهز للتثبيت',
+    `تم تنزيل الإصدار ${info.version} بنجاح. يمكنك تثبيته الآن.`,
+    false,
+    true // show install button
+  );
+
+  // Update the updates page if currently viewing it
+  updateUpdatesPageUI();
 });
 
 ipcRenderer.on('update-error', (event, errorInfo) => {
@@ -2971,15 +2985,23 @@ ipcRenderer.on('update-error', (event, errorInfo) => {
   }
 });
 
-function showUpdateNotification(title, message, showDownloadButton) {
+function showUpdateNotification(title, message, showDownloadButton, showInstallButton = false) {
   const notification = document.createElement('div');
   notification.className = 'update-notification';
+
+  let buttonsHTML = '';
+  if (showDownloadButton) {
+    buttonsHTML = '<button class="btn btn-primary" onclick="downloadUpdate()">تنزيل الآن</button>';
+  } else if (showInstallButton) {
+    buttonsHTML = '<button class="btn btn-primary" onclick="installUpdate()">إعادة التشغيل والتثبيت</button>';
+  }
+
   notification.innerHTML = `
     <div class="update-notification-content">
       <h3>${title}</h3>
       <p>${message}</p>
       <div class="update-actions">
-        ${showDownloadButton ? '<button class="btn btn-primary" onclick="downloadUpdate()">تنزيل الآن</button>' : '<button class="btn btn-primary" onclick="installUpdate()">إعادة التشغيل والتثبيت</button>'}
+        ${buttonsHTML}
         <button class="btn btn-secondary" onclick="closeUpdateNotification()">لاحقاً</button>
       </div>
     </div>
@@ -3039,6 +3061,28 @@ function downloadUpdate() {
 
 function installUpdate() {
   ipcRenderer.send('install-update');
+}
+
+function updateUpdatesPageUI() {
+  // Update the updates page UI to show install button if update is downloaded
+  const installBtn = document.getElementById('install-update-btn');
+  const updateStatus = document.getElementById('update-status');
+
+  if (updateInfo && updateInfo.downloaded) {
+    // Show install button
+    if (installBtn) {
+      installBtn.style.display = 'inline-flex';
+    }
+
+    // Update status text
+    if (updateStatus) {
+      updateStatus.textContent = `تحديث جاهز: الإصدار ${updateInfo.version}`;
+      updateStatus.style.color = '#28a745'; // Green color
+      updateStatus.style.fontWeight = 'bold';
+    }
+  } else if (installBtn) {
+    installBtn.style.display = 'none';
+  }
 }
 
 function closeUpdateNotification() {
