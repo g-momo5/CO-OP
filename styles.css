@@ -110,7 +110,7 @@ body {
 }
 
 .connection-online {
-  color: #d4f4dd;
+  color: #4caf50;
 }
 
 .connection-offline {
@@ -280,7 +280,7 @@ body {
 /* Bottom Navigation */
 .bottom-navigation {
   background: #f8f9fa;
-  padding: 1rem 2rem;
+  padding: 1rem 1rem;
   border-top: 1px solid #e9ecef;
   display: flex;
   gap: 1rem;
