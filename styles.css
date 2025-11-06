@@ -58,8 +58,9 @@ body {
   position: relative;
   display: flex;
   align-items: center;
-  margin-right: auto;
+  margin-left: auto;
   padding: 0 1rem;
+  order: -1;
 }
 
 .connection-tooltip {
@@ -283,8 +284,7 @@ body {
   border-top: 1px solid #e9ecef;
   display: flex;
   gap: 1rem;
-  flex-wrap: wrap;
-  justify-content: center;
+  align-items: center;
   direction: rtl;
   position: fixed;
   bottom: 0;
@@ -292,6 +292,16 @@ body {
   right: 0;
   z-index: 1000;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.bottom-navigation::before {
+  content: '';
+  flex: 1;
+}
+
+.bottom-navigation::after {
+  content: '';
+  flex: 1;
 }
 
 .nav-btn {
