@@ -3076,15 +3076,15 @@ function installUpdate() {
 }
 
 function updateUpdatesPageUI() {
-  // Update the updates page UI to show install button if update is downloaded
+  // Update the updates page UI to show download/install buttons based on update state
+  const downloadBtn = document.getElementById('download-update-btn');
   const installBtn = document.getElementById('install-update-btn');
   const updateStatus = document.getElementById('update-status');
 
   if (updateInfo && updateInfo.downloaded) {
-    // Show install button
-    if (installBtn) {
-      installBtn.style.display = 'inline-flex';
-    }
+    // Update is downloaded and ready to install
+    if (downloadBtn) downloadBtn.style.display = 'none';
+    if (installBtn) installBtn.style.display = 'inline-flex';
 
     // Update status text
     if (updateStatus) {
@@ -3092,14 +3092,30 @@ function updateUpdatesPageUI() {
       updateStatus.style.color = '#28a745'; // Green color
       updateStatus.style.fontWeight = 'bold';
     }
-  } else if (installBtn) {
-    installBtn.style.display = 'none';
+  } else if (updateInfo && !updateInfo.downloaded) {
+    // Update is available but not downloaded yet
+    if (downloadBtn) downloadBtn.style.display = 'inline-flex';
+    if (installBtn) installBtn.style.display = 'none';
+
+    // Update status text
+    if (updateStatus) {
+      updateStatus.textContent = `تحديث متاح: الإصدار ${updateInfo.version}`;
+      updateStatus.style.color = '#17a2b8'; // Blue color
+      updateStatus.style.fontWeight = 'bold';
+    }
+  } else {
+    // No update available
+    if (downloadBtn) downloadBtn.style.display = 'none';
+    if (installBtn) installBtn.style.display = 'none';
   }
 }
 
 function closeUpdateNotification() {
   const notification = document.querySelector('.update-notification');
   if (notification) notification.remove();
+
+  // Update the settings page UI to show download button if update was postponed
+  updateUpdatesPageUI();
 }
 
 function updateDownloadProgress(percent) {
