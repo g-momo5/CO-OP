@@ -53,35 +53,47 @@ body {
   margin-bottom: 1rem;
 }
 
-/* Floating Connection Status Bar (Bottom Right) */
-.floating-connection-status {
-  position: fixed;
-  bottom: 20px;
-  left: 20px;
-  z-index: 999;
-  background: rgba(0, 0, 0, 0.85);
-  border-radius: 12px;
-  padding: 0.75rem 1rem;
+/* Connection Status in Navigation Bar */
+.nav-connection-status {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  padding: 0 1rem;
+}
+
+.connection-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 0.5rem;
+  background: rgba(0, 0, 0, 0.95);
+  border-radius: 8px;
+  padding: 0.75rem;
   backdrop-filter: blur(10px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: all 0.3s ease;
-  max-width: 300px;
-}
-
-.floating-connection-status:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
-}
-
-.connection-details {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  min-width: 200px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
   font-size: 0.75rem;
+}
+
+.nav-connection-status:hover .connection-tooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(-5px);
+}
+
+.connection-text-short {
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 .connection-indicator {
