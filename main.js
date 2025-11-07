@@ -632,7 +632,7 @@ function setupIPCHandlers() {
           item.total,
           item.profit || 0,
           invoice_total || 0
-        ]);
+        ], 'fuel_invoices');
       }
 
       return true;
@@ -650,7 +650,7 @@ function setupIPCHandlers() {
       // Save each oil item as a separate record
       for (const item of oil_items) {
         const invoiceQuery = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)';
-        await executeInsert(invoiceQuery, [date, invoice_number, item.oil_type, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0]);
+        await executeInsert(invoiceQuery, [date, invoice_number, item.oil_type, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0], 'oil_invoices');
       }
 
       return true;
