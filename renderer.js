@@ -634,7 +634,7 @@ function resetFuelInvoiceForm() {
 
 async function updateFuelPrice(fuelType) {
   const inputId = `price-${fuelType.replace(/\s+/g, '-').toLowerCase()}`;
-  const price = parseFloat(document.getElementById(inputId).value);
+  const price = parseFloat(document.getElementById(inputId).value.replace(',', '.'));
 
   if (isNaN(price) || price <= 0) {
     showMessage('يرجى إدخال سعر صحيح', 'error');
@@ -652,7 +652,7 @@ async function updateFuelPrice(fuelType) {
 
 async function updatePurchasePrice(fuelType) {
   const inputId = `purchase-price-${fuelType.replace(/\s+/g, '-').toLowerCase()}`;
-  const price = parseFloat(document.getElementById(inputId).value);
+  const price = parseFloat(document.getElementById(inputId).value.replace(',', '.'));
 
   if (isNaN(price) || price <= 0) {
     showMessage('يرجى إدخال سعر صحيح', 'error');
@@ -1355,7 +1355,7 @@ function calculateCashDeposit() {
     }
   });
 
-  const actualTotal = parseFloat(actualTotalInput.value) || 0;
+  const actualTotal = parseFloat(actualTotalInput.value.replace(',', '.')) || 0;
   const cashDeposit = actualTotal - fuelSubtotal;
 
   console.log('===================');
@@ -1384,9 +1384,9 @@ function calculateOilItem() {
   
   if (!quantityInput || !purchasePriceInput || !ivaInput || !totalPurchaseInput) return;
   
-  const quantity = parseFloat(quantityInput.value) || 0;
-  const purchasePrice = parseFloat(purchasePriceInput.value) || 0;
-  const iva = parseFloat(ivaInput.value) || 0;
+  const quantity = parseFloat(quantityInput.value.replace(',', '.')) || 0;
+  const purchasePrice = parseFloat(purchasePriceInput.value.replace(',', '.')) || 0;
+  const iva = parseFloat(ivaInput.value.replace(',', '.')) || 0;
   
   const subtotal = quantity * purchasePrice;
   // Se l'IVA è inserita come percentuale (es. 14 per 14%), dividiamo per 100
@@ -1416,8 +1416,8 @@ function calculateOilInvoiceSummary() {
   const discountInput = document.getElementById('immediate-discount');
   const taxInput = document.getElementById('martyrs-tax');
 
-  const discount = discountInput ? (parseFloat(discountInput.value) || 0) : 0;
-  const tax = taxInput ? (parseFloat(taxInput.value) || 0) : 0;
+  const discount = discountInput ? (parseFloat(discountInput.value.replace(',', '.')) || 0) : 0;
+  const tax = taxInput ? (parseFloat(taxInput.value.replace(',', '.')) || 0) : 0;
 
   // Calculate final total: subtotal - discount + tax
   const finalTotal = subtotal - discount + tax;
@@ -2026,8 +2026,8 @@ async function addNewProduct() {
 
   const name = nameInput.value.trim();
   const type = typeInput.value;
-  const price = parseFloat(priceInput.value);
-  const vat = type === 'oil' ? (parseFloat(vatInput.value) || 0) : 0;
+  const price = parseFloat(priceInput.value.replace(',', '.'));
+  const vat = type === 'oil' ? (parseFloat(vatInput.value.replace(',', '.')) || 0) : 0;
 
   // Validation
   if (!name) {
@@ -2561,7 +2561,7 @@ async function loadPriceHistory() {
 
 async function updateOilPrice(oilType) {
   const inputId = `oil-price-${oilType.replace(/\s+/g, '-').replace(/\//g, '-')}`;
-  const price = parseFloat(document.getElementById(inputId).value);
+  const price = parseFloat(document.getElementById(inputId).value.replace(',', '.'));
 
   if (isNaN(price) || price < 0) {
     showMessage('يرجى إدخال سعر صحيح', 'error');
