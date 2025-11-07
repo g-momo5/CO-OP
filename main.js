@@ -98,7 +98,8 @@ async function createPostgreSQLTables() {
     vat REAL DEFAULT 0,
     effective_date DATE,
     is_active INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
   // Create index on product_type for faster queries

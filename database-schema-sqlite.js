@@ -82,7 +82,8 @@ class DatabaseSchema {
         vat REAL DEFAULT 0,
         effective_date TEXT,
         is_active INTEGER DEFAULT 1,
-        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
   }
@@ -241,14 +242,26 @@ class DatabaseSchema {
 
     try {
       // Check if product_id column exists in price_history
-      const tableInfo = db.prepare("PRAGMA table_info(price_history)").all();
-      const hasProductId = tableInfo.some(col => col.name === 'product_id');
+      const priceHistoryTableInfo = db.prepare("PRAGMA table_info(price_history)").all();
+      const hasProductId = priceHistoryTableInfo.some(col => col.name === 'product_id');
 
       if (!hasProductId) {
         console.log('Adding product_id column to price_history table...');
         db.exec('ALTER TABLE price_history ADD COLUMN product_id INTEGER');
         console.log('Migration completed: product_id column added');
-      } else {
+      }
+
+      // Check if updated_at column exists in products
+      const productsTableInfo = db.prepare("PRAGMA table_info(products)").all();
+      const hasUpdatedAt = productsTableInfo.some(col => col.name === 'updated_at');
+
+      if (!hasUpdatedAt) {
+        console.log('Adding updated_at column to products table...');
+        db.exec("ALTER TABLE products ADD COLUMN updated_at INTEGER DEFAULT (strftime('%s', 'now'))");
+        console.log('Migration completed: updated_at column added to products');
+      }
+
+      if (hasProductId && hasUpdatedAt) {
         console.log('Schema is up to date');
       }
     } catch (error) {
