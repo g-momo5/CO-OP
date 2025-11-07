@@ -78,7 +78,7 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_type TEXT NOT NULL,
         product_name TEXT NOT NULL UNIQUE,
-        current_price REAL NOT NULL DEFAULT 0,
+        current_price REAL NOT NULL,
         vat REAL DEFAULT 0,
         effective_date TEXT,
         is_active INTEGER DEFAULT 1,
@@ -95,6 +95,7 @@ class DatabaseSchema {
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
         start_date TEXT NOT NULL,
+        product_id INTEGER,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
@@ -137,12 +138,12 @@ class DatabaseSchema {
         invoice_number TEXT NOT NULL,
         fuel_type TEXT NOT NULL,
         quantity REAL NOT NULL,
-        net_quantity REAL,
+        net_quantity REAL NOT NULL,
         purchase_price REAL NOT NULL,
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
-        profit REAL,
-        invoice_total REAL,
+        profit REAL NOT NULL,
+        invoice_total REAL DEFAULT 0,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
@@ -159,8 +160,8 @@ class DatabaseSchema {
         purchase_price REAL NOT NULL,
         iva REAL NOT NULL,
         total_purchase REAL NOT NULL,
-        immediate_discount REAL,
-        martyrs_tax REAL,
+        immediate_discount REAL DEFAULT 0,
+        martyrs_tax REAL DEFAULT 0,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
@@ -229,6 +230,31 @@ class DatabaseSchema {
     // Sync queue indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name)');
+  }
+
+  /**
+   * Migrate existing database to match PostgreSQL schema
+   * @param {Database} db - SQLite database instance
+   */
+  static migrateExistingDatabase(db) {
+    console.log('Checking for schema migrations...');
+
+    try {
+      // Check if product_id column exists in price_history
+      const tableInfo = db.prepare("PRAGMA table_info(price_history)").all();
+      const hasProductId = tableInfo.some(col => col.name === 'product_id');
+
+      if (!hasProductId) {
+        console.log('Adding product_id column to price_history table...');
+        db.exec('ALTER TABLE price_history ADD COLUMN product_id INTEGER');
+        console.log('Migration completed: product_id column added');
+      } else {
+        console.log('Schema is up to date');
+      }
+    } catch (error) {
+      console.error('Migration error:', error);
+      // Don't throw - allow app to continue if migration fails
+    }
   }
 }
 

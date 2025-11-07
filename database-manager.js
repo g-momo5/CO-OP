@@ -74,6 +74,9 @@ class DatabaseManager {
       // Initialize schema
       DatabaseSchema.initialize(this.sqlite);
 
+      // Run migrations to align with PostgreSQL schema
+      DatabaseSchema.migrateExistingDatabase(this.sqlite);
+
       console.log('SQLite initialized at:', this.sqlitePath);
     } catch (error) {
       console.error('Failed to initialize SQLite:', error);

@@ -1073,11 +1073,16 @@ ipcMain.on('install-update', () => {
 ipcMain.on('check-for-updates-manual', () => {
   if (autoUpdater) {
     autoUpdater.checkForUpdates().then(result => {
-      if (mainWindow) {
+      if (mainWindow && result && result.updateInfo) {
         mainWindow.webContents.send('update-check-result', {
           available: result.updateInfo.version !== app.getVersion(),
           version: result.updateInfo.version,
           releaseNotes: result.updateInfo.releaseNotes
+        });
+      } else if (mainWindow) {
+        mainWindow.webContents.send('update-check-result', {
+          available: false,
+          error: 'No update info available'
         });
       }
     }).catch(err => {
