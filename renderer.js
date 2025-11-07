@@ -1295,8 +1295,9 @@ function calculateFuelItem() {
 
   if (!quantityInput || !purchasePriceInput || !totalInput) return;
 
-  const quantity = parseFloat(quantityInput.value) || 0;
-  const purchasePrice = parseFloat(purchasePriceInput.value) || 0;
+  // Replace comma with dot for decimal parsing
+  const quantity = parseFloat(quantityInput.value.replace(',', '.')) || 0;
+  const purchasePrice = parseFloat(purchasePriceInput.value.replace(',', '.')) || 0;
 
   // Calculate net quantity for gasoline (0.995 factor for evaporation)
   let netQuantity = quantity;
