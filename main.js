@@ -854,8 +854,18 @@ app.whenReady().then(async () => {
   try {
     const { autoUpdater: au } = require('electron-updater');
     autoUpdater = au;
+
+    // Configurazione auto-updater
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+
+    // Fix per Windows: forza il download differenziale se disponibile
+    autoUpdater.allowDowngrade = false;
+    autoUpdater.allowPrerelease = false;
+
+    // Logger per debugging
+    autoUpdater.logger = require('electron-log');
+    autoUpdater.logger.transports.file.level = 'info';
 
     // Auto-updater event handlers (registered only if autoUpdater is available)
     autoUpdater.on('checking-for-update', () => {
@@ -875,17 +885,46 @@ app.whenReady().then(async () => {
 
     autoUpdater.on('error', (err) => {
       console.error('Error in auto-updater:', err);
+      if (mainWindow) {
+        // Invia errore al renderer per mostrare all'utente
+        mainWindow.webContents.send('update-error', { message: err.message });
+      }
     });
 
+    // Evento download-progress con fallback manuale per Windows
+    let lastProgress = 0;
     autoUpdater.on('download-progress', (progressObj) => {
-      console.log(`Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`);
+      const percent = Math.round(progressObj.percent) || 0;
+
+      // Log dettagliato
+      console.log(`Download progress: ${percent}% (${progressObj.transferred}/${progressObj.total} bytes)`);
+      console.log(`Speed: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s`);
+
       if (mainWindow) {
-        mainWindow.webContents.send('download-progress', progressObj);
+        mainWindow.webContents.send('download-progress', {
+          percent: percent,
+          transferred: progressObj.transferred,
+          total: progressObj.total,
+          bytesPerSecond: progressObj.bytesPerSecond
+        });
       }
+
+      lastProgress = percent;
     });
 
     autoUpdater.on('update-downloaded', (info) => {
       console.log('Update downloaded');
+
+      // Forza invio 100% se non è stato ricevuto
+      if (lastProgress < 100 && mainWindow) {
+        mainWindow.webContents.send('download-progress', {
+          percent: 100,
+          transferred: info.files?.[0]?.size || 0,
+          total: info.files?.[0]?.size || 0,
+          bytesPerSecond: 0
+        });
+      }
+
       if (mainWindow) {
         mainWindow.webContents.send('update-downloaded', info);
       }
