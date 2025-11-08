@@ -523,23 +523,19 @@ async function loadPurchasePrices() {
 
 
 async function saveFuelInvoice() {
-  const actualTotalInput = document.getElementById('actual-invoice-total');
-  const invoiceTotal = parseFloat(actualTotalInput?.value) || 0;
-
   const invoiceData = {
     date: document.getElementById('fuel-invoice-date').value,
     invoice_number: document.getElementById('fuel-invoice-number').value,
-    invoice_total: invoiceTotal,
     fuel_items: []
   };
 
   // Collect fuel items data
   document.querySelectorAll('.fuel-item').forEach(item => {
     const fuelType = item.dataset.fuel;
-    const quantity = parseFloat(item.querySelector('.fuel-quantity').value) || 0;
-    const purchasePrice = parseFloat(item.querySelector('.fuel-purchase-price').value) || 0;
-    const salePrice = parseFloat(item.querySelector('.fuel-sale-price')?.value) || 0;
-    const total = parseFloat(item.querySelector('.fuel-total').value.replace(/[^\d.-]/g, '')) || 0;
+    const quantity = parseFloat(item.querySelector('.fuel-quantity').value.replace(',', '.')) || 0;
+    const purchasePrice = parseFloat(item.querySelector('.fuel-purchase-price').value.replace(',', '.')) || 0;
+    const totalValue = item.querySelector('.fuel-total').value;
+    const total = parseFloat(convertFromArabicNumerals(totalValue).replace(',', '.')) || 0;
 
     if (quantity > 0) {
       // Calculate net quantity for gasoline
@@ -548,16 +544,12 @@ async function saveFuelInvoice() {
         netQuantity = quantity * 0.995;
       }
 
-      const profit = (salePrice - purchasePrice) * netQuantity;
-
       invoiceData.fuel_items.push({
         fuel_type: fuelType,
         quantity: quantity,
         net_quantity: netQuantity,
         purchase_price: purchasePrice,
-        sale_price: salePrice,
-        total: total,
-        profit: profit
+        total: total
       });
     }
   });
@@ -1176,8 +1168,25 @@ function convertToArabicNumerals(number) {
     '8': '٨',
     '9': '٩'
   };
-  
+
   return String(number).replace(/[0-9]/g, digit => westernToArabic[digit]);
+}
+
+function convertFromArabicNumerals(str) {
+  const arabicToWestern = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9'
+  };
+
+  return String(str).replace(/[٠-٩]/g, digit => arabicToWestern[digit]);
 }
 
 // Convert Arabic numerals back to Western numerals
@@ -1658,6 +1667,13 @@ function toggleInvoiceField() {
   }
 }
 
+function resetMovementForm() {
+  document.getElementById('movement-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('movement-type').value = 'in';
+  document.getElementById('movement-quantity').value = '';
+  document.getElementById('movement-invoice').value = '';
+}
+
 function closeMovementModal() {
   document.getElementById('movement-modal').classList.remove('show');
 }
@@ -1697,6 +1713,7 @@ async function saveMovement() {
     });
     
     showMessage('تم حفظ الحركة بنجاح', 'success');
+    resetMovementForm();
     closeMovementModal();
     loadOilMovements(oilType); // Reload the movements for the current oil type
   } catch (error) {
@@ -1926,6 +1943,21 @@ function initializePriceDate() {
   if (dateInput && !dateInput.value) dateInput.value = today;
 }
 
+// Reset all price inputs
+function resetPriceInputs() {
+  // Reset fuel price inputs
+  const fuelPriceIds = ['price-80', 'price-92', 'price-95', 'price-diesel'];
+  fuelPriceIds.forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+
+  // Reset oil price inputs
+  document.querySelectorAll('.table-price-input').forEach(input => {
+    input.value = '';
+  });
+}
+
 // Save all prices at once
 async function saveAllPrices() {
   const startDate = document.getElementById('price-start-date').value;
@@ -1985,6 +2017,9 @@ async function saveAllPrices() {
 
     await ipcRenderer.invoke('save-all-prices', prices);
     showMessage('تم حفظ الأسعار بنجاح', 'success');
+
+    // Reset all price inputs
+    resetPriceInputs();
 
     // Reload prices to show current values
     loadFuelPrices();
@@ -2220,7 +2255,6 @@ async function loadManageProducts() {
       });
 
       Object.values(uniqueFuels).forEach((product, index) => {
-        const updatedDate = formatUpdateDate(product.effective_date);
         const row = document.createElement('tr');
 
         const td1 = document.createElement('td');
@@ -2232,7 +2266,7 @@ async function loadManageProducts() {
 
         const td3 = document.createElement('td');
         td3.style.textAlign = 'center';
-        td3.textContent = formatArabicCurrency(product.price) + updatedDate;
+        td3.textContent = formatArabicCurrency(product.price);
 
         const td4 = document.createElement('td');
         td4.style.textAlign = 'center';
@@ -2290,7 +2324,6 @@ async function loadManageProducts() {
 
       Object.values(uniqueOils).forEach((product, index) => {
         const vat = product.vat || 0;
-        const updatedDate = formatUpdateDate(product.effective_date);
         const isActive = product.is_active !== 0; // Default to true if undefined
         const row = document.createElement('tr');
 
@@ -2314,7 +2347,7 @@ async function loadManageProducts() {
 
         const td3 = document.createElement('td');
         td3.style.textAlign = 'center';
-        td3.textContent = formatArabicCurrency(product.price) + updatedDate;
+        td3.textContent = formatArabicCurrency(product.price);
 
         const td4 = document.createElement('td');
         td4.style.textAlign = 'center';
@@ -2400,6 +2433,7 @@ function closeEditProductModal() {
   if (modal) {
     modal.classList.remove('show');
     currentEditContext = null;
+    document.getElementById('edit-product-new-name').value = '';
   }
 }
 
@@ -2707,11 +2741,15 @@ async function loadInvoicesList() {
           type: 'fuel',
           date: inv.date,
           invoice_number: inv.invoice_number,
-          total: inv.invoice_total || 0,
           items: []
         };
       }
       fuelInvoicesMap[inv.invoice_number].items.push(inv);
+    });
+
+    // Calculate totals for fuel invoices (sum of all items)
+    Object.values(fuelInvoicesMap).forEach(invoice => {
+      invoice.total = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
     });
 
     // Process oil invoices - group by invoice number and calculate total
@@ -2834,9 +2872,7 @@ async function showInvoiceDetails(type, invoiceNumber) {
             <th>الكمية</th>
             <th>الكمية الصافية</th>
             <th>سعر الشراء</th>
-            <th>سعر البيع</th>
             <th>الإجمالي</th>
-            <th>الربح</th>
     `;
   } else {
     html += `
@@ -2862,9 +2898,7 @@ async function showInvoiceDetails(type, invoiceNumber) {
         <td>${formatArabicNumber(item.quantity)}</td>
         <td>${formatArabicNumber(item.net_quantity || 0)}</td>
         <td>${formatArabicNumber(item.purchase_price)} جنيه</td>
-        <td>${formatArabicNumber(item.sale_price)} جنيه</td>
         <td>${formatArabicNumber(item.total)} جنيه</td>
-        <td>${formatArabicNumber(item.profit || 0)} جنيه</td>
       `;
     } else {
       html += `
@@ -2897,10 +2931,16 @@ async function showInvoiceDetails(type, invoiceNumber) {
       </div>
     `;
   } else {
+    // Fuel invoice summary
+    const itemsSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
+    const invoiceTotal = invoice.total || 0;
+    const cashDeposit = invoiceTotal - itemsSubtotal;
+
     html += `
       <div class="invoice-summary-details">
+        <p><strong>تأمين نقدى:</strong> ${formatArabicNumber(cashDeposit)} جنيه</p>
         <p style="font-size: 1.2rem; font-weight: bold; margin-top: 1rem; border-top: 2px solid #c4291d; padding-top: 0.5rem;">
-          <strong>الإجمالي:</strong> ${formatArabicNumber(invoice.total)} جنيه
+          <strong>الإجمالي:</strong> ${formatArabicNumber(invoiceTotal)} جنيه
         </p>
       </div>
     `;
@@ -3913,6 +3953,10 @@ function closeAddCustomerModal() {
   const modal = document.getElementById('add-customer-modal');
   if (modal) {
     modal.style.display = 'none';
+    const input = document.getElementById('customer-name-input');
+    if (input) {
+      input.value = '';
+    }
   }
 }
 

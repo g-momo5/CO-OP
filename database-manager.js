@@ -8,6 +8,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const DatabaseSchema = require('./database-schema-sqlite');
+const SchemaMigrator = require('./database-migration');
 
 class DatabaseManager {
   constructor(app) {
@@ -40,6 +41,26 @@ class DatabaseManager {
       await Promise.race([connectionPromise, timeoutPromise]);
       this.isOnline = true;
       console.log('DatabaseManager initialized in ONLINE mode');
+
+      // Create PostgreSQL tables if they don't exist
+      await this.createPostgreSQLTables();
+
+      // Auto-migrate SQLite schema based on PostgreSQL schema (BEFORE initial sync)
+      console.log('🔄 Inizio sincronizzazione schema SQLite con PostgreSQL...');
+      const migrator = new SchemaMigrator(
+        this.pgPool,
+        this.sqlite,
+        this.app.getPath('userData')
+      );
+
+      const migrationResult = await migrator.migrateSchema();
+
+      if (migrationResult.success) {
+        console.log(`✅ Schema sincronizzato con successo (${migrationResult.changes} modifiche)`);
+      } else {
+        console.error('⚠️  Errore durante sincronizzazione schema:', migrationResult.error);
+        console.log('ℹ️  L\'applicazione continuerà con lo schema locale esistente');
+      }
 
       // Initial sync: download all data from PostgreSQL to SQLite
       await this.initialSync();
@@ -112,6 +133,136 @@ class DatabaseManager {
     const client = await this.pgPool.connect();
     console.log('Connected to PostgreSQL/Supabase');
     client.release();
+  }
+
+  /**
+   * Create PostgreSQL tables if they don't exist
+   */
+  async createPostgreSQLTables() {
+    // Sales table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS sales (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      fuel_type TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      price_per_liter REAL NOT NULL,
+      total_amount REAL NOT NULL,
+      payment_method TEXT NOT NULL,
+      customer_name TEXT,
+      notes TEXT
+    )`);
+
+    // Purchase prices table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
+      id SERIAL PRIMARY KEY,
+      fuel_type TEXT NOT NULL UNIQUE,
+      price REAL NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Insert default purchase prices
+    await this.pgPool.query(`INSERT INTO purchase_prices (fuel_type, price) VALUES
+      ('بنزين ٨٠', 8.00),
+      ('بنزين ٩٢', 10.00),
+      ('بنزين ٩٥', 11.00),
+      ('سولار', 7.00)
+    ON CONFLICT (fuel_type) DO NOTHING`);
+
+    // Products table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      product_type TEXT NOT NULL,
+      product_name TEXT NOT NULL UNIQUE,
+      current_price REAL NOT NULL,
+      vat REAL DEFAULT 0,
+      effective_date DATE,
+      is_active INTEGER DEFAULT 1
+    )`);
+
+    // Create index on product_type
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
+    } catch (err) {
+      console.log('Index creation: ', err.message);
+    }
+
+    // Price history table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS price_history (
+      id SERIAL PRIMARY KEY,
+      product_type TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      price REAL NOT NULL,
+      start_date DATE NOT NULL
+    )`);
+
+    // Oil movements table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_movements (
+      id SERIAL PRIMARY KEY,
+      oil_type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      invoice_number TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Fuel movements table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
+      id SERIAL PRIMARY KEY,
+      fuel_type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      invoice_number TEXT,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Fuel invoices table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_invoices (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      fuel_type TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      net_quantity REAL NOT NULL,
+      purchase_price REAL NOT NULL,
+      total REAL NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Oil invoices table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      oil_type TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      purchase_price REAL NOT NULL,
+      iva REAL NOT NULL,
+      total_purchase REAL NOT NULL,
+      immediate_discount REAL DEFAULT 0,
+      martyrs_tax REAL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Customers table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Shifts table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS shifts (
+      id SERIAL PRIMARY KEY,
+      date DATE NOT NULL,
+      shift_number INTEGER NOT NULL,
+      data JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(date, shift_number)
+    )`);
   }
 
   /**

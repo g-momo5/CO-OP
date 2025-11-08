@@ -81,9 +81,7 @@ class DatabaseSchema {
         current_price REAL NOT NULL,
         vat REAL DEFAULT 0,
         effective_date TEXT,
-        is_active INTEGER DEFAULT 1,
-        created_at INTEGER DEFAULT (strftime('%s', 'now')),
-        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        is_active INTEGER DEFAULT 1
       )
     `);
   }
@@ -96,8 +94,7 @@ class DatabaseSchema {
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
         start_date TEXT NOT NULL,
-        product_id INTEGER,
-        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+        product_id INTEGER
       )
     `);
   }
@@ -141,10 +138,7 @@ class DatabaseSchema {
         quantity REAL NOT NULL,
         net_quantity REAL NOT NULL,
         purchase_price REAL NOT NULL,
-        sale_price REAL NOT NULL,
         total REAL NOT NULL,
-        profit REAL NOT NULL,
-        invoice_total REAL DEFAULT 0,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
@@ -251,19 +245,44 @@ class DatabaseSchema {
         console.log('Migration completed: product_id column added');
       }
 
-      // Check if updated_at column exists in products
-      const productsTableInfo = db.prepare("PRAGMA table_info(products)").all();
-      const hasUpdatedAt = productsTableInfo.some(col => col.name === 'updated_at');
+      // Check if fuel_invoices has columns to remove (sale_price, profit, invoice_total)
+      const fuelInvoicesTableInfo = db.prepare("PRAGMA table_info(fuel_invoices)").all();
+      const hasSalePrice = fuelInvoicesTableInfo.some(col => col.name === 'sale_price');
 
-      if (!hasUpdatedAt) {
-        console.log('Adding updated_at column to products table...');
-        db.exec("ALTER TABLE products ADD COLUMN updated_at INTEGER DEFAULT (strftime('%s', 'now'))");
-        console.log('Migration completed: updated_at column added to products');
+      if (hasSalePrice) {
+        console.log('Removing obsolete columns from fuel_invoices table...');
+
+        // SQLite doesn't support DROP COLUMN, so we need to recreate the table
+        db.exec(`
+          -- Create new table with correct schema
+          CREATE TABLE fuel_invoices_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            invoice_number TEXT NOT NULL,
+            fuel_type TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            net_quantity REAL NOT NULL,
+            purchase_price REAL NOT NULL,
+            total REAL NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now'))
+          );
+
+          -- Copy data from old table
+          INSERT INTO fuel_invoices_new (id, date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, created_at)
+          SELECT id, date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, created_at
+          FROM fuel_invoices;
+
+          -- Drop old table
+          DROP TABLE fuel_invoices;
+
+          -- Rename new table
+          ALTER TABLE fuel_invoices_new RENAME TO fuel_invoices;
+        `);
+
+        console.log('Migration completed: removed sale_price, profit, invoice_total from fuel_invoices');
       }
 
-      if (hasProductId && hasUpdatedAt) {
-        console.log('Schema is up to date');
-      }
+      console.log('Schema is up to date');
     } catch (error) {
       console.error('Migration error:', error);
       // Don't throw - allow app to continue if migration fails

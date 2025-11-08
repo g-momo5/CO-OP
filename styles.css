@@ -24,7 +24,7 @@ body {
 .header {
   background: linear-gradient(to bottom, #c4291d 0%, #a8241a 100%);
   color: white;
-  padding: 2rem;
+  padding: 1rem 2rem 2rem 2rem;
   padding-bottom: 0; /* Remove bottom padding - breadcrumb will add its own */
   text-align: center;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
@@ -50,7 +50,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 /* Connection Status in Navigation Bar */
@@ -111,10 +111,11 @@ body {
 
 .connection-online {
   color: #4caf50;
+  animation: pulse 2s infinite;
 }
 
 .connection-offline {
-  color: #ffcccc;
+  color: #dc4747;
   animation: pulse 2s infinite;
 }
 
@@ -280,7 +281,7 @@ body {
 /* Bottom Navigation */
 .bottom-navigation {
   background: #f8f9fa;
-  padding: 1rem 1rem;
+  padding: 0.3rem 1rem;
   border-top: 1px solid #e9ecef;
   display: flex;
   gap: 1rem;
@@ -308,13 +309,13 @@ body {
   background: white;
   border: 2px solid #c4291d;
   color: #c4291d;
-  padding: 0.75rem 1.5rem;
+  padding: 0.35rem 0.5rem;
   border-radius: 25px;
   cursor: pointer;
   font-family: 'Noto Naskh Arabic', serif;
   font-weight: 500;
   transition: all 0.3s ease;
-  min-width: 120px;
+  min-width: 100px;
   direction: rtl;
   text-align: center;
 }
@@ -322,13 +323,13 @@ body {
 .nav-btn:hover {
   background: transparent;
   color: #c4291d;
-  transform: translateY(-2px);
+  transform: translateY(-0.15rem);
   box-shadow: 0 4px 12px rgba(196, 41, 29, 0.3);
   border-color: #c4291d;
 }
 
 .nav-btn.active {
-  background: transparent;
+  background: #ffe6e5;
   color: #c4291d;
   box-shadow: 0 4px 12px rgba(196, 41, 29, 0.3);
   border-color: #c4291d;
@@ -337,7 +338,7 @@ body {
 /* Main Content */
 .main-content {
   padding: 2rem;
-  padding-top: 140px; /* Space for fixed header with title */
+  padding-top: 150px; /* Space for fixed header with title */
   padding-bottom: 120px; /* Space for bottom navigation */
   min-height: calc(100vh - 200px);
   direction: rtl;
@@ -345,7 +346,7 @@ body {
 }
 
 .main-content.with-breadcrumb {
-  padding-top: 170px; /* Reduced space when breadcrumb is visible */
+  padding-top: 180px; /* Reduced space when breadcrumb is visible */
 }
 
 .header.scrolled ~ .main-content {

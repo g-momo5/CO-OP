@@ -51,145 +51,9 @@ async function initializeDatabase() {
     console.log('تحذير: التطبيق يعمل في وضع عدم الاتصال');
   }
 
-  // Create PostgreSQL tables if online
-  if (dbManager.isOnline && dbManager.pgPool) {
-    await createPostgreSQLTables();
-  }
+  // PostgreSQL tables creation and schema migration now happen inside DatabaseManager.initialize()
 
   return result;
-}
-
-async function createPostgreSQLTables() {
-  // Sales table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS sales (
-    id SERIAL PRIMARY KEY,
-    date TEXT NOT NULL,
-    fuel_type TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    price_per_liter REAL NOT NULL,
-    total_amount REAL NOT NULL,
-    payment_method TEXT NOT NULL,
-    customer_name TEXT,
-    notes TEXT
-  )`);
-
-  // Purchase prices table (for purchase costs - different from selling prices in products)
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
-    id SERIAL PRIMARY KEY,
-    fuel_type TEXT NOT NULL UNIQUE,
-    price REAL NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Insert default purchase prices if not exists
-  await dbManager.pgPool.query(`INSERT INTO purchase_prices (fuel_type, price) VALUES
-    ('بنزين ٨٠', 8.00),
-    ('بنزين ٩٢', 10.00),
-    ('بنزين ٩٥', 11.00),
-    ('سولار', 7.00)
-  ON CONFLICT (fuel_type) DO NOTHING`);
-
-  // Products table (unified product management)
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS products (
-    id SERIAL PRIMARY KEY,
-    product_type TEXT NOT NULL,
-    product_name TEXT NOT NULL UNIQUE,
-    current_price REAL NOT NULL,
-    vat REAL DEFAULT 0,
-    effective_date DATE,
-    is_active INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Create index on product_type for faster queries
-  try {
-    await dbManager.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
-  } catch (err) {
-    console.log('Index creation: ', err.message);
-  }
-
-  // Price history table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS price_history (
-    id SERIAL PRIMARY KEY,
-    product_type TEXT NOT NULL,
-    product_name TEXT NOT NULL,
-    price REAL NOT NULL,
-    start_date DATE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Oil movements table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_movements (
-    id SERIAL PRIMARY KEY,
-    oil_type TEXT NOT NULL,
-    date TEXT NOT NULL,
-    type TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    invoice_number TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Fuel movements table (for tank inventory tracking)
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
-    id SERIAL PRIMARY KEY,
-    fuel_type TEXT NOT NULL,
-    date TEXT NOT NULL,
-    type TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    invoice_number TEXT,
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Fuel invoices table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_invoices (
-    id SERIAL PRIMARY KEY,
-    date TEXT NOT NULL,
-    invoice_number TEXT NOT NULL,
-    fuel_type TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    net_quantity REAL NOT NULL,
-    purchase_price REAL NOT NULL,
-    sale_price REAL NOT NULL,
-    total REAL NOT NULL,
-    profit REAL NOT NULL,
-    invoice_total REAL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Oil invoices table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
-    id SERIAL PRIMARY KEY,
-    date TEXT NOT NULL,
-    invoice_number TEXT NOT NULL,
-    oil_type TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    purchase_price REAL NOT NULL,
-    iva REAL NOT NULL,
-    total_purchase REAL NOT NULL,
-    immediate_discount REAL DEFAULT 0,
-    martyrs_tax REAL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Customers table
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS customers (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Shifts table (for shift management)
-  await dbManager.pgPool.query(`CREATE TABLE IF NOT EXISTS shifts (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
-    shift_number INTEGER NOT NULL,
-    data JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(date, shift_number)
-  )`);
 }
 
 // Database helper functions - Now delegated to DatabaseManager
@@ -420,8 +284,8 @@ function setupIPCHandlers() {
           continue;
         }
 
-        // Get product_id from products table
-        const productQuery = 'SELECT id FROM products WHERE product_type = $1 AND product_name = $2';
+        // Get product_id and current effective_date from products table
+        const productQuery = 'SELECT id, effective_date FROM products WHERE product_type = $1 AND product_name = $2';
         const productResult = await executeQuery(productQuery, [product_type, product_name]);
 
         if (productResult.length === 0) {
@@ -430,14 +294,21 @@ function setupIPCHandlers() {
         }
 
         const product_id = productResult[0].id;
+        const current_effective_date = productResult[0].effective_date;
 
-        // Save to history with product_id
+        // Save to history with product_id (always save to history)
         const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)';
         await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id]);
 
-        // Update current price in products table
-        const updateQuery = 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3';
-        await executeUpdate(updateQuery, [price, start_date, product_id]);
+        // Update current price in products table ONLY if new date is more recent
+        // If no current date exists, always update
+        if (!current_effective_date || new Date(start_date) >= new Date(current_effective_date)) {
+          const updateQuery = 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3';
+          await executeUpdate(updateQuery, [price, start_date, product_id]);
+          console.log(`Updated current price for ${product_name}: ${price} (effective: ${start_date})`);
+        } else {
+          console.log(`Skipped updating current price for ${product_name}: new date ${start_date} is older than current ${current_effective_date}`);
+        }
       }
       return { success: true };
     } catch (error) {
@@ -620,7 +491,7 @@ function setupIPCHandlers() {
 
       // Save each fuel item as a separate record
       for (const item of fuel_items) {
-        const invoiceQuery = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit, invoice_total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)';
+        const invoiceQuery = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total) VALUES ($1, $2, $3, $4, $5, $6, $7)';
         await executeInsert(invoiceQuery, [
           date,
           invoice_number,
@@ -628,10 +499,7 @@ function setupIPCHandlers() {
           item.quantity,
           item.net_quantity,
           item.purchase_price,
-          item.sale_price || 0,
-          item.total,
-          item.profit || 0,
-          invoice_total || 0
+          item.total
         ], 'fuel_invoices');
       }
 
@@ -785,7 +653,7 @@ function setupIPCHandlers() {
       // Import fuel invoices
       if (backupData.fuelInvoices) {
         for (const invoice of backupData.fuelInvoices) {
-          const query = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, sale_price, total, profit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING';
+          const query = 'INSERT INTO fuel_invoices (date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING';
           await executeInsert(query, [
             invoice.date,
             invoice.invoice_number,
@@ -793,9 +661,7 @@ function setupIPCHandlers() {
             invoice.quantity,
             invoice.net_quantity,
             invoice.purchase_price,
-            invoice.sale_price,
-            invoice.total,
-            invoice.profit
+            invoice.total
           ]);
         }
       }
