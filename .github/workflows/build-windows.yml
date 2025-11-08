@@ -1,10 +1,10 @@
-name: Build Windows Release
+name: Build Windows
 
 on:
+  workflow_dispatch:  # Permette esecuzione manuale da GitHub UI
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v*'  # Si attiva automaticamente quando crei un tag tipo v1.0.10
 
 jobs:
   build-windows:
@@ -12,39 +12,38 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Install Windows Build Tools
-        run: |
-          choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --passive"
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build Windows
+      - name: Build Windows app
         run: npm run build:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installers
+          name: windows-build-${{ github.run_number }}
           path: |
             dist/*.exe
-            dist/*.blockmap
+            dist/latest.yml
+          retention-days: 30
 
-      - name: Create Release
+      - name: Create Release (if tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/CO-OP Setup *.exe
             dist/CO-OP *.exe
+            dist/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
