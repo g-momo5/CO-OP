@@ -47,7 +47,13 @@
           <!-- Left Column: Chart -->
           <div class="home-chart-column">
             <div class="home-chart-container">
-              <h2>كميات المشتريات الشهرية حسب نوع الوقود</h2>
+              <div class="home-chart-header">
+                <h2 id="home-chart-title">كميات المشتريات الشهرية حسب نوع الوقود</h2>
+                <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
+                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="purchases">المشتراة</button>
+                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="sales">المباعة</button>
+                </div>
+              </div>
               <div class="chart-wrapper">
                 <canvas id="monthly-fuel-sales-chart"></canvas>
               </div>
@@ -78,20 +84,137 @@
                 <p>تسجيل مبيعات الوردية</p>
               </div>
 
-              <!-- Card 4 - Placeholder -->
-              <div class="action-card">
-                <div class="card-icon">⚙️</div>
-                <h3>Card 4</h3>
-                <p>وصف الوظيفة</p>
+              <!-- Card 4 - Shift History -->
+              <div class="action-card" onclick="showShiftHistory()">
+                <div class="card-icon">📋</div>
+                <h3>سجل الورديات</h3>
+                <p>عرض سجل الورديات المسجلة</p>
+              </div>
+
+              <!-- Card 5 - Sales Summary -->
+              <div class="action-card" onclick="showScreen('sales-summary', 'home')">
+                <div class="card-icon">📊</div>
+                <h3>ملخص المبيعات</h3>
+                <p>مبيعات المنتجات حسب الأشهر</p>
+              </div>
+
+              <!-- Card 6 - Annual Inventory -->
+              <div class="action-card" onclick="showScreen('annual-inventory', 'home')">
+                <div class="card-icon">📒</div>
+                <h3>جرد سنوي</h3>
+                <p>حساب العجز أو الزيادة في نهاية العام</p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Annual Inventory Screen -->
+      <div id="annual-inventory-screen" class="screen">
+        <div class="annual-inventory-container">
+          <div class="annual-inventory-header">
+            <h2 id="annual-inventory-title">جرد سنوي</h2>
+            <div class="annual-year-group">
+              <label for="annual-inventory-year">السنة:</label>
+              <select id="annual-inventory-year"></select>
+            </div>
+          </div>
+
+          <div class="annual-inventory-grid">
+            <section class="annual-inventory-card">
+              <h3>الرصيد المفترض</h3>
+
+              <div class="annual-inventory-row">
+                <label for="annual-prev-balance">رصيد العام السابق</label>
+                <input type="text" id="annual-prev-balance" class="annual-inventory-input" data-annual-group="expected" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-station-profit">مكسب المحطة</label>
+                <input type="text" id="annual-station-profit" class="annual-inventory-input" data-annual-group="expected" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div id="annual-expected-custom-items" class="annual-custom-items"></div>
+              <div class="annual-section-actions">
+                <button type="button" class="annual-add-item-btn" data-annual-add-group="expected">+ إضافة بند</button>
+              </div>
+
+              <div class="annual-inventory-total">
+                <span>المفترض وجوده</span>
+                <strong id="annual-expected-total">٠.٠٠</strong>
+              </div>
+            </section>
+
+            <section class="annual-inventory-card">
+              <h3>الرصيد الفعلي</h3>
+
+              <div class="annual-inventory-row">
+                <label for="annual-bank-balance">رصيد البنك</label>
+                <input type="text" id="annual-bank-balance" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-safe-balance">رصيد الخزنة</label>
+                <input type="text" id="annual-safe-balance" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-accounting-remainder">متبقى المحاسبة</label>
+                <input type="text" id="annual-accounting-remainder" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-customers-balance">العملاء</label>
+                <input type="text" id="annual-customers-balance" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-vouchers-balance">البونات</label>
+                <input type="text" id="annual-vouchers-balance" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div class="annual-inventory-row">
+                <label for="annual-visa-balance">رصيد الفيزا</label>
+                <input type="text" id="annual-visa-balance" class="annual-inventory-input" data-annual-group="actual" inputmode="decimal" placeholder="0">
+              </div>
+
+              <div id="annual-actual-custom-items" class="annual-custom-items"></div>
+              <div class="annual-section-actions">
+                <button type="button" class="annual-add-item-btn" data-annual-add-group="actual">+ إضافة بند</button>
+              </div>
+
+              <div class="annual-inventory-total annual-net-worth">
+                <span>إجمالي رأس المال</span>
+                <strong id="annual-net-worth-total">٠.٠٠</strong>
+              </div>
+            </section>
+          </div>
+
+          <section class="annual-result-card">
+            <div class="annual-result-row">
+              <span id="annual-diff-label" class="annual-diff-status balanced">متوازن</span>
+              <strong id="annual-diff-value">٠.٠٠</strong>
+            </div>
+          </section>
+
+          <div class="annual-actions">
+            <button type="button" class="btn btn-primary" id="annual-save-btn">حفظ</button>
+            <button type="button" class="btn btn-danger" id="annual-finalize-btn">حفظ وإقفال</button>
+          </div>
+          <div id="annual-lock-note" class="annual-lock-note" style="display:none;"></div>
+        </div>
+      </div>
+
       <!-- Shift Entry Screen -->
       <div id="shift-entry-screen" class="screen">
-        <h2>إدخال وردية جديدة</h2>
+        <div class="shift-header-row">
+          <h2 id="shift-entry-title">إدخال وردية جديدة</h2>
+          <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
+            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
+            <div class="history-chip" id="history-chip">-</div>
+            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('next')">الوردية التالية</button>
+          </div>
+        </div>
 
         <!-- Shift Info Section -->
         <div class="shift-info-section">
@@ -103,9 +226,22 @@
             <div class="form-group">
               <label for="shift-number">رقم الوردية:</label>
               <select id="shift-number" class="form-control">
-                <option value="1">الوردية الأولى (صباحي)</option>
-                <option value="2">الوردية الثانية (مسائي)</option>
+                <option value="1">الوردية الأولى (الصباح)</option>
+                <option value="2">الوردية الثانية (الليل)</option>
               </select>
+            </div>
+            <div class="form-group">
+              <button class="btn-primary" id="save-shift-btn" onclick="saveShift()">
+                حفظ الوردية
+              </button>
+              <div class="shift-menu-wrapper">
+                <button type="button" class="shift-menu-btn" onclick="toggleShiftMenu(event)">
+                  <span></span><span></span><span></span>
+                </button>
+                <div id="shift-menu" class="shift-menu">
+                  <div class="shift-menu-item" onclick="openResetCountersModal()">إعادة ضبط عدادات أول الوردية</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -179,7 +315,7 @@
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
-                    <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel" id="fuel-diesel-clients" oninput="calculateCashForFuel('diesel')"></td>
+                    <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-clients" readonly></td>
                     <td colspan="2"></td>
                   </tr>
                   <!-- عيارات -->
@@ -256,9 +392,9 @@
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-clients" oninput="calculateCashForFuel('95')"></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-clients" oninput="calculateCashForFuel('92')"></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-80-clients" oninput="calculateCashForFuel('80')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-clients" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-clients" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-clients" readonly></td>
                   </tr>
                   <!-- عيارات -->
                   <tr>
@@ -306,6 +442,7 @@
                 <!-- Rows will be generated dynamically -->
               </tbody>
             </table>
+            <datalist id="customer-names-list"></datalist>
           </div>
         </div>
           </div>
@@ -347,28 +484,140 @@
 
         <div id="shift-total-section" class="shift-tab-section">
           <div class="shift-content">
-            <!-- Grand Total Summary -->
-            <div class="shift-grand-total-container">
-              <div class="shift-summary-card">
-                <div class="summary-row">
-                  <span class="summary-label">إجمالي إيرادات الوقود:</span>
-                  <span class="summary-value auto-calculated" id="summary-fuel-total">0.00 جنيه</span>
-                </div>
-                <div class="summary-divider"></div>
-                <div class="summary-row grand-total-row">
-                  <span class="summary-label">الإجمالي الكلي:</span>
-                  <span class="summary-value auto-calculated" id="summary-grand-total">0.00 جنيه</span>
+            <!-- Two Column Layout -->
+            <div class="shift-total-layout">
+
+              <!-- Right Column: Revenue -->
+              <div class="shift-total-column">
+                <h3 class="column-title">الإيرادات</h3>
+
+                <div class="total-section">
+                  <div class="total-row">
+                    <label>سولار:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-diesel-cash" readonly>
+                  </div>
+
+                  <div class="total-row">
+                    <label>بنزين ٨٠:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-80-cash" readonly>
+                  </div>
+
+                  <div class="total-row">
+                    <label>بنزين ٩٢:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-92-cash" readonly>
+                  </div>
+
+                  <div class="total-row">
+                    <label>بنزين ٩٥:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-95-cash" readonly>
+                  </div>
+
+                  <div class="total-row">
+                    <label>الزيوت:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-oil-revenue" readonly>
+                  </div>
+
+                  <!-- Free fields for other revenue -->
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="revenue-desc-1" placeholder="وصف الإيراد">
+                    <input type="number" step="0.01" class="total-input" id="revenue-amount-1" oninput="calculateGrandTotal()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="revenue-desc-2" placeholder="وصف الإيراد">
+                    <input type="number" step="0.01" class="total-input" id="revenue-amount-2" oninput="calculateGrandTotal()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="revenue-desc-3" placeholder="وصف الإيراد">
+                    <input type="number" step="0.01" class="total-input" id="revenue-amount-3" oninput="calculateGrandTotal()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="revenue-desc-4" placeholder="وصف الإيراد">
+                    <input type="number" step="0.01" class="total-input" id="revenue-amount-4" oninput="calculateGrandTotal()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="revenue-desc-5" placeholder="وصف الإيراد">
+                    <input type="number" step="0.01" class="total-input" id="revenue-amount-5" oninput="calculateGrandTotal()">
+                  </div>
+
+                  <div class="total-row total-divider grand-total">
+                    <label>إجمالي الإيرادات:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
+                  </div>
                 </div>
               </div>
 
-              <!-- Action Buttons -->
-              <div class="shift-action-buttons">
-                <button class="btn-primary btn-large" id="save-shift-btn" onclick="saveShift()">
-                  حفظ الوردية نهائياً
-                </button>
-                <button class="btn-secondary btn-large" id="view-history-btn" onclick="showShiftHistory()">
-                  عرض سجل الورديات
-                </button>
+              <!-- Left Column: Expenses -->
+              <div class="shift-total-column">
+                <h3 class="column-title">المصاريف</h3>
+
+                <div class="total-section">
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-1" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-1" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-2" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-2" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-3" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-3" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-4" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-4" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-5" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-5" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-6" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-6" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-7" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-7" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-8" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-8" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-9" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-9" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row">
+                    <input type="text" class="total-description-input" id="expense-desc-10" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input" id="expense-amount-10" oninput="calculateTotalExpenses()">
+                  </div>
+
+                  <div class="total-row total-divider grand-total">
+                    <label>إجمالي المصاريف:</label>
+                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-expenses" readonly>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Final Net Total -->
+            <div class="shift-final-total">
+              <div class="final-total-row">
+                <label>صافى الوردية:</label>
+                <input type="number" step="0.01" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
               </div>
             </div>
           </div>
@@ -824,6 +1073,7 @@
                 <label for="station-phone">رقم الهاتف:</label>
                 <input type="text" id="station-phone" placeholder="أدخل رقم الهاتف">
               </div>
+
               <button class="btn btn-primary" onclick="saveGeneralSettings()">حفظ الإعدادات</button>
 
               <!-- Updates Section -->
@@ -949,40 +1199,12 @@
           <!-- Mobile: Pulsante per aprire modal prodotti -->
           <button id="mobile-products-btn" class="mobile-products-btn">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M2 2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
+              <path d="M2 2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
             </svg>
             اختر المنتج
           </button>
 
           <div class="depot-layout">
-            <!-- Area principale (sinistra) -->
-            <div class="depot-main-content">
-              <div class="breadcrumb-container">
-                <h3>إدارة المخزن</h3>
-                <span id="breadcrumb-separator" class="breadcrumb-separator" style="display: none;"> > </span>
-                <span id="breadcrumb-product" class="breadcrumb-product"></span>
-              </div>
-
-              <div id="results-section" class="results-section">
-                <!-- Stock Display Card -->
-                <div class="current-stock-card">
-                  <div class="stock-card">
-                    <div class="stock-header">
-                      <div class="stock-info">
-                        <div class="stock-label">الرصيد الحالي:</div>
-                        <div id="current-stock-amount" class="stock-amount">0</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Movements Table -->
-                <div class="movements-section">
-                  <div id="movements-table"></div>
-                </div>
-              </div>
-            </div>
-
             <!-- Sidebar (destra) -->
             <aside class="depot-sidebar">
               <div class="sidebar-header">
@@ -1025,11 +1247,100 @@
                 <div class="oil-item" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
               </div>
             </aside>
+
+            <!-- Area principale (sinistra) -->
+            <div class="depot-main-content">
+              <div class="depot-topbar">
+                <div>
+                  <h3>إدارة المخزن</h3>
+                  <p class="depot-subtitle">اختر منتجاً من القائمة اليمنى لعرض الحركات</p>
+                </div>
+              </div>
+
+              <div class="depot-stats-row">
+                <div class="stat-card">
+                  <div class="stat-label">الرصيد الحالي</div>
+                  <div id="current-stock-amount" class="stat-value">0</div>
+                </div>
+                <div class="stat-card ghost-card">
+                  <div class="stat-label">اسم المنتج</div>
+                  <div id="breadcrumb-product" class="stat-value muted">-</div>
+                </div>
+              </div>
+
+              <div class="depot-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">حركات المخزون</div>
+                    <div class="panel-subtitle">دخول وخروج حسب التاريخ</div>
+                  </div>
+                  <button class="btn btn-primary btn-compact" onclick="openMovementModal()">إضافة حركة</button>
+                </div>
+                <div id="results-section" class="results-section">
+                  <div class="movements-section">
+                    <div id="movements-table"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Modal prodotti per mobile -->
+      <!-- Sales Summary Screen -->
+      <div id="sales-summary-screen" class="screen">
+        <div class="home-summary-header" style="margin-bottom:1rem;">
+          <div>
+            <h2>ملخص المبيعات</h2>
+            <p class="summary-subtitle">استخدم الفلاتر لاختيار الفترة الزمنية</p>
+          </div>
+            <div class="summary-filters">
+              <div class="form-group compact">
+                <label>من:</label>
+                <div class="dual-select">
+                  <select id="summary-start-month"></select>
+                  <select id="summary-start-year"></select>
+                </div>
+              </div>
+              <div class="form-group compact">
+                <label>إلى:</label>
+                <div class="dual-select">
+                  <select id="summary-end-month"></select>
+                  <select id="summary-end-year"></select>
+                </div>
+              </div>
+              <button class="btn btn-secondary" id="summary-filter-btn">تطبيق</button>
+            </div>
+        </div>
+        <div class="summary-table-wrapper" id="sales-summary-wrapper">
+          <div class="summary-table-scroll">
+            <table class="base-table summary-table">
+              <thead>
+                <tr id="sales-summary-head"></tr>
+              </thead>
+              <tbody id="sales-summary-body">
+              </tbody>
+            </table>
+          </div>
+          <div id="sales-summary-empty" class="empty-state" style="display:none;">لا توجد بيانات في الفترة المحددة</div>
+          <div id="sales-month-details" class="summary-details" style="display:none;">
+            <div class="summary-details-header">
+              <div class="details-title">تفاصيل الشهر: <span id="sales-month-details-title"></span></div>
+              <button class="btn btn-secondary btn-compact" onclick="hideMonthDetails()">إغلاق</button>
+            </div>
+            <div class="summary-table-scroll">
+              <table class="base-table summary-table">
+                <thead>
+                  <tr id="sales-month-details-head"></tr>
+                </thead>
+                <tbody id="sales-month-details-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        </div>
+
+        <!-- Modal prodotti per mobile -->
       <div id="products-modal" class="modal">
         <div class="modal-content">
           <div class="modal-header">
@@ -1076,6 +1387,65 @@
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeProductsModal()">إغلاق</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shift History Modal -->
+      <div id="shift-history-modal" class="modal">
+        <div class="modal-content" style="max-width: 480px;">
+          <div class="modal-header">
+            <h3>سجل الورديات</h3>
+            <button class="close-modal" onclick="closeShiftHistoryModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="history-shift-date">التاريخ:</label>
+              <input type="date" id="history-shift-date" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="history-shift-number">رقم الوردية:</label>
+              <select id="history-shift-number" class="form-control">
+                <option value="1">الوردية الأولى (الصباح)</option>
+                <option value="2">الوردية الثانية (الليل)</option>
+              </select>
+            </div>
+            <div id="history-shift-message" style="color: #c4291d; font-weight: 600; min-height: 1.5rem;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="loadShiftFromHistory()">عرض الوردية</button>
+            <button class="btn btn-secondary" onclick="closeShiftHistoryModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reset Counters Modal -->
+      <div id="reset-counters-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+          <div class="modal-header">
+            <h3>إعادة ضبط عدادات أول الوردية</h3>
+            <button class="close-modal" onclick="closeResetCountersModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="reset-fuel-type">نوع الوقود:</label>
+              <select id="reset-fuel-type" onchange="onResetFuelChange()">
+                <option value="">اختر نوع الوقود</option>
+                <option value="diesel">سولار</option>
+                <option value="gas">غاز سيارات</option>
+                <option value="95">بنزين ٩٥</option>
+                <option value="92">بنزين ٩٢</option>
+                <option value="80">بنزين ٨٠</option>
+              </select>
+            </div>
+            <div id="reset-counter-fields" class="reset-counter-grid">
+              <!-- dynamic inputs -->
+            </div>
+            <div id="reset-counters-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="applyResetCounters()">تأكيد</button>
+            <button class="btn btn-secondary" onclick="closeResetCountersModal()">إلغاء</button>
           </div>
         </div>
       </div>
@@ -1257,6 +1627,101 @@
       <button class="nav-btn" data-screen="settings">الإعدادات</button>
     </nav>
   </div>
+
+  <!-- Edit Prices Modal -->
+  <div id="edit-prices-modal" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3>تعديل الأسعار</h3>
+        <button class="close-modal" onclick="closeEditPricesModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Header with date -->
+        <div style="margin-bottom: 1.5rem; display: flex; gap: 0.5rem; align-items: center;">
+          <span style="font-weight: 600; color: #2c3e50;">تعديل الأسعار ابتداءً من:</span>
+          <input type="date" id="modal-price-start-date" class="date-input-compact">
+        </div>
+
+        <!-- Price Type Tabs -->
+        <div class="price-type-tabs" style="margin-bottom: 1.5rem;">
+          <div class="price-type-tab active" data-price-type="fuel" onclick="switchModalPriceType('fuel')">
+            أسعار الوقود
+          </div>
+          <div class="price-type-tab" data-price-type="oil" onclick="switchModalPriceType('oil')">
+            أسعار الزيوت
+          </div>
+        </div>
+
+        <!-- Fuel Prices Table -->
+        <div id="modal-fuel-prices-section" class="price-type-section active">
+          <div class="prices-table-wrapper">
+            <table class="base-table prices-table-full">
+              <thead>
+                <tr>
+                  <th style="width: 50px; text-align: center;">#</th>
+                  <th style="text-align: center;">المنتج</th>
+                  <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                  <th style="width: 150px; text-align: center;">السعر الجديد</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr data-product="بنزين ٨٠">
+                  <td>1</td>
+                  <td class="product-name">بنزين ٨٠</td>
+                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-80">—</span></td>
+                  <td style="text-align: center;"><input type="number" id="modal-price-80" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                </tr>
+                <tr data-product="بنزين ٩٢">
+                  <td>2</td>
+                  <td class="product-name">بنزين ٩٢</td>
+                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-92">—</span></td>
+                  <td style="text-align: center;"><input type="number" id="modal-price-92" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                </tr>
+                <tr data-product="بنزين ٩٥">
+                  <td>3</td>
+                  <td class="product-name">بنزين ٩٥</td>
+                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-95">—</span></td>
+                  <td style="text-align: center;"><input type="number" id="modal-price-95" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                </tr>
+                <tr data-product="سولار">
+                  <td>4</td>
+                  <td class="product-name">سولار</td>
+                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-diesel">—</span></td>
+                  <td style="text-align: center;"><input type="number" id="modal-price-diesel" step="0.01" class="table-price-input" placeholder="0.00"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Oil Prices Table -->
+        <div id="modal-oil-prices-section" class="price-type-section">
+          <div class="prices-table-wrapper">
+            <table class="base-table prices-table-full">
+              <thead>
+                <tr>
+                  <th style="width: 50px; text-align: center;">#</th>
+                  <th style="text-align: center;">المنتج</th>
+                  <th style="width: 200px; text-align: center;">السعر الحالي</th>
+                  <th style="width: 150px; text-align: center;">السعر الجديد</th>
+                </tr>
+              </thead>
+              <tbody id="modal-oil-prices-table-body">
+                <!-- Oil prices will be added here dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="saveModalPrices()">حفظ</button>
+        <button class="btn btn-secondary" onclick="closeEditPricesModal()">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container"></div>
 
   <script src="renderer.js"></script>
 </body>

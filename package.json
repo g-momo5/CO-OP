@@ -1,9 +1,10 @@
 {
   "name": "coop2",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "dev": "node scripts/run-electron.cjs",
+    "start": "node scripts/run-electron.cjs",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
@@ -24,12 +25,8 @@
     "directories": {
       "output": "dist"
     },
-    "files": [
-      "**/*",
-      "!**/*.md",
-      "!test-*.js"
-    ],
     "mac": {
+      "identity": null,
       "category": "public.app-category.business",
       "icon": "assets/logo_cpc.icns",
       "target": [
@@ -37,8 +34,13 @@
         "zip"
       ]
     },
+    "files": [
+      "**/*",
+      "!**/*.md",
+      "!test-*.js"
+    ],
     "win": {
-      "icon": "assets/logo_cpc.png",
+      "icon": "assets/logo_cpc.ico",
       "target": [
         {
           "target": "nsis",
@@ -78,8 +80,9 @@
     }
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
     "@electron/remote": "^2.1.3",
-    "electron": "^28.3.3",
+    "electron": "^33.2.0",
     "electron-builder": "^24.0.0"
   },
   "dependencies": {

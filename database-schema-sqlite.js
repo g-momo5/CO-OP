@@ -25,6 +25,7 @@ class DatabaseSchema {
     this.createOilInvoicesTable(db);
     this.createCustomersTable(db);
     this.createShiftsTable(db);
+    this.createAnnualInventoriesTable(db);
     this.createSyncQueueTable(db);
 
     // Create indexes for performance
@@ -186,6 +187,33 @@ class DatabaseSchema {
     `);
   }
 
+  static createAnnualInventoriesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS annual_inventories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year INTEGER NOT NULL UNIQUE,
+        prev_balance REAL DEFAULT 0,
+        station_profit REAL DEFAULT 0,
+        bank_balance REAL DEFAULT 0,
+        safe_balance REAL DEFAULT 0,
+        accounting_remainder REAL DEFAULT 0,
+        customers_balance REAL DEFAULT 0,
+        vouchers_balance REAL DEFAULT 0,
+        visa_balance REAL DEFAULT 0,
+        expected_total REAL DEFAULT 0,
+        actual_total REAL DEFAULT 0,
+        difference REAL DEFAULT 0,
+        expected_items TEXT DEFAULT '[]',
+        actual_items TEXT DEFAULT '[]',
+        status TEXT DEFAULT 'balanced',
+        finalized INTEGER DEFAULT 0,
+        finalized_at INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
   static createSyncQueueTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS sync_queue (
@@ -221,6 +249,8 @@ class DatabaseSchema {
 
     // Shifts indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
 
     // Sync queue indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced)');
@@ -280,6 +310,20 @@ class DatabaseSchema {
         `);
 
         console.log('Migration completed: removed sale_price, profit, invoice_total from fuel_invoices');
+      }
+
+      const annualInventoriesTableInfo = db.prepare("PRAGMA table_info(annual_inventories)").all();
+      const hasExpectedItems = annualInventoriesTableInfo.some(col => col.name === 'expected_items');
+      const hasActualItems = annualInventoriesTableInfo.some(col => col.name === 'actual_items');
+
+      if (!hasExpectedItems) {
+        console.log('Adding expected_items column to annual_inventories table...');
+        db.exec("ALTER TABLE annual_inventories ADD COLUMN expected_items TEXT DEFAULT '[]'");
+      }
+
+      if (!hasActualItems) {
+        console.log('Adding actual_items column to annual_inventories table...');
+        db.exec("ALTER TABLE annual_inventories ADD COLUMN actual_items TEXT DEFAULT '[]'");
       }
 
       console.log('Schema is up to date');

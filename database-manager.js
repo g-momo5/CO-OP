@@ -263,6 +263,40 @@ class DatabaseManager {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(date, shift_number)
     )`);
+
+    // Annual inventories table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS annual_inventories (
+      id SERIAL PRIMARY KEY,
+      year INTEGER NOT NULL UNIQUE,
+      prev_balance REAL DEFAULT 0,
+      station_profit REAL DEFAULT 0,
+      bank_balance REAL DEFAULT 0,
+      safe_balance REAL DEFAULT 0,
+      accounting_remainder REAL DEFAULT 0,
+      customers_balance REAL DEFAULT 0,
+      vouchers_balance REAL DEFAULT 0,
+      visa_balance REAL DEFAULT 0,
+      expected_total REAL DEFAULT 0,
+      actual_total REAL DEFAULT 0,
+      difference REAL DEFAULT 0,
+      expected_items TEXT DEFAULT '[]',
+      actual_items TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'balanced',
+      finalized INTEGER DEFAULT 0,
+      finalized_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    await this.pgPool.query(`ALTER TABLE annual_inventories ADD COLUMN IF NOT EXISTS expected_items TEXT DEFAULT '[]'`);
+    await this.pgPool.query(`ALTER TABLE annual_inventories ADD COLUMN IF NOT EXISTS actual_items TEXT DEFAULT '[]'`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)`);
+    } catch (err) {
+      console.log('Annual inventories index creation:', err.message);
+    }
   }
 
   /**
@@ -380,11 +414,19 @@ class DatabaseManager {
 
     // Add to sync queue if offline
     if (!this.isOnline) {
-      this.addToSyncQueue(tableName, 'INSERT', {
-        id: insertId,
-        sql,
-        params
-      });
+      // If table name is unknown, queue raw insert to replay on PostgreSQL
+      if (tableName && tableName !== 'unknown') {
+        this.addToSyncQueue(tableName, 'INSERT', {
+          id: insertId,
+          sql,
+          params
+        });
+      } else {
+        this.addToSyncQueue('unknown', 'RAW_INSERT', {
+          sql,
+          params
+        });
+      }
     }
 
     return insertId;
@@ -502,7 +544,7 @@ class DatabaseManager {
     const tables = [
       'sales', 'purchase_prices', 'products', 'price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
-      'customers', 'shifts'
+      'customers', 'shifts', 'annual_inventories'
     ];
 
     for (const table of tables) {

@@ -108,6 +108,9 @@ class SyncManager {
     const data = JSON.parse(op.data);
 
     switch (op.operation) {
+      case 'RAW_INSERT':
+        await this.syncRawInsert(data);
+        break;
       case 'INSERT':
         await this.syncInsert(op.table_name, data);
         break;
@@ -126,13 +129,22 @@ class SyncManager {
    * Sync an INSERT operation
    */
   async syncInsert(tableName, data) {
+    const normalized = (tableName || '').trim().toLowerCase();
+
+    // If table name is unknown, fallback to raw SQL replay
+    if (!normalized || normalized === 'unknown') {
+      await this.syncRawInsert(data);
+      return;
+    }
+
     // Get the record from SQLite
     const record = this.dbManager.sqlite.prepare(
       `SELECT * FROM ${tableName} WHERE id = ?`
     ).get(data.id);
 
     if (!record) {
-      console.warn(`Record ${data.id} not found in ${tableName}, skipping`);
+      console.warn(`Record ${data.id} not found in ${tableName}, replaying raw insert`);
+      await this.syncRawInsert(data);
       return;
     }
 
@@ -143,6 +155,18 @@ class SyncManager {
       if (col === 'data' && tableName === 'shifts') {
         return record[col]; // Already string in SQLite
       }
+
+      // Convert epoch seconds to Date for timestamp columns
+      if (/(_at)$/.test(col)) {
+        const val = record[col];
+        if (typeof val === 'number') {
+          return new Date(val * 1000);
+        }
+        if (typeof val === 'string' && /^\d+$/.test(val)) {
+          return new Date(parseInt(val, 10) * 1000);
+        }
+      }
+
       return record[col];
     });
 
@@ -158,6 +182,23 @@ class SyncManager {
         console.warn(`Record already exists in ${tableName}, skipping`);
         return;
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Sync a raw INSERT captured offline without table name
+   */
+  async syncRawInsert(data) {
+    if (!data || !data.sql) {
+      throw new Error('Raw insert missing SQL');
+    }
+
+    try {
+      await this.dbManager.pgPool.query(data.sql, data.params || []);
+      console.log('Synced RAW INSERT operation');
+    } catch (error) {
+      console.error('Failed to sync RAW INSERT:', error);
       throw error;
     }
   }

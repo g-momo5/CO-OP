@@ -9,8 +9,26 @@ let dbManager; // DatabaseManager instance (replaces db)
 let syncManager; // SyncManager instance
 let autoUpdater; // Initialized after app is ready
 let connectionCheckInterval; // Interval for checking connection status
+// Screens and sections that are limited when offline
+const OFFLINE_RESTRICTED = {
+  screens: ['report', 'charts'],
+  settingsSections: ['invoices-list', 'backup'],
+  reads: [
+    'get-sales',
+    'get-sales-report',
+    'get-sales-summary',
+    'get-fuel-invoices',
+    'get-oil-invoices',
+    'get-oil-invoices-report',
+    'get-price-history'
+  ]
+};
 
 function createWindow() {
+  const iconPath = process.platform === 'darwin'
+    ? path.join(__dirname, 'assets', 'logo_cpc.icns')
+    : path.join(__dirname, 'assets', 'logo_cpc.png');
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -19,7 +37,7 @@ function createWindow() {
       contextIsolation: false,
       enableRemoteModule: true
     },
-    icon: path.join(__dirname, 'assets/logo_cpc.png'),
+    icon: iconPath,
     title: 'محطة بنزين سمنود - الجمعية التعاونية للبترول - مصر'
   });
 
@@ -69,10 +87,19 @@ function executeInsert(query, params = [], tableName = 'unknown') {
   return dbManager.executeInsert(query, params, tableName);
 }
 
+function requireOnline(featureName = 'هذه الوظيفة') {
+  if (!dbManager?.isOnline) {
+    const err = new Error(`${featureName} تتطلب اتصالاً بالإنترنت`);
+    err.code = 'OFFLINE_RESTRICTED';
+    throw err;
+  }
+}
+
 // IPC Handlers setup function
 function setupIPCHandlers() {
   ipcMain.handle('get-sales', async () => {
     try {
+      requireOnline('عرض المبيعات');
       return await executeQuery('SELECT * FROM sales ORDER BY date DESC');
     } catch (error) {
       console.error('Error getting sales:', error);
@@ -84,7 +111,7 @@ function setupIPCHandlers() {
     try {
       const { date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes } = saleData;
       const query = 'INSERT INTO sales (date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-      return await executeInsert(query, [date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes]);
+      return await executeInsert(query, [date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes], 'sales');
     } catch (error) {
       console.error('Error adding sale:', error);
       throw error;
@@ -147,7 +174,7 @@ function setupIPCHandlers() {
       // If no rows were updated, insert new product
       if (result === 0) {
         const insertQuery = 'INSERT INTO products (product_type, product_name, current_price) VALUES ($1, $2, $3)';
-        return await executeInsert(insertQuery, ['oil', oil_type, price]);
+        return await executeInsert(insertQuery, ['oil', oil_type, price], 'products');
       }
       return result;
     } catch (error) {
@@ -211,7 +238,7 @@ function setupIPCHandlers() {
 
       // Insert new fuel product
       const insertQuery = 'INSERT INTO products (product_type, product_name, current_price) VALUES ($1, $2, $3)';
-      return await executeInsert(insertQuery, ['fuel', fuel_type, price]);
+      return await executeInsert(insertQuery, ['fuel', fuel_type, price], 'products');
     } catch (error) {
       console.error('Error adding fuel price:', error);
       throw error;
@@ -232,7 +259,7 @@ function setupIPCHandlers() {
       // Insert new oil product with VAT
       const vatValue = vat || 0;
       const insertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat) VALUES ($1, $2, $3, $4)';
-      return await executeInsert(insertQuery, ['oil', oil_type, price, vatValue]);
+      return await executeInsert(insertQuery, ['oil', oil_type, price, vatValue], 'products');
     } catch (error) {
       console.error('Error adding oil price:', error);
       throw error;
@@ -298,7 +325,7 @@ function setupIPCHandlers() {
 
         // Save to history with product_id (always save to history)
         const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)';
-        await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id]);
+        await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id], 'price_history');
 
         // Update current price in products table ONLY if new date is more recent
         // If no current date exists, always update
@@ -320,6 +347,7 @@ function setupIPCHandlers() {
   // Get price history
   ipcMain.handle('get-price-history', async (event, filter) => {
     try {
+      requireOnline('سجل الأسعار');
       let query = 'SELECT * FROM price_history';
       const params = [];
 
@@ -369,6 +397,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-sales-report', async (event, { startDate, endDate }) => {
     try {
+      requireOnline('التقارير');
       const reportQuery = 'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
@@ -379,6 +408,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-sales-summary', async () => {
     try {
+      requireOnline('ملخص المبيعات');
       return await executeQuery(`
         SELECT
           fuel_type,
@@ -400,7 +430,7 @@ function setupIPCHandlers() {
     try {
       const { oil_type, date, type, quantity, invoice_number } = movementData;
       const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
-      return await executeInsert(insertQuery, [oil_type, date, type, quantity, invoice_number]);
+      return await executeInsert(insertQuery, [oil_type, date, type, quantity, invoice_number], 'oil_movements');
     } catch (error) {
       console.error('Error adding oil movement:', error);
       throw error;
@@ -441,7 +471,7 @@ function setupIPCHandlers() {
     try {
       const { fuel_type, date, type, quantity, invoice_number, notes } = movementData;
       const insertQuery = 'INSERT INTO fuel_movements (fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6)';
-      return await executeInsert(insertQuery, [fuel_type, date, type, quantity, invoice_number, notes]);
+      return await executeInsert(insertQuery, [fuel_type, date, type, quantity, invoice_number, notes], 'fuel_movements');
     } catch (error) {
       console.error('Error adding fuel movement:', error);
       throw error;
@@ -519,6 +549,10 @@ function setupIPCHandlers() {
       for (const item of oil_items) {
         const invoiceQuery = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)';
         await executeInsert(invoiceQuery, [date, invoice_number, item.oil_type, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0], 'oil_invoices');
+
+        // Also create a stock movement "in" for each oil line
+        const movementQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
+        await executeInsert(movementQuery, [item.oil_type, date, 'in', item.quantity, invoice_number], 'oil_movements');
       }
 
       return true;
@@ -530,6 +564,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-fuel-invoices', async () => {
     try {
+      requireOnline('عرض فواتير الوقود');
       return await executeQuery('SELECT * FROM fuel_invoices ORDER BY date DESC');
     } catch (error) {
       console.error('Error getting fuel invoices:', error);
@@ -539,6 +574,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-oil-invoices', async () => {
     try {
+      requireOnline('عرض فواتير الزيوت');
       return await executeQuery('SELECT * FROM oil_invoices ORDER BY date DESC');
     } catch (error) {
       console.error('Error getting oil invoices:', error);
@@ -548,10 +584,210 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-oil-invoices-report', async (event, { startDate, endDate }) => {
     try {
+      requireOnline('تقرير فواتير الزيوت');
       const reportQuery = 'SELECT * FROM oil_invoices WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
       console.error('Error getting oil invoices report:', error);
+      throw error;
+    }
+  });
+
+  // Annual inventory handlers
+  ipcMain.handle('get-annual-inventory-records', async () => {
+    try {
+      return await executeQuery(`
+        SELECT
+          id,
+          year,
+          prev_balance,
+          station_profit,
+          bank_balance,
+          safe_balance,
+          accounting_remainder,
+          customers_balance,
+          vouchers_balance,
+          visa_balance,
+          expected_total,
+          actual_total,
+          difference,
+          expected_items,
+          actual_items,
+          status,
+          finalized,
+          finalized_at,
+          created_at,
+          updated_at
+        FROM annual_inventories
+        ORDER BY year DESC
+      `);
+    } catch (error) {
+      console.error('Error getting annual inventory records:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('save-annual-inventory', async (_event, payload) => {
+    try {
+      const toNumber = (value) => {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const normalizeItems = (items) => {
+        let parsed = items;
+
+        if (typeof parsed === 'string' && parsed.trim()) {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch (error) {
+            parsed = [];
+          }
+        }
+
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed
+          .map((item) => {
+            const label = String(item?.label || '').trim();
+            const value = toNumber(item?.value);
+
+            if (!label && Math.abs(value) < 0.0001) {
+              return null;
+            }
+
+            return {
+              label: label || 'بند إضافي',
+              value
+            };
+          })
+          .filter(Boolean);
+      };
+
+      const year = parseInt(payload?.year, 10);
+      if (!Number.isFinite(year)) {
+        throw new Error('السنة غير صالحة');
+      }
+
+      const finalizedFlag = payload?.finalized ? 1 : 0;
+      const prev_balance = toNumber(payload?.prev_balance);
+      const station_profit = toNumber(payload?.station_profit);
+      const bank_balance = toNumber(payload?.bank_balance);
+      const safe_balance = toNumber(payload?.safe_balance);
+      const accounting_remainder = toNumber(payload?.accounting_remainder);
+      const customers_balance = toNumber(payload?.customers_balance);
+      const vouchers_balance = toNumber(payload?.vouchers_balance);
+      const visa_balance = toNumber(payload?.visa_balance);
+      const expected_total = toNumber(payload?.expected_total);
+      const actual_total = toNumber(payload?.actual_total);
+      const difference = toNumber(payload?.difference);
+      const expected_items = JSON.stringify(normalizeItems(payload?.expected_items));
+      const actual_items = JSON.stringify(normalizeItems(payload?.actual_items));
+      const status = payload?.status || (difference > 0 ? 'surplus' : (difference < 0 ? 'shortage' : 'balanced'));
+
+      const existing = await executeQuery('SELECT id, finalized FROM annual_inventories WHERE year = $1 LIMIT 1', [year]);
+      if (existing.length > 0 && Number(existing[0].finalized) === 1) {
+        throw new Error('هذه السنة مقفلة نهائياً ولا يمكن تعديلها');
+      }
+
+      if (existing.length > 0) {
+        const setFinalizedTimestamp = finalizedFlag === 1 && Number(existing[0].finalized) !== 1 ? 1 : 0;
+
+        const updateQuery = `
+          UPDATE annual_inventories
+          SET
+            prev_balance = $1,
+            station_profit = $2,
+            bank_balance = $3,
+            safe_balance = $4,
+            accounting_remainder = $5,
+            customers_balance = $6,
+            vouchers_balance = $7,
+            visa_balance = $8,
+            expected_total = $9,
+            actual_total = $10,
+            difference = $11,
+            expected_items = $12,
+            actual_items = $13,
+            status = $14,
+            finalized = $15,
+            finalized_at = CASE WHEN $16 = 1 THEN CURRENT_TIMESTAMP ELSE finalized_at END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE year = $17
+        `;
+
+        await executeUpdate(updateQuery, [
+          prev_balance,
+          station_profit,
+          bank_balance,
+          safe_balance,
+          accounting_remainder,
+          customers_balance,
+          vouchers_balance,
+          visa_balance,
+          expected_total,
+          actual_total,
+          difference,
+          expected_items,
+          actual_items,
+          status,
+          finalizedFlag,
+          setFinalizedTimestamp,
+          year
+        ]);
+      } else {
+        const insertQuery = `
+          INSERT INTO annual_inventories (
+            year,
+            prev_balance,
+            station_profit,
+            bank_balance,
+            safe_balance,
+            accounting_remainder,
+            customers_balance,
+            vouchers_balance,
+            visa_balance,
+            expected_total,
+            actual_total,
+            difference,
+            expected_items,
+            actual_items,
+            status,
+            finalized,
+            finalized_at,
+            created_at,
+            updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+            CASE WHEN $16 = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+          )
+        `;
+
+        await executeInsert(insertQuery, [
+          year,
+          prev_balance,
+          station_profit,
+          bank_balance,
+          safe_balance,
+          accounting_remainder,
+          customers_balance,
+          vouchers_balance,
+          visa_balance,
+          expected_total,
+          actual_total,
+          difference,
+          expected_items,
+          actual_items,
+          status,
+          finalizedFlag
+        ], 'annual_inventories');
+      }
+
+      const saved = await executeQuery('SELECT * FROM annual_inventories WHERE year = $1 LIMIT 1', [year]);
+      return saved[0] || null;
+    } catch (error) {
+      console.error('Error saving annual inventory:', error);
       throw error;
     }
   });
@@ -662,7 +898,7 @@ function setupIPCHandlers() {
             invoice.net_quantity,
             invoice.purchase_price,
             invoice.total
-          ]);
+          ], 'fuel_invoices');
         }
       }
 
@@ -680,7 +916,7 @@ function setupIPCHandlers() {
             invoice.total_purchase,
             invoice.immediate_discount || 0,
             invoice.martyrs_tax || 0
-          ]);
+          ], 'oil_invoices');
         }
       }
 
@@ -689,20 +925,20 @@ function setupIPCHandlers() {
         // New format with unified products table
         for (const product of backupData.products) {
           const query = 'INSERT INTO products (product_type, product_name, current_price, vat, is_active) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (product_name) DO UPDATE SET current_price = $3, vat = $4, is_active = $5';
-          await executeInsert(query, [product.product_type, product.product_name, product.current_price, product.vat || 0, product.is_active !== undefined ? product.is_active : 1]);
+          await executeInsert(query, [product.product_type, product.product_name, product.current_price, product.vat || 0, product.is_active !== undefined ? product.is_active : 1], 'products');
         }
       } else {
         // Legacy format - import from old fuelPrices and oilPrices
         if (backupData.fuelPrices) {
           for (const price of backupData.fuelPrices) {
             const query = 'INSERT INTO products (product_type, product_name, current_price) VALUES ($1, $2, $3) ON CONFLICT (product_name) DO UPDATE SET current_price = $3';
-            await executeInsert(query, ['fuel', price.fuel_type, price.price]);
+            await executeInsert(query, ['fuel', price.fuel_type, price.price], 'products');
           }
         }
         if (backupData.oilPrices) {
           for (const price of backupData.oilPrices) {
             const query = 'INSERT INTO products (product_type, product_name, current_price, vat) VALUES ($1, $2, $3, $4) ON CONFLICT (product_name) DO UPDATE SET current_price = $3, vat = $4';
-            await executeInsert(query, ['oil', price.oil_type, price.price, price.vat || 0]);
+            await executeInsert(query, ['oil', price.oil_type, price.price, price.vat || 0], 'products');
           }
         }
       }
@@ -711,7 +947,7 @@ function setupIPCHandlers() {
       if (backupData.purchasePrices) {
         for (const price of backupData.purchasePrices) {
           const query = 'INSERT INTO purchase_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2';
-          await executeInsert(query, [price.fuel_type, price.price]);
+          await executeInsert(query, [price.fuel_type, price.price], 'purchase_prices');
         }
       }
 
@@ -719,7 +955,7 @@ function setupIPCHandlers() {
       if (backupData.priceHistory) {
         for (const item of backupData.priceHistory) {
           const query = 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at) VALUES ($1, $2, $3, $4, $5)';
-          await executeInsert(query, [item.product_type, item.product_name, item.price, item.start_date, item.created_at]);
+          await executeInsert(query, [item.product_type, item.product_name, item.price, item.start_date, item.created_at], 'price_history');
         }
       }
 
@@ -733,7 +969,7 @@ function setupIPCHandlers() {
             movement.type,
             movement.quantity,
             movement.invoice_number
-          ]);
+          ], 'depot_movements');
         }
       }
 
@@ -773,7 +1009,9 @@ function setupIPCHandlers() {
     return {
       online: dbManager.isOnline,
       lastSync: dbManager.lastSyncTime,
-      pending: dbManager.getPendingSyncCount()
+      pending: dbManager.getPendingSyncCount(),
+      mode: dbManager.isOnline ? 'online' : 'offline-limited',
+      restricted: OFFLINE_RESTRICTED
     };
   });
 } // End of setupIPCHandlers
@@ -1024,7 +1262,7 @@ ipcMain.handle('get-customers', async () => {
 ipcMain.handle('add-customer', async (event, { name }) => {
   try {
     const insertQuery = 'INSERT INTO customers (name) VALUES ($1)';
-    return await executeInsert(insertQuery, [name]);
+    return await executeInsert(insertQuery, [name], 'customers');
   } catch (error) {
     console.error('Error adding customer:', error);
     throw error;
@@ -1054,19 +1292,38 @@ ipcMain.handle('update-customer', async (event, { id, name }) => {
 // Shift management handlers
 ipcMain.handle('save-shift', async (event, shiftData) => {
   try {
-    const { date, shift_number, data } = shiftData;
+    const { date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved } = shiftData;
+
+    // Ensure numeric values are valid (convert NaN/undefined/null to 0)
+    const safeFuelTotal = parseFloat(fuel_total) || 0;
+    const safeOilTotal = parseFloat(oil_total) || 0;
+    const safeGrandTotal = parseFloat(grand_total) || 0;
+
+    // PostgreSQL uses $1, $2, etc. and CURRENT_TIMESTAMP
     const query = `
-      INSERT INTO shifts (date, shift_number, data, updated_at)
-      VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+      INSERT INTO shifts (date, shift_number, fuel_data, fuel_total, oil_data, oil_total, grand_total, is_saved, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
       ON CONFLICT (date, shift_number)
-      DO UPDATE SET data = $3, updated_at = CURRENT_TIMESTAMP
+      DO UPDATE SET
+        fuel_data = EXCLUDED.fuel_data,
+        fuel_total = EXCLUDED.fuel_total,
+        oil_data = EXCLUDED.oil_data,
+        oil_total = EXCLUDED.oil_total,
+        grand_total = EXCLUDED.grand_total,
+        is_saved = EXCLUDED.is_saved,
+        updated_at = CURRENT_TIMESTAMP
       RETURNING id
     `;
-    const result = await db.query(query, [date, shift_number, JSON.stringify(data)]);
-    return result.rows[0].id;
+
+    const result = await executeQuery(query, [date, shift_number, fuel_data, safeFuelTotal, oil_data, safeOilTotal, safeGrandTotal, is_saved]);
+
+    // PostgreSQL returns the id directly in result, SQLite we need to query
+    const id = result[0]?.id || result[0]?.lastID;
+
+    return { success: true, id: id };
   } catch (error) {
     console.error('Error saving shift:', error);
-    throw error;
+    return { success: false, error: error.message };
   }
 });
 
@@ -1084,6 +1341,25 @@ ipcMain.handle('get-shift', async (event, { date, shift_number }) => {
     return null;
   } catch (error) {
     console.error('Error getting shift:', error);
+    throw error;
+  }
+});
+
+// Get last shift (highest ID)
+ipcMain.handle('get-last-shift', async (event) => {
+  try {
+    const query = 'SELECT * FROM shifts ORDER BY id DESC LIMIT 1';
+    const result = await executeQuery(query, []);
+    if (result.length > 0) {
+      // Parse the JSONB/JSON data field
+      return {
+        ...result[0],
+        data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting last shift:', error);
     throw error;
   }
 });
