@@ -58,53 +58,250 @@
                 <canvas id="monthly-fuel-sales-chart"></canvas>
               </div>
             </div>
+            <div class="action-card home-annual-card" onclick="showScreen('annual-inventory', 'home')">
+              <div class="card-icon">📒</div>
+              <h3>جرد سنوي</h3>
+              <p>حساب العجز أو الزيادة في نهاية العام</p>
+            </div>
           </div>
 
-          <!-- Right Column: Action Cards Grid -->
+          <!-- Right Column: Action Cards Groups -->
           <div class="home-cards-column">
-            <div class="action-cards-grid">
-              <!-- Card 1 - New Invoice -->
-              <div class="action-card" onclick="showScreen('invoice', 'home')">
-                <div class="card-icon">📝</div>
-                <h3>فاتورة جديدة</h3>
-                <p>إنشاء فاتورة وقود أو زيوت</p>
-              </div>
+            <div class="home-card-groups">
+              <section class="home-card-group">
+                <h3 class="home-card-group-title">إدارة المكتب</h3>
+                <div class="action-cards-grid">
+                  <!-- Card 1 - New Invoice -->
+                  <div class="action-card" onclick="showScreen('invoice', 'home')">
+                    <div class="card-icon">📝</div>
+                    <h3>فاتورة جديدة</h3>
+                    <p>إنشاء فاتورة وقود أو زيوت</p>
+                  </div>
 
-              <!-- Card 2 - Depot Management -->
-              <div class="action-card" onclick="showDepotScreen()">
-                <div class="card-icon">📦</div>
-                <h3>إدارة المخزن</h3>
-                <p>تتبع مخزون الوقود والزيوت</p>
-              </div>
+                  <!-- Card 2 - Depot Management -->
+                  <div class="action-card" onclick="showDepotScreen()">
+                    <div class="card-icon">📦</div>
+                    <h3>إدارة المخزن</h3>
+                    <p>تتبع مخزون الوقود والزيوت</p>
+                  </div>
 
-              <!-- Card 3 - Shift Entry -->
-              <div class="action-card" onclick="showScreen('shift-entry', 'home')">
-                <div class="card-icon">🔄</div>
-                <h3>إدخال وردية جديدة</h3>
-                <p>تسجيل مبيعات الوردية</p>
-              </div>
+                  <!-- Card 5 - Sales Summary -->
+                  <div class="action-card" onclick="showScreen('sales-summary', 'home')">
+                    <div class="card-icon">📊</div>
+                    <h3>ملخص المبيعات</h3>
+                    <p>مبيعات المنتجات حسب الأشهر</p>
+                  </div>
 
-              <!-- Card 4 - Shift History -->
-              <div class="action-card" onclick="showShiftHistory()">
-                <div class="card-icon">📋</div>
-                <h3>سجل الورديات</h3>
-                <p>عرض سجل الورديات المسجلة</p>
-              </div>
+                  <!-- Card 6 - Safe Book -->
+                  <div class="action-card" onclick="showScreen('safe-book', 'home')">
+                    <div class="card-icon">💰</div>
+                    <h3>دفتر الخزينة</h3>
+                    <p>متابعة حركات الدخول والخروج</p>
+                  </div>
 
-              <!-- Card 5 - Sales Summary -->
-              <div class="action-card" onclick="showScreen('sales-summary', 'home')">
-                <div class="card-icon">📊</div>
-                <h3>ملخص المبيعات</h3>
-                <p>مبيعات المنتجات حسب الأشهر</p>
-              </div>
+                  <!-- Card 8 - Profit -->
+                  <div class="action-card" onclick="showScreen('profit', 'home')">
+                    <div class="card-icon">📈</div>
+                    <h3>المكسب</h3>
+                    <p>متابعة أرباح المحطة</p>
+                  </div>
 
-              <!-- Card 6 - Annual Inventory -->
-              <div class="action-card" onclick="showScreen('annual-inventory', 'home')">
-                <div class="card-icon">📒</div>
-                <h3>جرد سنوي</h3>
-                <p>حساب العجز أو الزيادة في نهاية العام</p>
+                  <!-- Card 9 - Expenses -->
+                  <div class="action-card" onclick="showMessage('صفحة المصاريف قيد التطوير', 'info')">
+                    <div class="card-icon">📉</div>
+                    <h3>المصاريف</h3>
+                    <p>عرض وتتبع المصروفات</p>
+                  </div>
+
+                </div>
+              </section>
+
+              <section class="home-card-group">
+                <h3 class="home-card-group-title">إدارة المبيعات</h3>
+                <div class="action-cards-grid">
+                  <!-- Card 3 - Shift Entry -->
+                  <div class="action-card" onclick="showScreen('shift-entry', 'home')">
+                    <div class="card-icon">🔄</div>
+                    <h3>إدخال وردية جديدة</h3>
+                    <p>تسجيل مبيعات الوردية</p>
+                  </div>
+
+                  <!-- Card 4 - Shift History -->
+                  <div class="action-card" onclick="showShiftHistory()">
+                    <div class="card-icon">📋</div>
+                    <h3>سجل الورديات</h3>
+                    <p>عرض سجل الورديات المسجلة</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Safe Book Screen -->
+      <div id="safe-book-screen" class="screen">
+        <div class="safe-book-page">
+          <div class="safe-book-card">
+            <div class="safe-book-header">
+              <div>
+                <h2>دفتر الخزينة</h2>
+                <p class="summary-subtitle">جميع حركات الدخول والخروج من الخزينة</p>
+              </div>
+              <div class="safe-book-filters">
+                <div class="summary-filters">
+                  <div class="form-group compact">
+                    <label>من:</label>
+                    <div class="dual-select">
+                      <select id="safe-book-start-month"></select>
+                      <select id="safe-book-start-year"></select>
+                    </div>
+                  </div>
+                  <div class="form-group compact">
+                    <label>إلى:</label>
+                    <div class="dual-select">
+                      <select id="safe-book-end-month"></select>
+                      <select id="safe-book-end-year"></select>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-secondary safe-book-clear-filter-btn" id="safe-book-clear-filter-btn" title="إلغاء الفلتر">
+                    ✕
+                  </button>
+                </div>
               </div>
             </div>
+
+            <div id="safe-book-form" class="safe-book-form" style="display: none;">
+              <div class="safe-book-form-grid">
+                <div class="form-group compact">
+                  <label for="safe-book-date">التاريخ:</label>
+                  <input type="date" id="safe-book-date">
+                </div>
+                <div class="form-group compact">
+                  <label for="safe-book-type">النوع:</label>
+                  <input type="text" id="safe-book-type" placeholder="مثال: مصروف صيانة">
+                </div>
+                <div class="form-group compact">
+                  <label for="safe-book-amount">القيمة:</label>
+                  <input type="number" step="0.01" min="0" id="safe-book-amount" placeholder="0.00">
+                </div>
+                <div class="form-group compact">
+                  <label for="safe-book-direction">الحركة:</label>
+                  <select id="safe-book-direction">
+                    <option value="in">دخول</option>
+                    <option value="out">خروج</option>
+                  </select>
+                </div>
+              </div>
+              <div class="safe-book-form-actions">
+                <button type="button" class="btn btn-primary" onclick="saveSafeBookMovement()">حفظ</button>
+                <button type="button" class="btn btn-secondary" onclick="toggleSafeBookForm(false)">إلغاء</button>
+              </div>
+            </div>
+
+            <div class="safe-book-balance-row">
+              <button type="button" class="btn btn-secondary safe-book-add-btn" onclick="toggleSafeBookForm()">
+                إضافة حركة
+              </button>
+              <div class="safe-book-balance">
+                <span class="safe-book-balance-label">رصيد الخزنة</span>
+                <strong id="safe-book-balance-value" class="safe-book-balance-value">٠ ج.م.‏</strong>
+                <div id="safe-book-period-balances" class="safe-book-period-balances" style="display: none;">
+                  <div class="safe-book-period-item">
+                    <span class="safe-book-period-label">رصيد بداية الفترة</span>
+                    <strong id="safe-book-period-start-value" class="safe-book-period-value">٠ ج.م.‏</strong>
+                  </div>
+                  <div class="safe-book-period-item">
+                    <span class="safe-book-period-label">رصيد نهاية الفترة</span>
+                    <strong id="safe-book-period-end-value" class="safe-book-period-value">٠ ج.م.‏</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="safe-book-table-wrapper">
+              <div id="safe-book-sticky-month" class="safe-book-sticky-month" style="display: none;"></div>
+              <table class="base-table safe-book-table">
+                <tbody id="safe-book-body">
+                  <tr>
+                    <td colspan="3" style="text-align:center; color:#777;">لا توجد حركات حالياً</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profit Screen -->
+      <div id="profit-screen" class="screen">
+        <div class="profit-page">
+          <div class="profit-header">
+            <div>
+              <h2>المكسب</h2>
+              <p class="summary-subtitle">متابعة المكسب الشهري للمحطة</p>
+            </div>
+            <div class="profit-filters">
+              <div class="summary-filters">
+                <div class="form-group compact">
+                  <label>من:</label>
+                  <div class="dual-select">
+                    <select id="profit-start-month"></select>
+                    <select id="profit-start-year"></select>
+                  </div>
+                </div>
+                <div class="form-group compact">
+                  <label>إلى:</label>
+                  <div class="dual-select">
+                    <select id="profit-end-month"></select>
+                    <select id="profit-end-year"></select>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary" id="profit-filter-btn">تطبيق</button>
+                <button type="button" class="btn btn-secondary profit-clear-filter-btn" id="profit-clear-filter-btn" title="إعادة الفترة الافتراضية">
+                  ↺
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="profit-kpis">
+            <article class="profit-kpi-card net">
+              <span class="profit-kpi-label">صافي المكسب</span>
+              <strong id="profit-kpi-net" class="profit-kpi-value">٠ ج.م.‏</strong>
+            </article>
+            <article class="profit-kpi-card positive">
+              <span class="profit-kpi-label">إجمالي الإيرادات</span>
+              <strong id="profit-kpi-positive" class="profit-kpi-value">٠ ج.م.‏</strong>
+            </article>
+            <article class="profit-kpi-card deductions">
+              <span class="profit-kpi-label">إجمالي الخصومات</span>
+              <strong id="profit-kpi-deductions" class="profit-kpi-value">٠ ج.م.‏</strong>
+            </article>
+          </div>
+
+          <div class="profit-status-row">
+            <div id="profit-save-status" class="profit-save-status">جاهز</div>
+            <div class="profit-row-actions">
+              <button type="button" class="btn btn-secondary" id="profit-add-revenue-row">إضافة صف إيراد</button>
+              <button type="button" class="btn btn-secondary" id="profit-add-deduction-row">إضافة صف خصم</button>
+            </div>
+          </div>
+
+          <div class="profit-table-shell">
+            <div class="profit-table-scroll">
+              <table class="base-table profit-table">
+                <thead>
+                  <tr id="profit-monthly-head"></tr>
+                </thead>
+                <tbody id="profit-monthly-body">
+                  <tr>
+                    <td colspan="99" style="text-align:center; color:#777;">جاري تحميل البيانات...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="profit-empty" class="empty-state" style="display:none;">لا توجد بيانات في الفترة المحددة</div>
           </div>
         </div>
       </div>
@@ -515,6 +712,11 @@
                   <div class="total-row">
                     <label>الزيوت:</label>
                     <input type="number" step="0.01" class="total-input auto-calculated" id="total-oil-revenue" readonly>
+                  </div>
+
+                  <div class="total-row">
+                    <label>غسيل و تشحيم:</label>
+                    <input type="number" step="0.01" class="total-input" id="total-wash-lube-revenue" oninput="calculateGrandTotal()">
                   </div>
 
                   <!-- Free fields for other revenue -->
@@ -1457,16 +1659,16 @@
             <h3>سجل تغييرات الأسعار</h3>
             <button class="close-modal" onclick="closePriceHistoryModal()">&times;</button>
           </div>
-          <div class="modal-body">
-            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; direction: rtl;">
-              <div>
-                <label style="font-weight: 600; margin-left: 0.5rem;">نوع المنتج:</label>
-                <select id="history-product-filter" onchange="loadPriceHistory()" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 6px; font-family: 'Noto Naskh Arabic', serif; min-width: 200px;">
-                  <option value="">الكل</option>
-                  <optgroup label="الوقود">
-                    <option value="بنزين ٨٠">بنزين ٨٠</option>
-                    <option value="بنزين ٩٢">بنزين ٩٢</option>
-                    <option value="بنزين ٩٥">بنزين ٩٥</option>
+            <div class="modal-body">
+              <div class="price-history-filter-row">
+                <div class="price-history-filter-group">
+                  <label for="history-product-filter" class="price-history-filter-label">نوع المنتج:</label>
+                  <select id="history-product-filter" class="price-history-filter-select" onchange="loadPriceHistory()">
+                    <option value="">الكل</option>
+                    <optgroup label="الوقود">
+                      <option value="بنزين ٨٠">بنزين ٨٠</option>
+                      <option value="بنزين ٩٢">بنزين ٩٢</option>
+                      <option value="بنزين ٩٥">بنزين ٩٥</option>
                     <option value="سولار">سولار</option>
                   </optgroup>
                   <optgroup label="الزيوت" id="oil-filter-group">

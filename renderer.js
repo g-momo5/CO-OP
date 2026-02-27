@@ -3,6 +3,7 @@ const { ipcRenderer } = require('electron');
 // Global variables
 let charts = {};
 let currentScreen = 'home';
+window.__currentScreen = currentScreen;
 let currentParentScreen = null;
 let oilItemCounter = 0;
 let navigationHistory = [];
@@ -17,6 +18,7 @@ const HOME_CHART_MODE = {
   SALES: 'sales'
 };
 let currentHomeChartMode = HOME_CHART_MODE.PURCHASES;
+window.__skipBeforeUnloadWarning = false;
 const ANNUAL_INVENTORY_FIELDS = [
   { key: 'prev_balance', id: 'annual-prev-balance' },
   { key: 'station_profit', id: 'annual-station-profit' },
@@ -36,12 +38,14 @@ const screenTitles = {
   'home': 'الرئيسية',
   'invoice': 'فاتورة جديدة',
   'shift-entry': 'إدخال وردية جديدة',
+  'safe-book': 'دفتر الخزينة',
   'charts': 'الرسوم البيانية',
   'report': 'التقارير',
   'settings': 'الإعدادات',
   'depot': 'المخزن',
   'annual-inventory': 'جرد سنوي',
-  'sales-summary': 'ملخص المبيعات'
+  'sales-summary': 'ملخص المبيعات',
+  'profit': 'المكسب'
 };
 
 const settingsSectionTitles = {
@@ -166,6 +170,8 @@ document.addEventListener('DOMContentLoaded', function () {
   loadFuelPrices();
   loadPurchasePrices();
   initSalesSummaryFilters();
+  initSafeBookFilters();
+  loadSafeBookMovements();
 
   // Check for updates on startup if enabled
   setTimeout(() => {
@@ -213,6 +219,7 @@ function initializeApp() {
 
   // Prepare sales summary filters if present
   initSalesSummaryFilters();
+  initSafeBookFilters();
 
   // Generate invoice number
   generateInvoiceNumber();
@@ -222,6 +229,9 @@ function initializeApp() {
 
   // Load home chart on initialization
   loadHomeChart();
+  scheduleHomeChartHeightSync();
+  setTimeout(scheduleHomeChartHeightSync, 80);
+  setTimeout(scheduleHomeChartHeightSync, 220);
   
   // Setup fuel calculation listeners
   setupFuelCalculationListeners();
@@ -244,6 +254,8 @@ function initializeApp() {
 function setupEventListeners() {
   setupHomeChartToggle();
   setupAnnualInventoryCalculator();
+  window.addEventListener('resize', scheduleHomeChartHeightSync);
+  window.addEventListener('resize', scheduleSafeBookTableViewportSync);
 
   // Navigation
   document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -560,6 +572,8 @@ function showScreenWithoutHistory(screenName) {
   }
 
   currentScreen = screenName;
+  window.__currentScreen = currentScreen;
+  syncSafeBookScrollMode();
 
   // Reset scroll position to top
   const mainContent = document.querySelector('.main-content');
@@ -572,6 +586,10 @@ function showScreenWithoutHistory(screenName) {
     case 'home':
       loadHomeChart();
       loadTodayStats();
+      loadSafeBookMovements();
+      scheduleHomeChartHeightSync();
+      setTimeout(scheduleHomeChartHeightSync, 60);
+      setTimeout(scheduleHomeChartHeightSync, 180);
       break;
     case 'invoice':
       setupFuelCalculationListeners();
@@ -590,6 +608,13 @@ function showScreenWithoutHistory(screenName) {
     case 'sales-summary':
       initSalesSummaryFilters();
       loadSalesSummary();
+      break;
+    case 'safe-book':
+      initSafeBookFilters();
+      loadSafeBookMovements();
+      break;
+    case 'profit':
+      initializeProfitDashboard();
       break;
     case 'shift-entry':
       // Initialize customers table IMMEDIATELY to avoid visible delay
@@ -629,6 +654,22 @@ function showScreen(screenName, parentScreen = null) {
     updateShiftTitle();
     toggleHistoryBar(false);
   }
+}
+
+function syncSafeBookScrollMode() {
+  const isSafeBookScreen = currentScreen === 'safe-book';
+  document.body.classList.toggle('safe-book-scroll-lock', isSafeBookScreen);
+
+  if (isSafeBookScreen) {
+    bindSafeBookStickyMonthTracking();
+    scheduleSafeBookTableViewportSync();
+    setTimeout(scheduleSafeBookTableViewportSync, 80);
+    updateSafeBookStickyMonthSummary();
+    setTimeout(updateSafeBookStickyMonthSummary, 80);
+    return;
+  }
+
+  clearSafeBookStickyMonthSummary();
 }
 
 function resetDepotView() {
@@ -687,6 +728,584 @@ async function loadTodayStats() {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parseIsoDateParts(dateString) {
+  const normalized = String(dateString || '').split('T')[0];
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  return {
+    year: parseInt(match[1], 10),
+    month: parseInt(match[2], 10),
+    day: parseInt(match[3], 10)
+  };
+}
+
+function formatSafeBookDate(dateString) {
+  const parts = parseIsoDateParts(dateString);
+  if (!parts) return '-';
+  return `${convertToArabicNumerals(parts.day)}/${convertToArabicNumerals(parts.month)}/${convertToArabicNumerals(parts.year)}`;
+}
+
+const SAFE_BOOK_MONTH_NAMES = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+];
+const SAFE_BOOK_DEFAULT_VISIBLE_ROWS = 15;
+
+function formatSafeBookArabicLongDate(dateString) {
+  const parts = parseIsoDateParts(dateString);
+  if (!parts) return formatArabicDate(dateString);
+
+  const monthName = SAFE_BOOK_MONTH_NAMES[Math.max(0, Math.min(11, parts.month - 1))];
+  return `${convertToArabicNumerals(parts.day)} ${monthName} ${convertToArabicNumerals(parts.year)}`;
+}
+
+function formatShiftSafeBookType(date, shiftNumber) {
+  const shiftLabel = shiftNumber === 1 ? 'صباحا' : 'ليلا';
+  return `إيراد وردية يوم ${formatSafeBookArabicLongDate(date)} ${shiftLabel}`;
+}
+
+function getSafeBookMonthInfo(dateString) {
+  const parts = parseIsoDateParts(dateString);
+  if (!parts) {
+    return { key: 'unknown', label: 'غير محدد' };
+  }
+
+  const monthName = SAFE_BOOK_MONTH_NAMES[Math.max(0, Math.min(11, parts.month - 1))];
+  return {
+    key: `${parts.year}-${String(parts.month).padStart(2, '0')}`,
+    label: `${monthName} ${convertToArabicNumerals(parts.year)}`
+  };
+}
+
+function initSafeBookFilters() {
+  const startMonthSel = document.getElementById('safe-book-start-month');
+  const startYearSel = document.getElementById('safe-book-start-year');
+  const endMonthSel = document.getElementById('safe-book-end-month');
+  const endYearSel = document.getElementById('safe-book-end-year');
+  if (!startMonthSel || !startYearSel || !endMonthSel || !endYearSel) return;
+
+  const end = new Date();
+  const years = [];
+  for (let year = 2025; year <= end.getFullYear(); year++) {
+    years.push(year);
+  }
+
+  const months = SAFE_BOOK_MONTH_NAMES.map((label, index) => ({
+    value: String(index + 1).padStart(2, '0'),
+    label: label
+  }));
+
+  const fillOptions = (select, opts, selectedValue) => {
+    if (!select) return;
+    select.innerHTML = [
+      '<option value="">—</option>',
+      ...opts.map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
+    ].join('');
+    select.value = String(selectedValue);
+  };
+
+  fillOptions(startMonthSel, months, '');
+  fillOptions(endMonthSel, months, '');
+  fillOptions(startYearSel, years.map((year) => ({ value: year, label: year })), '');
+  fillOptions(endYearSel, years.map((year) => ({ value: year, label: year })), '');
+
+  [startMonthSel, startYearSel, endMonthSel, endYearSel].forEach((select) => {
+    if (!select || select.dataset.bound) return;
+    select.addEventListener('change', () => {
+      loadSafeBookMovements();
+    });
+    select.dataset.bound = 'true';
+  });
+
+  const clearBtn = document.getElementById('safe-book-clear-filter-btn');
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.addEventListener('click', () => {
+      clearSafeBookFilters();
+    });
+    clearBtn.dataset.bound = 'true';
+  }
+
+  updateSafeBookClearFilterButtonState(false);
+}
+
+function formatDateYmd(dateObject) {
+  const year = dateObject.getFullYear();
+  const month = String(dateObject.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObject.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getSafeBookFiltersRange() {
+  const startMonthSel = document.getElementById('safe-book-start-month');
+  const startYearSel = document.getElementById('safe-book-start-year');
+  const endMonthSel = document.getElementById('safe-book-end-month');
+  const endYearSel = document.getElementById('safe-book-end-year');
+
+  if (!startMonthSel || !startYearSel || !endMonthSel || !endYearSel) {
+    return { valid: true, isFiltered: false, hasSelection: false, startDate: null, endDate: null };
+  }
+
+  const startMonthVal = startMonthSel.value;
+  const startYearVal = startYearSel.value;
+  const endMonthVal = endMonthSel.value;
+  const endYearVal = endYearSel.value;
+  const values = [startMonthVal, startYearVal, endMonthVal, endYearVal];
+  const hasSelection = values.some((value) => Boolean(value));
+  const hasFullSelection = values.every((value) => Boolean(value));
+
+  if (!hasSelection) {
+    return { valid: true, isFiltered: false, hasSelection: false, startDate: null, endDate: null };
+  }
+
+  if (!hasFullSelection) {
+    return { valid: true, isFiltered: false, hasSelection: true, startDate: null, endDate: null };
+  }
+
+  const startYear = parseInt(startYearVal, 10);
+  const startMonth = parseInt(startMonthVal, 10);
+  const endYear = parseInt(endYearVal, 10);
+  const endMonth = parseInt(endMonthVal, 10);
+
+  if (!startYear || !startMonth || !endYear || !endMonth) {
+    return { valid: false, isFiltered: false, hasSelection: true, message: 'صيغة الشهر غير صحيحة' };
+  }
+
+  const startDateObj = new Date(startYear, startMonth - 1, 1);
+  const endDateObj = new Date(endYear, endMonth, 0);
+  if (startDateObj > endDateObj) {
+    return { valid: false, isFiltered: false, hasSelection: true, message: 'فترة زمنية غير صحيحة' };
+  }
+
+  return {
+    valid: true,
+    isFiltered: true,
+    hasSelection: true,
+    startDate: formatDateYmd(startDateObj),
+    endDate: formatDateYmd(endDateObj)
+  };
+}
+
+function clearSafeBookFilters() {
+  const startMonthSel = document.getElementById('safe-book-start-month');
+  const startYearSel = document.getElementById('safe-book-start-year');
+  const endMonthSel = document.getElementById('safe-book-end-month');
+  const endYearSel = document.getElementById('safe-book-end-year');
+
+  if (startMonthSel) startMonthSel.value = '';
+  if (startYearSel) startYearSel.value = '';
+  if (endMonthSel) endMonthSel.value = '';
+  if (endYearSel) endYearSel.value = '';
+
+  updateSafeBookClearFilterButtonState(false);
+  loadSafeBookMovements();
+}
+
+function updateSafeBookClearFilterButtonState(enabled) {
+  const clearBtn = document.getElementById('safe-book-clear-filter-btn');
+  if (!clearBtn) return;
+  clearBtn.disabled = !enabled;
+}
+
+function updateSafeBookBalanceDisplay(balance) {
+  const balanceEl = document.getElementById('safe-book-balance-value');
+  if (!balanceEl) return;
+
+  const numericBalance = Number.isFinite(balance) ? balance : 0;
+  balanceEl.textContent = formatArabicCurrency(numericBalance);
+  balanceEl.classList.toggle('negative', numericBalance < 0);
+}
+
+function updateSafeBookPeriodBalancesDisplay(startBalance, endBalance) {
+  const startEl = document.getElementById('safe-book-period-start-value');
+  const endEl = document.getElementById('safe-book-period-end-value');
+
+  const safeStart = Number.isFinite(startBalance) ? startBalance : 0;
+  const safeEnd = Number.isFinite(endBalance) ? endBalance : 0;
+
+  if (startEl) {
+    startEl.textContent = formatArabicCurrency(safeStart);
+    startEl.classList.toggle('negative', safeStart < 0);
+  }
+
+  if (endEl) {
+    endEl.textContent = formatArabicCurrency(safeEnd);
+    endEl.classList.toggle('negative', safeEnd < 0);
+  }
+}
+
+function setSafeBookPeriodBalancesVisibility(visible) {
+  const container = document.getElementById('safe-book-period-balances');
+  if (!container) return;
+  container.style.display = visible ? 'flex' : 'none';
+}
+
+function syncSafeBookTableViewportHeight() {
+  const safeBookScreen = document.getElementById('safe-book-screen');
+  if (!safeBookScreen || !safeBookScreen.classList.contains('active')) return;
+
+  const tableWrapper = safeBookScreen.querySelector('.safe-book-table-wrapper');
+  if (!tableWrapper) return;
+
+  const viewportHeight = window.innerHeight;
+  const wrapperTop = tableWrapper.getBoundingClientRect().top;
+  const bottomNav = document.querySelector('.bottom-navigation');
+
+  let bottomReserve = 16;
+  if (bottomNav) {
+    const navRect = bottomNav.getBoundingClientRect();
+    if (navRect.top < viewportHeight) {
+      bottomReserve = Math.max(bottomReserve, (viewportHeight - navRect.top) + 12);
+    }
+  }
+
+  const availableHeight = Math.floor(viewportHeight - wrapperTop - bottomReserve);
+  if (availableHeight > 80) {
+    tableWrapper.style.maxHeight = `${availableHeight}px`;
+  }
+}
+
+function scheduleSafeBookTableViewportSync() {
+  window.requestAnimationFrame(() => {
+    syncSafeBookTableViewportHeight();
+  });
+}
+
+function clearSafeBookStickyMonthSummary() {
+  const stickyMonth = document.getElementById('safe-book-sticky-month');
+  if (!stickyMonth) return;
+  stickyMonth.style.display = 'none';
+  stickyMonth.innerHTML = '';
+  stickyMonth.dataset.monthKey = '';
+}
+
+function updateSafeBookStickyMonthSummary() {
+  const safeBookScreen = document.getElementById('safe-book-screen');
+  if (!safeBookScreen || !safeBookScreen.classList.contains('active')) {
+    clearSafeBookStickyMonthSummary();
+    return;
+  }
+
+  const tableWrapper = safeBookScreen.querySelector('.safe-book-table-wrapper');
+  const stickyMonth = document.getElementById('safe-book-sticky-month');
+  if (!tableWrapper || !stickyMonth) return;
+
+  const monthRows = Array.from(tableWrapper.querySelectorAll('tr.safe-book-month-row'));
+  if (!monthRows.length || tableWrapper.scrollTop <= 0) {
+    clearSafeBookStickyMonthSummary();
+    return;
+  }
+
+  let activeMonthRow = monthRows[0];
+  const threshold = tableWrapper.scrollTop + 1;
+  for (const monthRow of monthRows) {
+    if (monthRow.offsetTop <= threshold) {
+      activeMonthRow = monthRow;
+      continue;
+    }
+    break;
+  }
+
+  const activeHeader = activeMonthRow.querySelector('.safe-book-month-header');
+  if (!activeHeader) {
+    clearSafeBookStickyMonthSummary();
+    return;
+  }
+
+  const monthKey = activeMonthRow.dataset.monthKey || '';
+  if (stickyMonth.dataset.monthKey !== monthKey) {
+    stickyMonth.innerHTML = `<div class="safe-book-month-header">${activeHeader.innerHTML}</div>`;
+    stickyMonth.dataset.monthKey = monthKey;
+  }
+  stickyMonth.style.display = 'block';
+}
+
+function bindSafeBookStickyMonthTracking() {
+  const safeBookScreen = document.getElementById('safe-book-screen');
+  if (!safeBookScreen) return;
+
+  const tableWrapper = safeBookScreen.querySelector('.safe-book-table-wrapper');
+  if (!tableWrapper) return;
+
+  if (typeof tableWrapper.__safeBookStickyHandler === 'function') {
+    tableWrapper.removeEventListener('scroll', tableWrapper.__safeBookStickyHandler);
+  }
+
+  tableWrapper.__safeBookStickyHandler = () => {
+    updateSafeBookStickyMonthSummary();
+  };
+  tableWrapper.addEventListener('scroll', tableWrapper.__safeBookStickyHandler, { passive: true });
+
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent && typeof mainContent.__safeBookStickyHandler !== 'function') {
+    mainContent.__safeBookStickyHandler = () => {
+      updateSafeBookStickyMonthSummary();
+    };
+    mainContent.addEventListener('scroll', mainContent.__safeBookStickyHandler, { passive: true });
+  }
+}
+
+async function loadSafeBookMovements() {
+  const tableBody = document.getElementById('safe-book-body');
+  if (!tableBody) return;
+
+  try {
+    const allMovements = await ipcRenderer.invoke('get-safe-book-movements');
+
+    if (!Array.isArray(allMovements) || allMovements.length === 0) {
+      const filtersRange = getSafeBookFiltersRange();
+      updateSafeBookBalanceDisplay(0);
+      updateSafeBookPeriodBalancesDisplay(0, 0);
+      setSafeBookPeriodBalancesVisibility(false);
+      updateSafeBookClearFilterButtonState(Boolean(filtersRange.hasSelection));
+      clearSafeBookStickyMonthSummary();
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="3" style="text-align:center; color:#777;">لا توجد حركات حالياً</td>
+        </tr>
+      `;
+      return;
+    }
+
+    const signedAmount = (movement) => {
+      const direction = movement.direction === 'out' ? 'out' : 'in';
+      const amount = Math.abs(parseFloat(movement.amount) || 0);
+      return direction === 'out' ? -amount : amount;
+    };
+
+    const getMovementDate = (movement) => String(movement?.date || '').split('T')[0];
+
+    const currentBalance = allMovements.reduce((sum, movement) => sum + signedAmount(movement), 0);
+    updateSafeBookBalanceDisplay(currentBalance);
+
+    const filtersRange = getSafeBookFiltersRange();
+    updateSafeBookClearFilterButtonState(Boolean(filtersRange.hasSelection));
+    if (!filtersRange.valid) {
+      updateSafeBookPeriodBalancesDisplay(0, 0);
+      setSafeBookPeriodBalancesVisibility(false);
+      clearSafeBookStickyMonthSummary();
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="3" style="text-align:center; color:#777;">${filtersRange.message}</td>
+        </tr>
+      `;
+      return;
+    }
+
+    const hasDateFilter = Boolean(filtersRange.isFiltered && filtersRange.startDate && filtersRange.endDate);
+    if (hasDateFilter) {
+      const startBalance = allMovements.reduce((sum, movement) => {
+        const movementDate = getMovementDate(movement);
+        if (!movementDate || movementDate >= filtersRange.startDate) return sum;
+        return sum + signedAmount(movement);
+      }, 0);
+
+      const endBalance = allMovements.reduce((sum, movement) => {
+        const movementDate = getMovementDate(movement);
+        if (!movementDate || movementDate > filtersRange.endDate) return sum;
+        return sum + signedAmount(movement);
+      }, 0);
+
+      updateSafeBookPeriodBalancesDisplay(startBalance, endBalance);
+      setSafeBookPeriodBalancesVisibility(true);
+    } else {
+      updateSafeBookPeriodBalancesDisplay(0, currentBalance);
+      setSafeBookPeriodBalancesVisibility(false);
+    }
+
+    const filteredMovements = hasDateFilter
+      ? allMovements.filter((movement) => {
+          const movementDate = getMovementDate(movement);
+          if (!movementDate) return false;
+          return movementDate >= filtersRange.startDate && movementDate <= filtersRange.endDate;
+        })
+      : allMovements;
+
+    const movements = hasDateFilter
+      ? filteredMovements
+      : filteredMovements.slice(0, SAFE_BOOK_DEFAULT_VISIBLE_ROWS);
+
+    if (movements.length === 0) {
+      clearSafeBookStickyMonthSummary();
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="3" style="text-align:center; color:#777;">
+            ${hasDateFilter ? 'لا توجد حركات في الفترة المحددة' : 'لا توجد حركات حالياً'}
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const monthlyGroups = new Map();
+    movements.forEach((movement) => {
+      const direction = movement.direction === 'out' ? 'out' : 'in';
+      const amount = Math.abs(parseFloat(movement.amount) || 0);
+      const dateText = formatSafeBookDate(movement.date);
+      const movementType = movement.source === 'shift'
+        ? formatShiftSafeBookType(movement.date, parseInt(movement.shift_number, 10) || 1)
+        : (movement.movement_type || 'حركة يدوية');
+
+      const monthInfo = getSafeBookMonthInfo(movement.date);
+      if (!monthlyGroups.has(monthInfo.key)) {
+        monthlyGroups.set(monthInfo.key, {
+          key: monthInfo.key,
+          label: monthInfo.label,
+          totalIn: 0,
+          totalOut: 0,
+          rows: []
+        });
+      }
+
+      const monthGroup = monthlyGroups.get(monthInfo.key);
+      if (direction === 'out') {
+        monthGroup.totalOut += amount;
+      } else {
+        monthGroup.totalIn += amount;
+      }
+
+      monthGroup.rows.push(`
+        <tr>
+          <td>${dateText}</td>
+          <td>${escapeHtml(movementType)}</td>
+          <td class="safe-book-value ${direction}">${formatArabicCurrency(amount)}</td>
+        </tr>
+      `);
+    });
+
+    const rowsHtml = Array.from(monthlyGroups.values()).map((monthGroup) => {
+      const monthHeader = `
+        <tr class="safe-book-month-row" data-month-key="${escapeHtml(monthGroup.key)}">
+          <td colspan="3" class="safe-book-month-cell">
+            <div class="safe-book-month-header">
+              <span class="safe-book-month-name">${escapeHtml(monthGroup.label)}</span>
+              <div class="safe-book-month-totals">
+                <span class="safe-book-month-in">${formatArabicCurrency(monthGroup.totalIn)}</span>
+                <span class="safe-book-month-out">${formatArabicCurrency(monthGroup.totalOut)}</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+      `;
+
+      return `${monthHeader}${monthGroup.rows.join('')}`;
+    }).join('');
+
+    tableBody.innerHTML = rowsHtml;
+    bindSafeBookStickyMonthTracking();
+    updateSafeBookStickyMonthSummary();
+    scheduleSafeBookTableViewportSync();
+    setTimeout(updateSafeBookStickyMonthSummary, 80);
+  } catch (error) {
+    console.error('Error loading safe book movements:', error);
+    updateSafeBookBalanceDisplay(0);
+    updateSafeBookPeriodBalancesDisplay(0, 0);
+    setSafeBookPeriodBalancesVisibility(false);
+    clearSafeBookStickyMonthSummary();
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="3" style="text-align:center; color:#c4291d;">حدث خطأ أثناء تحميل دفتر الخزينة</td>
+      </tr>
+    `;
+    scheduleSafeBookTableViewportSync();
+  }
+}
+
+function toggleSafeBookForm(forceShow) {
+  const form = document.getElementById('safe-book-form');
+  if (!form) return;
+
+  const shouldShow = typeof forceShow === 'boolean'
+    ? forceShow
+    : form.style.display === 'none';
+
+  if (shouldShow) {
+    form.style.display = 'block';
+    const dateInput = document.getElementById('safe-book-date');
+    const typeInput = document.getElementById('safe-book-type');
+    if (dateInput && !dateInput.value) {
+      dateInput.value = getTodayDate();
+    }
+    if (typeInput) {
+      setTimeout(() => typeInput.focus(), 0);
+    }
+    scheduleSafeBookTableViewportSync();
+    setTimeout(scheduleSafeBookTableViewportSync, 60);
+    setTimeout(updateSafeBookStickyMonthSummary, 60);
+  } else {
+    form.style.display = 'none';
+    const dateInput = document.getElementById('safe-book-date');
+    const typeInput = document.getElementById('safe-book-type');
+    const amountInput = document.getElementById('safe-book-amount');
+    const directionSelect = document.getElementById('safe-book-direction');
+
+    if (dateInput) dateInput.value = '';
+    if (typeInput) typeInput.value = '';
+    if (amountInput) amountInput.value = '';
+    if (directionSelect) directionSelect.value = 'in';
+    scheduleSafeBookTableViewportSync();
+    setTimeout(scheduleSafeBookTableViewportSync, 60);
+    setTimeout(updateSafeBookStickyMonthSummary, 60);
+  }
+}
+
+async function saveSafeBookMovement() {
+  const dateInput = document.getElementById('safe-book-date');
+  const typeInput = document.getElementById('safe-book-type');
+  const amountInput = document.getElementById('safe-book-amount');
+  const directionSelect = document.getElementById('safe-book-direction');
+
+  const date = dateInput?.value || '';
+  const movementType = (typeInput?.value || '').trim();
+  const amount = parseFloat(amountInput?.value);
+  const direction = directionSelect?.value || 'in';
+
+  if (!date) {
+    showMessage('يرجى تحديد التاريخ', 'error');
+    return;
+  }
+
+  if (!movementType) {
+    showMessage('يرجى إدخال نوع الحركة', 'error');
+    return;
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showMessage('يرجى إدخال قيمة صحيحة', 'error');
+    return;
+  }
+
+  if (direction !== 'in' && direction !== 'out') {
+    showMessage('نوع الحركة غير صالح', 'error');
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('add-safe-book-movement', {
+      date: date,
+      movement_type: movementType,
+      amount: amount,
+      direction: direction
+    });
+
+    showMessage('تمت إضافة حركة الخزينة بنجاح', 'success');
+    toggleSafeBookForm(false);
+    await loadSafeBookMovements();
+  } catch (error) {
+    console.error('Error saving safe book movement:', error);
+    showMessage(error.message || 'حدث خطأ أثناء إضافة حركة الخزينة', 'error');
+  }
+}
+
 function setupHomeChartToggle() {
   const toggleButtons = document.querySelectorAll('.home-chart-toggle-btn');
   if (!toggleButtons.length) return;
@@ -710,6 +1329,60 @@ function setupHomeChartToggle() {
   });
 
   updateHomeChartToggleUI();
+}
+
+function syncHomeChartHeightToCardRows() {
+  const homeScreen = document.getElementById('home-screen');
+  if (!homeScreen || !homeScreen.classList.contains('active')) return;
+
+  const chartContainer = homeScreen.querySelector('.home-chart-container');
+  const cardsGrid = homeScreen.querySelector('.action-cards-grid');
+  if (!chartContainer || !cardsGrid) return;
+
+  // Keep mobile sizing delegated to CSS media rules.
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    chartContainer.style.removeProperty('height');
+    return;
+  }
+
+  const cards = Array.from(cardsGrid.querySelectorAll('.action-card'));
+  if (!cards.length) return;
+
+  const rowTolerance = 4;
+  const rowGroups = [];
+  cards.forEach((card) => {
+    const rect = card.getBoundingClientRect();
+    const top = rect.top;
+    const existingGroup = rowGroups.find(group => Math.abs(group.top - top) <= rowTolerance);
+
+    if (!existingGroup) {
+      rowGroups.push({ top, height: rect.height });
+      return;
+    }
+
+    existingGroup.height = Math.max(existingGroup.height, rect.height);
+  });
+
+  const sortedRowHeights = rowGroups
+    .sort((a, b) => a.top - b.top)
+    .map(group => group.height);
+
+  if (!sortedRowHeights.length) return;
+
+  const targetRows = 2;
+  const usedRows = sortedRowHeights.slice(0, targetRows);
+  const rowsHeight = usedRows.reduce((total, height) => total + height, 0);
+  const gridStyle = window.getComputedStyle(cardsGrid);
+  const rowGap = parseFloat(gridStyle.rowGap || gridStyle.gap || '0') || 0;
+  const totalGap = rowGap * Math.max(0, usedRows.length - 1);
+
+  chartContainer.style.height = `${Math.round(rowsHeight + totalGap)}px`;
+}
+
+function scheduleHomeChartHeightSync() {
+  window.requestAnimationFrame(() => {
+    syncHomeChartHeightToCardRows();
+  });
 }
 
 function updateHomeChartToggleUI() {
@@ -1262,12 +1935,14 @@ async function loadHomeChart() {
     }
 
     createMonthlyFuelSalesChart(chartData, currentHomeChartMode);
+    scheduleHomeChartHeightSync();
   } catch (error) {
     if (isSalesMode) {
       showMessage('عرض الكميات المباعة غير متاح حالياً', 'warning');
     }
     console.error('Error loading home chart:', error);
     createMonthlyFuelSalesChart([], currentHomeChartMode);
+    scheduleHomeChartHeightSync();
   }
 }
 
@@ -1316,9 +1991,13 @@ async function loadPurchasePrices() {
 
 
 async function saveFuelInvoice() {
+  const actualInvoiceTotalInput = document.getElementById('actual-invoice-total');
+  const parsedInvoiceTotal = parseAnnualInventoryValue(actualInvoiceTotalInput?.value || '');
+
   const invoiceData = {
     date: document.getElementById('fuel-invoice-date').value,
     invoice_number: document.getElementById('fuel-invoice-number').value,
+    invoice_total: parsedInvoiceTotal,
     fuel_items: []
   };
 
@@ -1350,6 +2029,10 @@ async function saveFuelInvoice() {
   if (invoiceData.fuel_items.length === 0) {
     showMessage('يرجى إدخال بيانات على الأقل لنوع واحد من الوقود', 'error');
     return;
+  }
+
+  if (invoiceData.invoice_total <= 0) {
+    invoiceData.invoice_total = invoiceData.fuel_items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
   }
 
   try {
@@ -4345,6 +5028,33 @@ let currentShiftData = {
 let shiftViewMode = 'edit'; // 'edit' | 'history'
 let salesSummaryCache = { sales: [], months: [], products: [] };
 let expandedSalesMonth = null;
+const SALES_SUMMARY_ORDER_KEY = 'sales-summary-order';
+const PROFIT_MANUAL_FIELDS = [
+  'oil_total',
+  'bonuses',
+  'commission_diff',
+  'deposit_tax',
+  'bonus_tax'
+];
+let profitRowsCache = [];
+let profitDefaultRange = null;
+let profitCustomRowsCache = [];
+let profitCustomValuesMap = new Map();
+const PROFIT_TABLE_ROWS = [
+  { key: 'fuel_diesel', label: 'سولار', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'fuel_80', label: 'بنزين ٨٠', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'fuel_92', label: 'بنزين ٩٢', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'fuel_95', label: 'بنزين ٩٥', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'fuel_total_month', label: 'إجمالي الوقود', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'oil_total', label: 'الزيوت', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
+  { key: 'wash_lube_month', label: 'غسيل و تشحيم', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
+  { key: 'bonuses', label: 'حوافز', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
+  { key: 'commission_diff', label: 'فرق العمولة', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
+  { key: 'expenses_month', label: 'المصاريف', type: 'auto', section: 'deduction', cellClass: 'deduction-col auto-col' },
+  { key: 'cash_insurance_month', label: 'تأمين نقدى', type: 'auto', section: 'deduction', cellClass: 'deduction-col auto-col' },
+  { key: 'deposit_tax', label: 'ضريبة المنبع', type: 'manual-fixed', section: 'deduction', cellClass: 'deduction-col' },
+  { key: 'bonus_tax', label: 'ضرائب الحافز', type: 'manual-fixed', section: 'deduction', cellClass: 'deduction-col' }
+];
 
 // Default summary date range (current year to date)
 function initSalesSummaryFilters() {
@@ -4511,7 +5221,8 @@ async function loadSalesSummary() {
       });
     });
 
-    const products = productsOrdered.length > 0 ? productsOrdered : Array.from(productSet).sort((a, b) => a.localeCompare(b));
+    let products = productsOrdered.length > 0 ? productsOrdered : Array.from(productSet).sort((a, b) => a.localeCompare(b));
+    products = applySavedSalesSummaryOrder(products);
     // Store for later drill-down use
     salesSummaryCache = { sales, months, products };
 
@@ -4544,10 +5255,20 @@ async function loadSalesSummary() {
         totalQty += entry.qty;
         return `<td class="cell-qty-only">${formatArabicNumber(entry.qty)}</td>`;
       }).join('');
-      return `<tr><td>${product}</td>${cells}<td class="cell-total">${formatArabicNumber(totalQty)}</td></tr>`;
+      return `
+        <tr draggable="true" class="draggable-oil-row draggable-sales-summary-row">
+          <td class="oil-name-cell">
+            <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
+            <strong>${product}</strong>
+          </td>
+          ${cells}
+          <td class="cell-total">${formatArabicNumber(totalQty)}</td>
+        </tr>
+      `;
     }).join('');
 
     tbody.innerHTML = rowsHtml;
+    enableSalesSummaryRowDragDrop();
     if (emptyState) emptyState.style.display = 'none';
   } catch (error) {
     console.error('Error loading sales summary:', error);
@@ -4557,6 +5278,80 @@ async function loadSalesSummary() {
       emptyState.textContent = 'حدث خطأ أثناء تحميل الملخص';
     }
   }
+}
+
+// Load sales summary order from localStorage and apply it
+function applySavedSalesSummaryOrder(products) {
+  if (!Array.isArray(products) || products.length === 0) return products;
+
+  const savedOrder = localStorage.getItem(SALES_SUMMARY_ORDER_KEY);
+  if (!savedOrder) return products;
+
+  try {
+    const orderArray = JSON.parse(savedOrder);
+    return [...products].sort((a, b) => {
+      const indexA = orderArray.indexOf(a);
+      const indexB = orderArray.indexOf(b);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+  } catch (error) {
+    console.error('Error parsing saved sales summary order:', error);
+    return products;
+  }
+}
+
+// Enable drag and drop for sales summary rows
+function enableSalesSummaryRowDragDrop() {
+  const tableBody = document.getElementById('sales-summary-body');
+  if (!tableBody) return;
+
+  let draggedRow = null;
+  const rows = tableBody.querySelectorAll('.draggable-sales-summary-row');
+
+  rows.forEach(row => {
+    row.addEventListener('dragstart', function(e) {
+      draggedRow = this;
+      this.style.opacity = '0.5';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    row.addEventListener('dragend', function() {
+      this.style.opacity = '1';
+      draggedRow = null;
+      saveSalesSummaryOrder();
+    });
+
+    row.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      if (draggedRow && draggedRow !== this) {
+        const rect = this.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+
+        if (e.clientY < midpoint) {
+          tableBody.insertBefore(draggedRow, this);
+        } else {
+          tableBody.insertBefore(draggedRow, this.nextSibling);
+        }
+      }
+    });
+  });
+}
+
+// Save sales summary order to localStorage
+function saveSalesSummaryOrder() {
+  const tableBody = document.getElementById('sales-summary-body');
+  if (!tableBody) return;
+
+  const rows = tableBody.querySelectorAll('.draggable-sales-summary-row');
+  const order = Array.from(rows)
+    .map(row => row.querySelector('td strong')?.textContent?.trim())
+    .filter(Boolean);
+
+  localStorage.setItem(SALES_SUMMARY_ORDER_KEY, JSON.stringify(order));
 }
 
 function toggleMonthDetails(month) {
@@ -4628,6 +5423,823 @@ function formatMonthLabel(monthStr) {
   const [y, m] = monthStr.split('-');
   return `${m}/${y}`;
 }
+
+function normalizeMonthKey(monthKey) {
+  const normalized = String(monthKey || '').trim();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : null;
+}
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getDefaultProfitRange(availableMonths) {
+  const normalizedMonths = Array.isArray(availableMonths)
+    ? availableMonths
+        .map((monthKey) => normalizeMonthKey(monthKey))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+    : [];
+
+  if (normalizedMonths.length === 0) {
+    const currentMonth = getCurrentMonthKey();
+    return { fromMonth: currentMonth, toMonth: currentMonth };
+  }
+
+  const toMonth = normalizedMonths[normalizedMonths.length - 1];
+  const fromMonth = normalizedMonths[Math.max(0, normalizedMonths.length - 12)];
+  return { fromMonth, toMonth };
+}
+
+function formatProfitMonthLabel(monthKey) {
+  const normalized = normalizeMonthKey(monthKey);
+  if (!normalized) return '-';
+  const [yearText, monthText] = normalized.split('-');
+  const monthIndex = Math.max(0, Math.min(11, parseInt(monthText, 10) - 1));
+  return `${SAFE_BOOK_MONTH_NAMES[monthIndex]} ${convertToArabicNumerals(yearText)}`;
+}
+
+function normalizeProfitCustomRowType(value) {
+  const type = String(value || '').trim();
+  return type === 'deduction' ? 'deduction' : 'revenue';
+}
+
+function normalizeProfitCustomRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  const rowKey = String(row.row_key || '').trim();
+  if (!rowKey) return null;
+
+  const rowType = normalizeProfitCustomRowType(row.row_type);
+  const rowLabelRaw = String(row.row_label || '').trim();
+  const defaultLabel = rowType === 'deduction' ? 'خصم إضافي' : 'إيراد إضافي';
+
+  return {
+    row_key: rowKey,
+    row_type: rowType,
+    row_label: rowLabelRaw || defaultLabel,
+    display_order: parseInt(row.display_order, 10) || 0
+  };
+}
+
+function getProfitCustomValue(rowKey, monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  const key = `${rowKey}__${normalizedMonth}`;
+  return parseAnnualInventoryValue(profitCustomValuesMap.get(key));
+}
+
+function setProfitCustomValue(rowKey, monthKey, amount) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return;
+  const key = `${rowKey}__${normalizedMonth}`;
+  profitCustomValuesMap.set(key, parseAnnualInventoryValue(amount));
+}
+
+function getProfitCustomTotalsForMonth(monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return { revenue: 0, deduction: 0 };
+
+  let revenue = 0;
+  let deduction = 0;
+  profitCustomRowsCache.forEach((row) => {
+    const value = getProfitCustomValue(row.row_key, normalizedMonth);
+    if (row.row_type === 'deduction') {
+      deduction += value;
+    } else {
+      revenue += value;
+    }
+  });
+
+  return { revenue, deduction };
+}
+
+function recalculateProfitDerivedValues(row, customTotals = { revenue: 0, deduction: 0 }) {
+  if (!row || typeof row !== 'object') return row;
+
+  row.fuel_diesel = parseAnnualInventoryValue(row.fuel_diesel);
+  row.fuel_80 = parseAnnualInventoryValue(row.fuel_80);
+  row.fuel_92 = parseAnnualInventoryValue(row.fuel_92);
+  row.fuel_95 = parseAnnualInventoryValue(row.fuel_95);
+  row.oil_total = parseAnnualInventoryValue(row.oil_total);
+  row.wash_lube_month = parseAnnualInventoryValue(row.wash_lube_month);
+  row.bonuses = parseAnnualInventoryValue(row.bonuses);
+  row.commission_diff = parseAnnualInventoryValue(row.commission_diff);
+  row.cash_insurance_month = parseAnnualInventoryValue(row.cash_insurance_month);
+  row.expenses_month = parseAnnualInventoryValue(row.expenses_month);
+  row.deposit_tax = parseAnnualInventoryValue(row.deposit_tax);
+  row.bonus_tax = parseAnnualInventoryValue(row.bonus_tax);
+  row.custom_revenue_total = parseAnnualInventoryValue(customTotals.revenue);
+  row.custom_deduction_total = parseAnnualInventoryValue(customTotals.deduction);
+
+  row.fuel_total_month = row.fuel_diesel + row.fuel_80 + row.fuel_92 + row.fuel_95;
+  row.total_positive = row.fuel_total_month + row.oil_total + row.wash_lube_month + row.bonuses + row.commission_diff + row.custom_revenue_total;
+  row.total_deductions = row.cash_insurance_month + row.expenses_month + row.deposit_tax + row.bonus_tax + row.custom_deduction_total;
+  row.net_profit = row.total_positive - row.total_deductions;
+  return row;
+}
+
+function rebuildProfitRowsWithCustomTotals() {
+  profitRowsCache = (Array.isArray(profitRowsCache) ? profitRowsCache : []).map((row) => {
+    const monthKey = normalizeMonthKey(row.month_key);
+    const customTotals = getProfitCustomTotalsForMonth(monthKey);
+    return recalculateProfitDerivedValues(row, customTotals);
+  });
+}
+
+function getSortedProfitCustomRowsByType(rowType) {
+  return profitCustomRowsCache
+    .filter((row) => row.row_type === rowType)
+    .sort((a, b) => (a.display_order - b.display_order) || a.row_key.localeCompare(b.row_key));
+}
+
+function buildProfitDisplayRows() {
+  const revenueRows = PROFIT_TABLE_ROWS.filter((row) => row.section === 'revenue');
+  const deductionRows = PROFIT_TABLE_ROWS.filter((row) => row.section === 'deduction');
+
+  const customRevenueRows = getSortedProfitCustomRowsByType('revenue').map((row) => ({
+    key: row.row_key,
+    label: row.row_label,
+    type: 'custom',
+    section: 'revenue',
+    cellClass: 'positive-col',
+    row_key: row.row_key
+  }));
+
+  const customDeductionRows = getSortedProfitCustomRowsByType('deduction').map((row) => ({
+    key: row.row_key,
+    label: row.row_label,
+    type: 'custom',
+    section: 'deduction',
+    cellClass: 'deduction-col',
+    row_key: row.row_key
+  }));
+
+  return [
+    ...revenueRows,
+    ...customRevenueRows,
+    { key: 'total_positive', label: 'إجمالي الإيرادات', type: 'auto', section: 'revenue-total', cellClass: 'positive-col auto-col' },
+    ...deductionRows,
+    ...customDeductionRows,
+    { key: 'total_deductions', label: 'إجمالي الخصومات', type: 'auto', section: 'deduction-total', cellClass: 'deduction-col auto-col' },
+    { key: 'net_profit', label: 'صافي المكسب', type: 'auto-net', section: 'net', cellClass: 'net-col' }
+  ];
+}
+
+function setProfitSaveStatus(state, customMessage = '') {
+  const statusEl = document.getElementById('profit-save-status');
+  if (!statusEl) return;
+
+  const stateMessages = {
+    idle: 'جاهز',
+    saving: 'جارٍ الحفظ...',
+    saved: 'تم الحفظ',
+    error: 'خطأ'
+  };
+
+  statusEl.classList.remove('idle', 'saving', 'saved', 'error');
+  statusEl.classList.add(state || 'idle');
+  statusEl.textContent = customMessage || stateMessages[state] || stateMessages.idle;
+}
+
+function bindProfitRowActionButtons() {
+  const addRevenueButton = document.getElementById('profit-add-revenue-row');
+  if (addRevenueButton && addRevenueButton.dataset.bound !== 'true') {
+    addRevenueButton.addEventListener('click', () => {
+      addProfitCustomRow('revenue');
+    });
+    addRevenueButton.dataset.bound = 'true';
+  }
+
+  const addDeductionButton = document.getElementById('profit-add-deduction-row');
+  if (addDeductionButton && addDeductionButton.dataset.bound !== 'true') {
+    addDeductionButton.addEventListener('click', () => {
+      addProfitCustomRow('deduction');
+    });
+    addDeductionButton.dataset.bound = 'true';
+  }
+}
+
+function populateProfitFilterOptions(availableMonths, defaultRange) {
+  const startMonthSel = document.getElementById('profit-start-month');
+  const startYearSel = document.getElementById('profit-start-year');
+  const endMonthSel = document.getElementById('profit-end-month');
+  const endYearSel = document.getElementById('profit-end-year');
+  if (!startMonthSel || !startYearSel || !endMonthSel || !endYearSel) return;
+
+  const validMonths = Array.isArray(availableMonths)
+    ? availableMonths
+        .map((monthKey) => normalizeMonthKey(monthKey))
+        .filter(Boolean)
+    : [];
+
+  const nowYear = new Date().getFullYear();
+  const yearValues = validMonths.map((monthKey) => parseInt(monthKey.slice(0, 4), 10)).filter(Number.isFinite);
+  const minYear = yearValues.length > 0 ? Math.min(...yearValues) : nowYear;
+  const maxYear = yearValues.length > 0 ? Math.max(nowYear, Math.max(...yearValues)) : nowYear;
+
+  const years = [];
+  for (let year = minYear; year <= maxYear; year += 1) {
+    years.push(year);
+  }
+
+  const monthOptions = SAFE_BOOK_MONTH_NAMES.map((label, index) => ({
+    value: String(index + 1).padStart(2, '0'),
+    label
+  }));
+  const yearOptions = years.map((year) => ({
+    value: String(year),
+    label: convertToArabicNumerals(year)
+  }));
+
+  const fillSelect = (select, options, selectedValue) => {
+    select.innerHTML = options.map((option) => (
+      `<option value="${option.value}">${option.label}</option>`
+    )).join('');
+    if (selectedValue) {
+      select.value = selectedValue;
+    }
+  };
+
+  const safeDefault = defaultRange && normalizeMonthKey(defaultRange.fromMonth) && normalizeMonthKey(defaultRange.toMonth)
+    ? defaultRange
+    : getDefaultProfitRange(validMonths);
+
+  fillSelect(startMonthSel, monthOptions, safeDefault.fromMonth.slice(5, 7));
+  fillSelect(endMonthSel, monthOptions, safeDefault.toMonth.slice(5, 7));
+  fillSelect(startYearSel, yearOptions, safeDefault.fromMonth.slice(0, 4));
+  fillSelect(endYearSel, yearOptions, safeDefault.toMonth.slice(0, 4));
+
+  const filterBtn = document.getElementById('profit-filter-btn');
+  if (filterBtn && !filterBtn.dataset.bound) {
+    filterBtn.addEventListener('click', () => {
+      loadProfitMonthlyData();
+    });
+    filterBtn.dataset.bound = 'true';
+  }
+
+  const clearBtn = document.getElementById('profit-clear-filter-btn');
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.addEventListener('click', () => {
+      if (!profitDefaultRange) {
+        profitDefaultRange = getDefaultProfitRange(validMonths);
+      }
+      if (profitDefaultRange) {
+        startMonthSel.value = profitDefaultRange.fromMonth.slice(5, 7);
+        startYearSel.value = profitDefaultRange.fromMonth.slice(0, 4);
+        endMonthSel.value = profitDefaultRange.toMonth.slice(5, 7);
+        endYearSel.value = profitDefaultRange.toMonth.slice(0, 4);
+      }
+      loadProfitMonthlyData();
+    });
+    clearBtn.dataset.bound = 'true';
+  }
+}
+
+function getProfitFiltersRange() {
+  const startMonthSel = document.getElementById('profit-start-month');
+  const startYearSel = document.getElementById('profit-start-year');
+  const endMonthSel = document.getElementById('profit-end-month');
+  const endYearSel = document.getElementById('profit-end-year');
+
+  if (!startMonthSel || !startYearSel || !endMonthSel || !endYearSel) {
+    const currentMonth = getCurrentMonthKey();
+    return { valid: true, fromMonth: currentMonth, toMonth: currentMonth };
+  }
+
+  const startMonth = normalizeMonthKey(`${startYearSel.value}-${startMonthSel.value}`);
+  const endMonth = normalizeMonthKey(`${endYearSel.value}-${endMonthSel.value}`);
+
+  if (!startMonth || !endMonth) {
+    return { valid: false, message: 'صيغة الشهر غير صحيحة' };
+  }
+
+  if (startMonth > endMonth) {
+    return { valid: false, message: 'فترة زمنية غير صحيحة' };
+  }
+
+  return { valid: true, fromMonth: startMonth, toMonth: endMonth };
+}
+
+async function initializeProfitDashboard() {
+  try {
+    const availableMonths = await ipcRenderer.invoke('get-profit-available-months');
+    profitDefaultRange = getDefaultProfitRange(availableMonths);
+    populateProfitFilterOptions(availableMonths, profitDefaultRange);
+    bindProfitRowActionButtons();
+    setProfitSaveStatus('idle');
+    await loadProfitMonthlyData();
+  } catch (error) {
+    console.error('Error initializing profit dashboard:', error);
+    setProfitSaveStatus('error');
+    updateProfitKpis([]);
+    renderProfitTableMessage('حدث خطأ أثناء تحميل بيانات المكسب', 'error');
+  }
+}
+
+function updateProfitKpis(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const totals = safeRows.reduce((acc, row) => {
+    acc.net += parseAnnualInventoryValue(row.net_profit);
+    acc.positive += parseAnnualInventoryValue(row.total_positive);
+    acc.deductions += parseAnnualInventoryValue(row.total_deductions);
+    return acc;
+  }, { net: 0, positive: 0, deductions: 0 });
+
+  const netEl = document.getElementById('profit-kpi-net');
+  const positiveEl = document.getElementById('profit-kpi-positive');
+  const deductionsEl = document.getElementById('profit-kpi-deductions');
+
+  if (netEl) netEl.textContent = formatArabicCurrency(totals.net);
+  if (positiveEl) positiveEl.textContent = formatArabicCurrency(totals.positive);
+  if (deductionsEl) deductionsEl.textContent = formatArabicCurrency(totals.deductions);
+}
+
+function renderProfitTableMessage(message, tone = 'neutral') {
+  const headRow = document.getElementById('profit-monthly-head');
+  const tbody = document.getElementById('profit-monthly-body');
+  if (headRow) {
+    headRow.innerHTML = '<th>البند</th>';
+  }
+  if (!tbody) return;
+
+  const color = tone === 'error' ? '#c4291d' : '#777';
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="2" style="text-align:center; color:${color};">${escapeHtml(message)}</td>
+    </tr>
+  `;
+}
+
+function getProfitTableScrollState() {
+  const container = document.querySelector('.profit-table-scroll');
+  if (!container) return null;
+  return { top: container.scrollTop, left: container.scrollLeft };
+}
+
+function restoreProfitTableScrollState(state) {
+  if (!state) return;
+  const container = document.querySelector('.profit-table-scroll');
+  if (!container) return;
+  container.scrollTop = state.top || 0;
+  container.scrollLeft = state.left || 0;
+}
+
+function renderProfitMonthlyRows(rows) {
+  const headRow = document.getElementById('profit-monthly-head');
+  const tbody = document.getElementById('profit-monthly-body');
+  const emptyState = document.getElementById('profit-empty');
+  if (!headRow || !tbody) return;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    renderProfitTableMessage('لا توجد بيانات في الفترة المحددة');
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = 'none';
+
+  const months = rows
+    .map((row) => normalizeMonthKey(row.month_key))
+    .filter(Boolean);
+
+  headRow.innerHTML = `
+    <th>البند</th>
+    ${months.map((monthKey) => `<th>${formatProfitMonthLabel(monthKey)}</th>`).join('')}
+  `;
+
+  const renderManualInput = (monthKey, fieldName, value, cellClass = '') => `
+    <td class="${cellClass || ''}">
+      <input
+        type="text"
+        class="profit-manual-input"
+        data-month-key="${escapeHtml(monthKey)}"
+        data-field="${escapeHtml(fieldName)}"
+        value="${escapeHtml(formatArabicNumberFixed(parseAnnualInventoryValue(value)))}"
+        inputmode="decimal"
+      >
+    </td>
+  `;
+
+  const renderNumberCell = (value, cellClass = '') => {
+    const normalized = parseAnnualInventoryValue(value);
+    const className = cellClass ? ` class="${cellClass}"` : '';
+    return `<td${className}>${formatArabicNumberFixed(normalized)}</td>`;
+  };
+
+  const renderCustomValueInput = (rowKey, monthKey, value, cellClass = '') => `
+    <td class="${cellClass || ''}">
+      <input
+        type="text"
+        class="profit-manual-input profit-custom-value-input"
+        data-row-key="${escapeHtml(rowKey)}"
+        data-month-key="${escapeHtml(monthKey)}"
+        value="${escapeHtml(formatArabicNumberFixed(parseAnnualInventoryValue(value)))}"
+        inputmode="decimal"
+      >
+    </td>
+  `;
+
+  const displayRows = buildProfitDisplayRows();
+  tbody.innerHTML = displayRows.map((metric) => {
+    const isCustomRow = metric.type === 'custom';
+    const labelCell = isCustomRow
+      ? `
+        <td class="profit-label-cell ${metric.cellClass || ''}">
+          <div class="profit-custom-label-wrap">
+            <input
+              type="text"
+              class="profit-custom-label-input"
+              data-row-key="${escapeHtml(metric.row_key)}"
+              value="${escapeHtml(metric.label)}"
+            >
+            <button
+              type="button"
+              class="profit-custom-delete-btn"
+              data-row-key="${escapeHtml(metric.row_key)}"
+              title="حذف الصف"
+            >✕</button>
+          </div>
+        </td>
+      `
+      : `<td class="profit-label-cell ${metric.cellClass || ''}"><strong>${escapeHtml(metric.label)}</strong></td>`;
+
+    return `
+      <tr data-profit-row-key="${escapeHtml(metric.key)}">
+        ${labelCell}
+        ${months.map((monthKey) => {
+          const monthRow = rows.find((row) => normalizeMonthKey(row.month_key) === monthKey) || {};
+          if (metric.type === 'manual-fixed') {
+            return renderManualInput(monthKey, metric.key, monthRow[metric.key], metric.cellClass);
+          }
+          if (metric.type === 'custom') {
+            const value = getProfitCustomValue(metric.row_key, monthKey);
+            return renderCustomValueInput(metric.row_key, monthKey, value, metric.cellClass);
+          }
+          if (metric.type === 'auto-net') {
+            const value = parseAnnualInventoryValue(monthRow[metric.key]);
+            const netClass = value < 0 ? 'net-col negative' : 'net-col';
+            return renderNumberCell(value, netClass);
+          }
+          return renderNumberCell(monthRow[metric.key], metric.cellClass);
+        }).join('')}
+      </tr>
+    `;
+  }).join('');
+
+  bindProfitManualInputEvents();
+}
+
+function bindProfitManualInputEvents() {
+  document.querySelectorAll('.profit-manual-input:not(.profit-custom-value-input)').forEach((input) => {
+    if (input.dataset.bound === 'true') return;
+
+    input.addEventListener('focus', () => {
+      input.select();
+    });
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      saveProfitManualField(input);
+    });
+
+    input.dataset.bound = 'true';
+  });
+
+  document.querySelectorAll('.profit-custom-value-input').forEach((input) => {
+    if (input.dataset.customBound === 'true') return;
+
+    input.addEventListener('focus', () => {
+      input.select();
+    });
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      saveProfitCustomValue(input);
+    });
+
+    input.dataset.customBound = 'true';
+  });
+
+  document.querySelectorAll('.profit-custom-label-input').forEach((input) => {
+    if (input.dataset.labelBound === 'true') return;
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      saveProfitCustomLabel(input);
+    });
+
+    input.dataset.labelBound = 'true';
+  });
+
+  document.querySelectorAll('.profit-custom-delete-btn').forEach((button) => {
+    if (button.dataset.deleteBound === 'true') return;
+
+    button.addEventListener('click', () => {
+      const rowKey = String(button.dataset.rowKey || '').trim();
+      if (!rowKey) return;
+      deleteProfitCustomRowByKey(rowKey);
+    });
+
+    button.dataset.deleteBound = 'true';
+  });
+}
+
+async function saveProfitManualField(input) {
+  if (!input) return;
+
+  const monthKey = normalizeMonthKey(input.dataset.monthKey);
+  const fieldName = String(input.dataset.field || '').trim();
+  if (!monthKey || !PROFIT_MANUAL_FIELDS.includes(fieldName)) return;
+
+  const newValue = parseAnnualInventoryValue(input.value);
+  input.value = formatArabicNumberFixed(newValue);
+
+  const row = profitRowsCache.find((item) => item.month_key === monthKey);
+  if (row && Math.abs(parseAnnualInventoryValue(row[fieldName]) - newValue) < 0.0001) {
+    return;
+  }
+
+  input.disabled = true;
+  setProfitSaveStatus('saving');
+
+  try {
+    await ipcRenderer.invoke('upsert-monthly-profit-input', {
+      month_key: monthKey,
+      field: fieldName,
+      value: newValue
+    });
+
+    if (row) {
+      row[fieldName] = newValue;
+      rebuildProfitRowsWithCustomTotals();
+    } else {
+      await loadProfitMonthlyData();
+    }
+
+    const scrollState = getProfitTableScrollState();
+    renderProfitMonthlyRows(profitRowsCache);
+    restoreProfitTableScrollState(scrollState);
+    updateProfitKpis(profitRowsCache);
+
+    setProfitSaveStatus('saved');
+    setTimeout(() => {
+      setProfitSaveStatus('idle');
+    }, 1200);
+  } catch (error) {
+    console.error('Error saving monthly profit value:', error);
+    setProfitSaveStatus('error', 'خطأ');
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function saveProfitCustomValue(input) {
+  if (!input) return;
+
+  const rowKey = String(input.dataset.rowKey || '').trim();
+  const monthKey = normalizeMonthKey(input.dataset.monthKey);
+  if (!rowKey || !monthKey) return;
+
+  const newValue = parseAnnualInventoryValue(input.value);
+  input.value = formatArabicNumberFixed(newValue);
+
+  if (Math.abs(getProfitCustomValue(rowKey, monthKey) - newValue) < 0.0001) {
+    return;
+  }
+
+  input.disabled = true;
+  setProfitSaveStatus('saving');
+
+  try {
+    await ipcRenderer.invoke('upsert-profit-custom-value', {
+      row_key: rowKey,
+      month_key: monthKey,
+      amount: newValue
+    });
+
+    setProfitCustomValue(rowKey, monthKey, newValue);
+    rebuildProfitRowsWithCustomTotals();
+
+    const scrollState = getProfitTableScrollState();
+    renderProfitMonthlyRows(profitRowsCache);
+    restoreProfitTableScrollState(scrollState);
+    updateProfitKpis(profitRowsCache);
+
+    setProfitSaveStatus('saved');
+    setTimeout(() => {
+      setProfitSaveStatus('idle');
+    }, 1200);
+  } catch (error) {
+    console.error('Error saving custom profit value:', error);
+    setProfitSaveStatus('error', 'خطأ');
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function saveProfitCustomLabel(input) {
+  if (!input) return;
+
+  const rowKey = String(input.dataset.rowKey || '').trim();
+  if (!rowKey) return;
+
+  const row = profitCustomRowsCache.find((item) => item.row_key === rowKey);
+  if (!row) return;
+
+  const fallbackLabel = row.row_type === 'deduction' ? 'خصم إضافي' : 'إيراد إضافي';
+  const newLabel = String(input.value || '').trim() || fallbackLabel;
+
+  if (newLabel === row.row_label) {
+    input.value = row.row_label;
+    return;
+  }
+
+  input.disabled = true;
+  setProfitSaveStatus('saving');
+
+  try {
+    await ipcRenderer.invoke('update-profit-custom-row-label', {
+      row_key: rowKey,
+      row_label: newLabel
+    });
+
+    row.row_label = newLabel;
+    const scrollState = getProfitTableScrollState();
+    renderProfitMonthlyRows(profitRowsCache);
+    restoreProfitTableScrollState(scrollState);
+    updateProfitKpis(profitRowsCache);
+
+    setProfitSaveStatus('saved');
+    setTimeout(() => {
+      setProfitSaveStatus('idle');
+    }, 1200);
+  } catch (error) {
+    console.error('Error saving custom profit label:', error);
+    setProfitSaveStatus('error', 'خطأ');
+    input.value = row.row_label;
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function addProfitCustomRow(rowType) {
+  return addProfitCustomRowAt(rowType, null);
+}
+
+async function addProfitCustomRowAt(rowType, displayOrder = null) {
+  const normalizedType = normalizeProfitCustomRowType(rowType);
+  const normalizedOrder = Number.isFinite(parseInt(displayOrder, 10)) && parseInt(displayOrder, 10) > 0
+    ? parseInt(displayOrder, 10)
+    : null;
+  setProfitSaveStatus('saving');
+
+  try {
+    const createdRow = await ipcRenderer.invoke('add-profit-custom-row', {
+      row_type: normalizedType,
+      display_order: normalizedOrder
+    });
+    const normalizedRow = normalizeProfitCustomRow(createdRow);
+    if (normalizedRow) {
+      if (normalizedOrder !== null) {
+        profitCustomRowsCache.forEach((row) => {
+          if (row.row_type === normalizedType && row.display_order >= normalizedOrder) {
+            row.display_order += 1;
+          }
+        });
+      }
+      profitCustomRowsCache.push(normalizedRow);
+      rebuildProfitRowsWithCustomTotals();
+      const scrollState = getProfitTableScrollState();
+      renderProfitMonthlyRows(profitRowsCache);
+      restoreProfitTableScrollState(scrollState);
+      updateProfitKpis(profitRowsCache);
+    }
+
+    setProfitSaveStatus('saved');
+    setTimeout(() => {
+      setProfitSaveStatus('idle');
+    }, 1200);
+  } catch (error) {
+    console.error('Error adding custom profit row:', error);
+    setProfitSaveStatus('error', 'خطأ');
+  }
+}
+
+async function deleteProfitCustomRowByKey(rowKey) {
+  const key = String(rowKey || '').trim();
+  if (!key) return;
+
+  const row = profitCustomRowsCache.find((item) => item.row_key === key);
+  if (!row) return;
+
+  const confirmed = confirm('سيتم حذف الصف نهائيًا. هل تريد المتابعة؟');
+  if (!confirmed) return;
+
+  setProfitSaveStatus('saving');
+
+  try {
+    await ipcRenderer.invoke('delete-profit-custom-row', { row_key: key });
+
+    profitCustomRowsCache = profitCustomRowsCache.filter((item) => item.row_key !== key);
+    profitCustomValuesMap.forEach((_value, compositeKey) => {
+      if (compositeKey.startsWith(`${key}__`)) {
+        profitCustomValuesMap.delete(compositeKey);
+      }
+    });
+
+    rebuildProfitRowsWithCustomTotals();
+    const scrollState = getProfitTableScrollState();
+    renderProfitMonthlyRows(profitRowsCache);
+    restoreProfitTableScrollState(scrollState);
+    updateProfitKpis(profitRowsCache);
+
+    setProfitSaveStatus('saved');
+    setTimeout(() => {
+      setProfitSaveStatus('idle');
+    }, 1200);
+  } catch (error) {
+    console.error('Error deleting custom profit row:', error);
+    setProfitSaveStatus('error', 'خطأ');
+  }
+}
+
+async function loadProfitMonthlyData() {
+  const range = getProfitFiltersRange();
+  const tbody = document.getElementById('profit-monthly-body');
+  const emptyState = document.getElementById('profit-empty');
+  if (!tbody) return;
+
+  if (!range.valid) {
+    renderProfitTableMessage(range.message || 'فترة زمنية غير صحيحة');
+    if (emptyState) emptyState.style.display = 'none';
+    updateProfitKpis([]);
+    return;
+  }
+
+  try {
+    const [rows, customRows, customValues] = await Promise.all([
+      ipcRenderer.invoke('get-profit-monthly-data', {
+        fromMonth: range.fromMonth,
+        toMonth: range.toMonth
+      }),
+      ipcRenderer.invoke('get-profit-custom-rows'),
+      ipcRenderer.invoke('get-profit-custom-values', {
+        fromMonth: range.fromMonth,
+        toMonth: range.toMonth
+      })
+    ]);
+
+    profitCustomRowsCache = (Array.isArray(customRows) ? customRows : [])
+      .map((row) => normalizeProfitCustomRow(row))
+      .filter(Boolean);
+
+    profitCustomValuesMap = new Map();
+    (Array.isArray(customValues) ? customValues : []).forEach((entry) => {
+      const rowKey = String(entry?.row_key || '').trim();
+      const monthKey = normalizeMonthKey(entry?.month_key);
+      if (!rowKey || !monthKey) return;
+      setProfitCustomValue(rowKey, monthKey, parseAnnualInventoryValue(entry?.amount));
+    });
+
+    profitRowsCache = (Array.isArray(rows) ? rows : []).map((row) => ({ ...row }));
+    rebuildProfitRowsWithCustomTotals();
+    renderProfitMonthlyRows(profitRowsCache);
+    updateProfitKpis(profitRowsCache);
+    const statusEl = document.getElementById('profit-save-status');
+    if (!statusEl || !statusEl.classList.contains('saving')) {
+      setProfitSaveStatus('idle');
+    }
+  } catch (error) {
+    console.error('Error loading monthly profit data:', error);
+    profitRowsCache = [];
+    profitCustomRowsCache = [];
+    profitCustomValuesMap = new Map();
+    renderProfitTableMessage('حدث خطأ أثناء تحميل بيانات المكسب', 'error');
+    if (emptyState) emptyState.style.display = 'none';
+    setProfitSaveStatus('error');
+    updateProfitKpis([]);
+  }
+}
+
 let defaultCounters = {
   diesel: [0, 0, 0, 0],
   gas: [0, 0],
@@ -5399,6 +7011,7 @@ async function updateCustomerName(id, newName) {
 function calculateGrandTotal() {
   // Simply call calculateTotalRevenue which does the proper calculation
   calculateTotalRevenue();
+  return parseFloat(document.getElementById('final-net-total')?.value) || 0;
 }
 
 // ============= TOTALS PAGE FUNCTIONS =============
@@ -5436,7 +7049,7 @@ function updateTotalsPage() {
   calculateTotalRevenue();
 
   // Recalculate net total
-  calculateNetTotal();
+  return calculateNetTotal();
 }
 
 // Calculate total revenue (fuel + oil + extra fields)
@@ -5449,6 +7062,7 @@ function calculateTotalRevenue() {
   const totalFuelCash = dieselCash + cash80 + cash92 + cash95;
 
   const totalOilRevenue = parseFloat(document.getElementById('total-oil-revenue')?.value) || 0;
+  const washLubeRevenue = parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0;
 
   // Add extra revenue fields
   let extraRevenue = 0;
@@ -5457,10 +7071,11 @@ function calculateTotalRevenue() {
     extraRevenue += amount;
   }
 
-  const totalRevenue = totalFuelCash + totalOilRevenue + extraRevenue;
+  const totalRevenue = totalFuelCash + totalOilRevenue + washLubeRevenue + extraRevenue;
   document.getElementById('total-revenue').value = formatPrice(totalRevenue);
 
   calculateNetTotal();
+  return totalRevenue;
 }
 
 // Calculate total expenses
@@ -5475,6 +7090,7 @@ function calculateTotalExpenses() {
   document.getElementById('total-expenses').value = formatPrice(totalExpenses);
 
   calculateNetTotal();
+  return totalExpenses;
 }
 
 // Calculate net total (revenue - expenses)
@@ -5484,6 +7100,7 @@ function calculateNetTotal() {
 
   const netTotal = totalRevenue - totalExpenses;
   document.getElementById('final-net-total').value = formatPrice(netTotal);
+  return netTotal;
 }
 
 // Collect fuel data from form
@@ -5683,6 +7300,8 @@ async function saveShift() {
       fuel_total: calculateFuelTotal(),
       oil_data: JSON.stringify(collectOilData()),
       oil_total: calculateOilTotal(),
+      wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
+      total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
       grand_total: calculateGrandTotal(),
       is_saved: 1
     };
@@ -6044,9 +7663,26 @@ async function loadShiftData(date, shiftNumber) {
       return;
     }
 
-    // Parse JSON data
-    const fuelData = JSON.parse(shift.fuel_data);
-    const oilData = JSON.parse(shift.oil_data);
+    const parseJsonObject = (value, fallback = {}) => {
+      if (!value) return fallback;
+      if (typeof value === 'object') return value;
+      try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : fallback;
+      } catch (error) {
+        return fallback;
+      }
+    };
+
+    const legacyData = parseJsonObject(shift.data, {});
+    const fuelData = parseJsonObject(shift.fuel_data || legacyData.fuel_data, {});
+    const oilData = parseJsonObject(shift.oil_data || legacyData.oil_data, {});
+    const washLubeRevenue = parseFloat(
+      shift.wash_lube_revenue ?? legacyData.wash_lube_revenue ?? 0
+    ) || 0;
+    const totalExpenses = parseFloat(
+      shift.total_expenses ?? legacyData.total_expenses ?? 0
+    ) || 0;
 
     // Populate fuel data
     Object.entries(fuelData).forEach(([fuelType, data]) => {
@@ -6137,10 +7773,20 @@ async function loadShiftData(date, shiftNumber) {
       }
     });
 
+    const washLubeInput = document.getElementById('total-wash-lube-revenue');
+    if (washLubeInput) {
+      washLubeInput.value = Math.abs(washLubeRevenue) > 0.0001 ? formatPrice(washLubeRevenue) : '';
+    }
+
     // Recalculate totals
     calculateFuelTotal();
     calculateOilTotal();
     calculateGrandTotal();
+    const totalExpensesInput = document.getElementById('total-expenses');
+    if (totalExpensesInput && Math.abs(totalExpenses) > 0.0001) {
+      totalExpensesInput.value = formatPrice(totalExpenses);
+      calculateNetTotal();
+    }
 
     // Set current shift state
     currentShiftData.date = date;
@@ -6242,6 +7888,11 @@ function clearShiftForm() {
       if (priceInput) priceInput.value = '';
       if (revenueInput) revenueInput.value = '';
     });
+  }
+
+  const washLubeInput = document.getElementById('total-wash-lube-revenue');
+  if (washLubeInput) {
+    washLubeInput.value = '';
   }
 
   // Reset totals
@@ -6573,6 +8224,10 @@ async function initializeShiftEntry() {
 
     // Set up unsaved data warning on page navigation
     window.addEventListener('beforeunload', (e) => {
+      if (window.__skipBeforeUnloadWarning) {
+        return;
+      }
+
       if (currentShiftData.hasUnsavedChanges && currentScreen === 'shift-entry') {
         e.preventDefault();
         e.returnValue = '';

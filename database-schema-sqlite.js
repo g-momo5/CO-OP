@@ -26,6 +26,10 @@ class DatabaseSchema {
     this.createCustomersTable(db);
     this.createShiftsTable(db);
     this.createAnnualInventoriesTable(db);
+    this.createSafeBookMovementsTable(db);
+    this.createMonthlyProfitInputsTable(db);
+    this.createMonthlyProfitCustomRowsTable(db);
+    this.createMonthlyProfitCustomValuesTable(db);
     this.createSyncQueueTable(db);
 
     // Create indexes for performance
@@ -140,6 +144,7 @@ class DatabaseSchema {
         net_quantity REAL NOT NULL,
         purchase_price REAL NOT NULL,
         total REAL NOT NULL,
+        invoice_total REAL DEFAULT 0,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
@@ -179,7 +184,15 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         shift_number INTEGER NOT NULL,
-        data TEXT NOT NULL,
+        data TEXT DEFAULT '{}',
+        fuel_data TEXT DEFAULT '{}',
+        fuel_total REAL DEFAULT 0,
+        oil_data TEXT DEFAULT '{}',
+        oil_total REAL DEFAULT 0,
+        wash_lube_revenue REAL DEFAULT 0,
+        total_expenses REAL DEFAULT 0,
+        grand_total REAL DEFAULT 0,
+        is_saved INTEGER DEFAULT 0,
         created_at INTEGER DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER DEFAULT (strftime('%s', 'now')),
         UNIQUE(date, shift_number)
@@ -210,6 +223,67 @@ class DatabaseSchema {
         finalized_at INTEGER,
         created_at INTEGER DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
+  static createSafeBookMovementsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS safe_book_movements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        movement_type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        direction TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
+  static createMonthlyProfitInputsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS monthly_profit_inputs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month_key TEXT NOT NULL UNIQUE,
+        fuel_diesel REAL DEFAULT 0,
+        fuel_80 REAL DEFAULT 0,
+        fuel_92 REAL DEFAULT 0,
+        fuel_95 REAL DEFAULT 0,
+        oil_total REAL DEFAULT 0,
+        bonuses REAL DEFAULT 0,
+        commission_diff REAL DEFAULT 0,
+        deposit_tax REAL DEFAULT 0,
+        bonus_tax REAL DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
+  static createMonthlyProfitCustomRowsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS monthly_profit_custom_rows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        row_key TEXT NOT NULL UNIQUE,
+        row_label TEXT NOT NULL,
+        row_type TEXT NOT NULL,
+        display_order INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
+  static createMonthlyProfitCustomValuesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS monthly_profit_custom_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        row_key TEXT NOT NULL,
+        month_key TEXT NOT NULL,
+        amount REAL DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(row_key, month_key)
       )
     `);
   }
@@ -249,8 +323,14 @@ class DatabaseSchema {
 
     // Shifts indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_inputs_month_key ON monthly_profit_inputs(month_key)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_rows_type_order ON monthly_profit_custom_rows(row_type, display_order)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_month_key ON monthly_profit_custom_values(month_key)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_direction ON safe_book_movements(direction)');
 
     // Sync queue indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced)');
@@ -275,11 +355,12 @@ class DatabaseSchema {
         console.log('Migration completed: product_id column added');
       }
 
-      // Check if fuel_invoices has columns to remove (sale_price, profit, invoice_total)
+      // Check if fuel_invoices has obsolete columns to remove (sale_price/profit)
       const fuelInvoicesTableInfo = db.prepare("PRAGMA table_info(fuel_invoices)").all();
       const hasSalePrice = fuelInvoicesTableInfo.some(col => col.name === 'sale_price');
+      const hasProfit = fuelInvoicesTableInfo.some(col => col.name === 'profit');
 
-      if (hasSalePrice) {
+      if (hasSalePrice || hasProfit) {
         console.log('Removing obsolete columns from fuel_invoices table...');
 
         // SQLite doesn't support DROP COLUMN, so we need to recreate the table
@@ -294,12 +375,23 @@ class DatabaseSchema {
             net_quantity REAL NOT NULL,
             purchase_price REAL NOT NULL,
             total REAL NOT NULL,
+            invoice_total REAL DEFAULT 0,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
           );
 
           -- Copy data from old table
-          INSERT INTO fuel_invoices_new (id, date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, created_at)
-          SELECT id, date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, created_at
+          INSERT INTO fuel_invoices_new (id, date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total, created_at)
+          SELECT
+            id,
+            date,
+            invoice_number,
+            fuel_type,
+            quantity,
+            net_quantity,
+            purchase_price,
+            total,
+            COALESCE(invoice_total, 0),
+            created_at
           FROM fuel_invoices;
 
           -- Drop old table
@@ -309,7 +401,51 @@ class DatabaseSchema {
           ALTER TABLE fuel_invoices_new RENAME TO fuel_invoices;
         `);
 
-        console.log('Migration completed: removed sale_price, profit, invoice_total from fuel_invoices');
+        console.log('Migration completed: removed obsolete columns from fuel_invoices');
+      }
+
+      const refreshedFuelInvoicesInfo = db.prepare("PRAGMA table_info(fuel_invoices)").all();
+      const hasInvoiceTotal = refreshedFuelInvoicesInfo.some(col => col.name === 'invoice_total');
+      if (!hasInvoiceTotal) {
+        console.log('Adding invoice_total column to fuel_invoices table...');
+        db.exec('ALTER TABLE fuel_invoices ADD COLUMN invoice_total REAL DEFAULT 0');
+      }
+
+      const shiftsTableInfo = db.prepare("PRAGMA table_info(shifts)").all();
+      const ensureShiftColumn = (name, definition) => {
+        const exists = shiftsTableInfo.some(col => col.name === name);
+        if (!exists) {
+          console.log(`Adding ${name} column to shifts table...`);
+          db.exec(`ALTER TABLE shifts ADD COLUMN ${name} ${definition}`);
+        }
+      };
+
+      ensureShiftColumn('fuel_data', "TEXT DEFAULT '{}'");
+      ensureShiftColumn('data', "TEXT DEFAULT '{}'");
+      ensureShiftColumn('fuel_total', 'REAL DEFAULT 0');
+      ensureShiftColumn('oil_data', "TEXT DEFAULT '{}'");
+      ensureShiftColumn('oil_total', 'REAL DEFAULT 0');
+      ensureShiftColumn('wash_lube_revenue', 'REAL DEFAULT 0');
+      ensureShiftColumn('total_expenses', 'REAL DEFAULT 0');
+      ensureShiftColumn('grand_total', 'REAL DEFAULT 0');
+      ensureShiftColumn('is_saved', 'INTEGER DEFAULT 0');
+
+      const monthlyProfitInputsInfo = db.prepare("PRAGMA table_info(monthly_profit_inputs)").all();
+      if (monthlyProfitInputsInfo.length === 0) {
+        console.log('Creating monthly_profit_inputs table...');
+        this.createMonthlyProfitInputsTable(db);
+      }
+
+      const monthlyProfitCustomRowsInfo = db.prepare("PRAGMA table_info(monthly_profit_custom_rows)").all();
+      if (monthlyProfitCustomRowsInfo.length === 0) {
+        console.log('Creating monthly_profit_custom_rows table...');
+        this.createMonthlyProfitCustomRowsTable(db);
+      }
+
+      const monthlyProfitCustomValuesInfo = db.prepare("PRAGMA table_info(monthly_profit_custom_values)").all();
+      if (monthlyProfitCustomValuesInfo.length === 0) {
+        console.log('Creating monthly_profit_custom_values table...');
+        this.createMonthlyProfitCustomValuesTable(db);
       }
 
       const annualInventoriesTableInfo = db.prepare("PRAGMA table_info(annual_inventories)").all();

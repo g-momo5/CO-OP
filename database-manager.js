@@ -228,8 +228,10 @@ class DatabaseManager {
       net_quantity REAL NOT NULL,
       purchase_price REAL NOT NULL,
       total REAL NOT NULL,
+      invoice_total REAL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE fuel_invoices ADD COLUMN IF NOT EXISTS invoice_total REAL DEFAULT 0`);
 
     // Oil invoices table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
@@ -258,11 +260,28 @@ class DatabaseManager {
       id SERIAL PRIMARY KEY,
       date DATE NOT NULL,
       shift_number INTEGER NOT NULL,
-      data JSONB NOT NULL,
+      data JSONB DEFAULT '{}'::jsonb,
+      fuel_data TEXT DEFAULT '{}',
+      fuel_total REAL DEFAULT 0,
+      oil_data TEXT DEFAULT '{}',
+      oil_total REAL DEFAULT 0,
+      wash_lube_revenue REAL DEFAULT 0,
+      total_expenses REAL DEFAULT 0,
+      grand_total REAL DEFAULT 0,
+      is_saved INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(date, shift_number)
     )`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}'::jsonb`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS fuel_data TEXT DEFAULT '{}'`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS fuel_total REAL DEFAULT 0`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS oil_data TEXT DEFAULT '{}'`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS oil_total REAL DEFAULT 0`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS wash_lube_revenue REAL DEFAULT 0`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS total_expenses REAL DEFAULT 0`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS grand_total REAL DEFAULT 0`);
+    await this.pgPool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_saved INTEGER DEFAULT 0`);
 
     // Annual inventories table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS annual_inventories (
@@ -296,6 +315,74 @@ class DatabaseManager {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)`);
     } catch (err) {
       console.log('Annual inventories index creation:', err.message);
+    }
+
+    // Safe book movements table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS safe_book_movements (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      movement_type TEXT NOT NULL,
+      amount REAL NOT NULL,
+      direction TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_safe_book_movements_direction ON safe_book_movements(direction)`);
+    } catch (err) {
+      console.log('Safe book indexes creation:', err.message);
+    }
+
+    // Monthly profit manual inputs table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS monthly_profit_inputs (
+      id SERIAL PRIMARY KEY,
+      month_key TEXT NOT NULL UNIQUE,
+      fuel_diesel REAL DEFAULT 0,
+      fuel_80 REAL DEFAULT 0,
+      fuel_92 REAL DEFAULT 0,
+      fuel_95 REAL DEFAULT 0,
+      oil_total REAL DEFAULT 0,
+      bonuses REAL DEFAULT 0,
+      commission_diff REAL DEFAULT 0,
+      deposit_tax REAL DEFAULT 0,
+      bonus_tax REAL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_monthly_profit_inputs_month_key ON monthly_profit_inputs(month_key)`);
+    } catch (err) {
+      console.log('Monthly profit inputs index creation:', err.message);
+    }
+
+    // Custom rows for monthly profit (extra revenue/deduction lines)
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS monthly_profit_custom_rows (
+      id SERIAL PRIMARY KEY,
+      row_key TEXT NOT NULL UNIQUE,
+      row_label TEXT NOT NULL,
+      row_type TEXT NOT NULL,
+      display_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS monthly_profit_custom_values (
+      id SERIAL PRIMARY KEY,
+      row_key TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      amount REAL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(row_key, month_key)
+    )`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_rows_type_order ON monthly_profit_custom_rows(row_type, display_order)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_month_key ON monthly_profit_custom_values(month_key)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)`);
+    } catch (err) {
+      console.log('Monthly profit custom indexes creation:', err.message);
     }
   }
 
@@ -544,7 +631,8 @@ class DatabaseManager {
     const tables = [
       'sales', 'purchase_prices', 'products', 'price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
-      'customers', 'shifts', 'annual_inventories'
+      'customers', 'shifts', 'annual_inventories', 'safe_book_movements',
+      'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values'
     ];
 
     for (const table of tables) {

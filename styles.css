@@ -14,6 +14,10 @@ body {
   unicode-bidi: bidi-override;
 }
 
+body.safe-book-scroll-lock {
+  overflow: hidden;
+}
+
 .app-container {
   margin: 0;
   background: white;
@@ -390,6 +394,14 @@ body {
 /* Home Screen */
 /* Home Layout - 2 Column Layout */
 .home-layout {
+  --home-card-height: 140px;
+  --home-card-gap: 1.5rem;
+  --home-card-group-gap: 0.55rem;
+  --home-card-group-title-font-size: 1.3rem;
+  --home-card-group-title-line-height: 1.25;
+  --home-card-group-header-offset: calc(
+    (var(--home-card-group-title-font-size) * var(--home-card-group-title-line-height)) + var(--home-card-group-gap)
+  );
   display: flex;
   gap: 2rem;
   direction: rtl;
@@ -400,6 +412,10 @@ body {
 .home-chart-column {
   flex: 6;
   min-width: 0;
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--home-card-gap);
 }
 
 .home-chart-container {
@@ -408,10 +424,15 @@ body {
   border-radius: 15px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   direction: rtl;
-  height: 100%;
+  height: calc((var(--home-card-height) * 2) + var(--home-card-gap));
+  margin-top: var(--home-card-group-header-offset);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.home-annual-card {
+  width: 100%;
 }
 
 /* Right Column - Action Cards (40%) */
@@ -421,6 +442,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  order: 1;
+}
+
+.home-card-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.home-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--home-card-group-gap);
+}
+
+.home-card-group-title {
+  margin: 0;
+  color: #c4291d;
+  font-size: var(--home-card-group-title-font-size);
+  font-weight: 800;
+  line-height: var(--home-card-group-title-line-height);
+  text-align: right;
+  direction: rtl;
 }
 
 .home-summary-card {
@@ -478,53 +522,96 @@ body {
 .summary-table-scroll {
   width: 100%;
   overflow-x: auto;
+  position: relative;
 }
 
-.summary-table th,
-.summary-table td {
+/* Main sales summary table: enable vertical scrolling so sticky header can lock */
+#sales-summary-wrapper > .summary-table-scroll {
+  overflow-y: auto;
+  max-height: clamp(320px, 60vh, 680px);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.base-table.summary-table th,
+.base-table.summary-table td {
   text-align: right;
 }
 
-.summary-table .cell-qty {
+.base-table.summary-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: visible;
+}
+
+.base-table.summary-table .cell-qty {
   font-weight: 700;
 }
 
-.summary-table .cell-qty-only {
+.base-table.summary-table .cell-qty-only {
   font-weight: 700;
 }
 
-.summary-table .cell-total {
+.base-table.summary-table .cell-total {
   font-weight: 700;
   color: #c4291d;
 }
 
-.summary-table td:not(:first-child),
-.summary-table th:not(:first-child) {
+.base-table.summary-table td:not(:first-child),
+.base-table.summary-table th:not(:first-child) {
   text-align: center !important;
+  min-width: 88px;
 }
 
-.summary-table tbody tr td {
+.base-table.summary-table tbody tr td {
   padding: 0.2rem 0.4rem;
 }
 
-.summary-table thead th {
+.base-table.summary-table thead th {
   padding-left: 0.2rem;
   padding-right: 0.2rem;
   padding-top: 0.6rem;
   padding-bottom: 0.6rem;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #2c3e50;
 }
 
-.summary-table tbody tr td:first-child,
-.summary-table thead th:first-child {
+.base-table.summary-table tbody tr td:first-child,
+.base-table.summary-table thead th:first-child {
   padding-right: 0.8rem;
+  min-width: 220px;
+  max-width: 220px;
+  width: 220px;
+  position: sticky;
+  inset-inline-end: 0;
+  right: 0;
+  z-index: 4;
 }
 
-.summary-table th.month-click {
+.base-table.summary-table thead th:first-child {
+  background: #2c3e50;
+  top: 0;
+  z-index: 6;
+}
+
+.base-table.summary-table tbody td:first-child {
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 700;
+  box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
+}
+
+.base-table.summary-table th.month-click {
   cursor: pointer;
   user-select: none;
 }
 
-.summary-table th.month-click:hover {
+.base-table.summary-table th.month-click:hover {
   color: #c4291d;
 }
 
@@ -556,11 +643,721 @@ body {
   padding: 1rem 0;
 }
 
+.safe-book-card {
+  margin-top: 1.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.safe-book-page {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.safe-book-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.safe-book-filters {
+  margin-top: 0;
+}
+
+.safe-book-filters .summary-filters {
+  margin: 0;
+  gap: 0.35rem;
+}
+
+.summary-filters .form-group.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.summary-filters .form-group.compact label {
+  width: 100%;
+  text-align: center !important;
+}
+
+.summary-filters .dual-select {
+  justify-content: center;
+}
+
+.summary-filters .dual-select select {
+  text-align: center !important;
+  text-align-last: center !important;
+  padding-left: 1.8rem !important;
+  padding-right: 0.7rem !important;
+  background-position: left 8px center;
+}
+
+.summary-filters .dual-select select option {
+  text-align: center !important;
+}
+
+.safe-book-clear-filter-btn {
+  min-width: 40px !important;
+  width: 40px !important;
+  height: 40px !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0 !important;
+  font-size: 0 !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  margin-inline-start: -0.3rem;
+  color: #c4291d !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.safe-book-clear-filter-btn::before {
+  content: '✕';
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1;
+  font-family: 'Arial Black', 'Segoe UI Symbol', 'Noto Naskh Arabic', sans-serif;
+  color: inherit;
+  transform: translateY(-1px);
+}
+
+.safe-book-clear-filter-btn:hover {
+  color: #a8241a !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.safe-book-clear-filter-btn:focus,
+.safe-book-clear-filter-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.safe-book-clear-filter-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.safe-book-form {
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.safe-book-form-grid {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.95fr) minmax(260px, 2fr) minmax(120px, 0.85fr) minmax(120px, 0.85fr);
+  gap: 0.8rem;
+}
+
+.safe-book-form-actions {
+  margin-top: 0.8rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.safe-book-balance-row {
+  position: relative;
+  margin-top: 1rem;
+}
+
+.safe-book-add-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.safe-book-balance {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.25rem;
+}
+
+.safe-book-balance-label {
+  color: #444;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.safe-book-balance-value {
+  color: #1f8f3a;
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.safe-book-balance-value.negative {
+  color: #c4291d;
+}
+
+.safe-book-period-balances {
+  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+
+.safe-book-period-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.safe-book-period-label {
+  color: #666;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.safe-book-period-value {
+  color: #2c3e50;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.safe-book-period-value.negative {
+  color: #c4291d;
+}
+
+.safe-book-table-wrapper {
+  margin-top: 1rem;
+  width: 100%;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}
+
+.safe-book-sticky-month {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f7f9fb;
+  border-top: 1px solid #e5e9ef;
+  border-bottom: 1px solid #e5e9ef;
+  padding: 0.45rem 0.8rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+}
+
+.safe-book-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.safe-book-table th,
+.safe-book-table td {
+  text-align: right;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  line-height: 1.2;
+}
+
+.safe-book-table th {
+  padding-inline: 0.8rem;
+  font-size: 0.98rem;
+}
+
+.safe-book-table td {
+  padding-inline: 0.8rem;
+}
+
+.safe-book-month-row td {
+  background: #f7f9fb;
+  border-top: 1px solid #e5e9ef;
+  border-bottom: 1px solid #e5e9ef;
+}
+
+.safe-book-month-cell {
+  padding: 0.45rem 0.8rem !important;
+  text-align: initial !important;
+  background: #f7f9fb;
+}
+
+.safe-book-month-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.safe-book-month-name {
+  color: #2c3e50;
+  font-weight: 800;
+  font-size: 0.96rem;
+}
+
+.safe-book-month-totals {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.safe-book-month-in {
+  color: #1f8f3a;
+  font-weight: 700;
+}
+
+.safe-book-month-out {
+  color: #c4291d;
+  font-weight: 700;
+}
+
+.safe-book-table th:last-child,
+.safe-book-table td:last-child {
+  text-align: center;
+}
+
+.safe-book-table td:first-child {
+  width: auto;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.safe-book-value {
+  font-weight: 700;
+}
+
+.safe-book-value.in {
+  color: #1f8f3a;
+}
+
+.safe-book-value.out {
+  color: #c4291d;
+}
+
+/* Profit page */
+.profit-page {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.profit-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.profit-filters .summary-filters {
+  margin: 0;
+  gap: 0.35rem;
+}
+
+.profit-filters .form-group.compact {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: auto;
+}
+
+.profit-filters .form-group.compact label {
+  width: auto;
+  margin-bottom: 0;
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.profit-filters .dual-select {
+  justify-content: flex-start;
+}
+
+.profit-clear-filter-btn {
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.profit-formula-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  background: linear-gradient(120deg, rgba(31, 143, 58, 0.05) 0%, rgba(44, 62, 80, 0.04) 100%);
+  padding: 0.7rem 0.9rem;
+  color: #2c3e50;
+  font-size: 0.95rem;
+}
+
+.profit-formula-box strong {
+  color: #1f8f3a;
+}
+
+.profit-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 0.8rem;
+}
+
+.profit-kpi-card {
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 14px;
+  padding: 0.8rem 1rem;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.profit-kpi-card.positive {
+  border-color: rgba(31, 143, 58, 0.25);
+}
+
+.profit-kpi-card.deductions {
+  border-color: rgba(196, 41, 29, 0.25);
+}
+
+.profit-kpi-card.net {
+  border-color: rgba(44, 62, 80, 0.3);
+}
+
+.profit-kpi-label {
+  color: #667;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.profit-kpi-value {
+  font-size: 1.2rem;
+  font-weight: 900;
+  color: #2c3e50;
+  line-height: 1.1;
+}
+
+.profit-kpi-card.positive .profit-kpi-value {
+  color: #1f8f3a;
+}
+
+.profit-kpi-card.deductions .profit-kpi-value {
+  color: #c4291d;
+}
+
+.profit-save-status {
+  display: inline-flex;
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid #dbe1e8;
+  color: #495a6d;
+  background: #f8fafc;
+}
+
+.profit-save-status.saving {
+  color: #9f5f00;
+  border-color: rgba(159, 95, 0, 0.35);
+  background: rgba(255, 237, 196, 0.5);
+}
+
+.profit-save-status.saved {
+  color: #1f8f3a;
+  border-color: rgba(31, 143, 58, 0.35);
+  background: rgba(213, 245, 220, 0.5);
+}
+
+.profit-save-status.error {
+  color: #c4291d;
+  border-color: rgba(196, 41, 29, 0.35);
+  background: rgba(255, 221, 221, 0.6);
+}
+
+.profit-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.profit-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.profit-table-shell {
+  width: 100%;
+}
+
+.profit-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: clamp(330px, 62vh, 700px);
+  padding-inline-end: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.profit-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.profit-table th,
+.profit-table td {
+  text-align: center;
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.profit-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #2c3e50;
+  color: #fff;
+  font-size: 0.84rem;
+  padding: 0.18rem 0.32rem;
+}
+
+.profit-table td {
+  padding: 0 0.22rem;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.profit-insert-row td {
+  padding: 0 !important;
+  height: 8px;
+  line-height: 8px;
+  min-width: 120px;
+  background: transparent;
+  border-top: 1px solid #d8dde5;
+  cursor: pointer;
+  position: relative;
+  overflow: visible !important;
+  transition: border-top-width 0.16s ease, border-top-color 0.16s ease, background-color 0.16s ease;
+}
+
+.profit-insert-row:hover td {
+  border-top-width: 3px;
+  border-top-color: #2c3e50;
+  background: rgba(44, 62, 80, 0.035);
+}
+
+.profit-insert-label-cell {
+  text-align: right !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+.profit-insert-btn {
+  position: absolute;
+  top: 0;
+  inset-inline-end: -0.52rem;
+  right: -0.52rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: none;
+  border: 1.6px solid #2c3e50;
+  border-radius: 50%;
+  color: #2c3e50;
+  font-size: 1.18rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  background: #fff;
+  appearance: none;
+  -webkit-appearance: none;
+  transform: translateY(-50%);
+  transition: transform 0.16s ease, color 0.16s ease;
+  z-index: 8;
+}
+
+.profit-insert-row:hover .profit-insert-btn {
+  color: #1f8f3a;
+  border-color: #1f8f3a;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.profit-table th:first-child,
+.profit-table td:first-child {
+  position: sticky;
+  inset-inline-end: 0;
+  right: 0;
+  min-width: 190px;
+  max-width: 190px;
+  z-index: 4;
+  text-align: right;
+  padding-right: 0.7rem;
+  padding-left: 0.55rem;
+}
+
+.base-table.profit-table th:not(:first-child),
+.base-table.profit-table td:not(:first-child) {
+  text-align: center !important;
+}
+
+.base-table.profit-table td:not(:first-child) .profit-manual-input,
+.base-table.profit-table td:not(:first-child) .profit-custom-value-input {
+  text-align: center !important;
+}
+
+.profit-table th:first-child {
+  z-index: 6;
+  background: #2c3e50;
+}
+
+.profit-table td:first-child {
+  background: #fff;
+  box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
+  color: #2c3e50;
+}
+
+.profit-insert-row td:first-child {
+  background: #fff;
+}
+
+.profit-table .positive-col {
+  background: rgba(31, 143, 58, 0.045);
+}
+
+.profit-table .deduction-col {
+  background: rgba(196, 41, 29, 0.05);
+}
+
+.profit-table .auto-col {
+  font-weight: 700;
+}
+
+.profit-table .net-col {
+  font-weight: 900;
+  color: #1f8f3a;
+}
+
+.profit-table .net-col.negative {
+  color: #c4291d;
+}
+
+.profit-label-cell strong {
+  font-size: 0.9rem;
+}
+
+.profit-custom-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.profit-custom-label-input {
+  width: 100%;
+  min-width: 220px;
+  border: 1px solid #d8dde5;
+  border-radius: 8px;
+  height: 30px;
+  padding: 0.2rem 0.65rem;
+  font-size: 1.06rem;
+  font-weight: 800;
+  color: #2c3e50;
+  background: #fff;
+  text-align: right;
+}
+
+.profit-custom-label-input:focus {
+  outline: none;
+  border-color: #2c3e50;
+  box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.14);
+}
+
+.profit-custom-delete-btn {
+  border: none;
+  background: transparent;
+  color: #c4291d;
+  font-size: 1.2rem;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+
+.profit-custom-delete-btn:hover {
+  color: #991f14;
+}
+
+.profit-manual-input {
+  width: 100%;
+  min-width: 176px;
+  border: 1px solid #d8dde5;
+  border-radius: 8px;
+  height: 30px;
+  padding: 0.2rem 0.65rem;
+  font-size: 1.06rem;
+  text-align: center;
+  font-weight: 800;
+  color: #2c3e50;
+  background: #fff;
+}
+
+.profit-manual-input:focus {
+  outline: none;
+  border-color: #2c3e50;
+  box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.14);
+}
+
 /* Action Cards Grid - 2x2 */
 .action-cards-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1.5rem;
+  gap: var(--home-card-gap);
   direction: rtl;
 }
 
@@ -580,7 +1377,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 140px;
+  min-height: var(--home-card-height);
 }
 
 .action-card:hover {
@@ -670,8 +1467,8 @@ body {
 
 .chart-wrapper {
   position: relative;
-  height: auto;
-  min-height: 400px;
+  height: 100%;
+  min-height: 0;
   flex: 1;
   direction: rtl; /* Charts need RTL for proper rendering */
 }
@@ -1898,9 +2695,8 @@ body {
 }
 
 /* Readonly State */
-.form-group input:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
-.form-group select:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
-.form-group textarea:read-only:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]) {
+.form-group input[readonly]:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]),
+.form-group textarea[readonly]:not([class*="shift"]):not([class*="fuel-table"]):not([class*="customers-table"]) {
   background-color: #f5f5f5;
   color: #757575;
   cursor: not-allowed;
@@ -3014,6 +3810,26 @@ body {
   width: 50px;
 }
 
+/* Profit table must bypass generic .base-table framing/row borders */
+.base-table.profit-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  box-shadow: none !important;
+  table-layout: fixed !important;
+}
+
+.base-table.profit-table tbody tr {
+  border-bottom: none !important;
+}
+
+.base-table.profit-table tbody tr:hover {
+  background: transparent;
+}
+
 /* Products table - center السعر الحالي, الضريبة المضافة (%), الإجراءات, في البيع */
 .prices-table-full th:nth-child(3),
 .prices-table-full th:nth-child(4),
@@ -3196,17 +4012,105 @@ body {
   /* Home Layout - Stack vertically on mobile */
   .home-layout {
     flex-direction: column;
+    --home-card-group-header-offset: 0rem;
+    --home-card-group-gap: 0.45rem;
   }
 
   .home-chart-column,
   .home-cards-column {
     flex: 1;
     width: 100%;
+    order: initial;
+  }
+
+  .home-chart-container {
+    height: auto;
+    min-height: 420px;
+    margin-top: 0;
+  }
+
+  .chart-wrapper {
+    min-height: 320px;
   }
 
   /* Action Cards - Single column on mobile */
   .action-cards-grid {
     grid-template-columns: 1fr;
+  }
+
+  .home-card-groups {
+    gap: 0.9rem;
+  }
+
+  .safe-book-header {
+    align-items: stretch;
+  }
+
+  .safe-book-filters {
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+
+  .safe-book-filters .summary-filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .safe-book-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .safe-book-form-actions {
+    justify-content: stretch;
+    flex-direction: column;
+  }
+
+  .safe-book-form-actions .btn {
+    width: 100%;
+  }
+
+  .safe-book-balance-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .safe-book-add-btn {
+    position: static;
+    transform: none;
+    align-self: flex-end;
+  }
+
+  .profit-header {
+    align-items: stretch;
+  }
+
+  .profit-filters {
+    width: 100%;
+  }
+
+  .profit-filters .summary-filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .profit-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .profit-row-actions {
+    width: 100%;
+  }
+
+  .profit-row-actions .btn {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .profit-table th:first-child,
+  .profit-table td:first-child {
+    min-width: 160px;
+    max-width: 160px;
   }
 
   .home-chart-header {
@@ -4944,6 +5848,90 @@ select option {
   font-weight: 600;
   color: #333;
   font-size: 0.9rem;
+}
+
+.invoices-filters .filter-group {
+  align-items: center;
+}
+
+.invoices-filters .filter-group label {
+  width: 100%;
+  text-align: center !important;
+}
+
+.invoices-filters .filter-group select {
+  text-align: center !important;
+  text-align-last: center !important;
+  padding-left: 1.8rem !important;
+  padding-right: 0.7rem !important;
+  background-position: left 8px center;
+}
+
+.invoices-filters .filter-group select option {
+  text-align: center !important;
+}
+
+.invoices-filters .filter-group input[type="date"] {
+  direction: ltr !important;
+  text-align: center !important;
+}
+
+.price-history-filter-row {
+  margin-bottom: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  direction: rtl;
+}
+
+.price-history-filter-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.price-history-filter-label {
+  width: 100%;
+  text-align: center;
+  font-weight: 600;
+}
+
+.price-history-filter-select {
+  height: 44px;
+  min-height: 44px;
+  width: 100%;
+  min-width: 200px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  background-color: #ffffff;
+  color: #333333;
+  outline: none;
+  box-shadow: none;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 14px;
+  line-height: 44px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  direction: rtl;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23757575' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  text-align: center !important;
+  text-align-last: center !important;
+  padding-left: 1.8rem !important;
+  padding-right: 0.7rem !important;
+  background-position: left 8px center;
+}
+
+.price-history-filter-select option {
+  text-align: center !important;
+}
+
+.price-history-filter-select:focus {
+  border-color: #c4291d;
+  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
 }
 
 /* filter-group select and input already handled by standardized input system above (line 974) */
