@@ -55,6 +55,19 @@ jobs:
             dist/latest.yml
           retention-days: 30
 
+      - name: Remove existing release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release_tag.outputs.tag }}"
+          shopt -s nullglob
+
+          for file in dist/*.exe dist/*.exe.blockmap dist/latest.yml; do
+            asset_name="$(basename "$file")"
+            gh release delete-asset "$TAG" "$asset_name" --yes >/dev/null 2>&1 || true
+          done
+
       - name: Create or update release
         uses: softprops/action-gh-release@v1
         with:
@@ -65,6 +78,5 @@ jobs:
             dist/*.exe
             dist/*.exe.blockmap
             dist/latest.yml
-          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
