@@ -19,6 +19,7 @@ const HOME_CHART_MODE = {
 };
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
+const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
 let currentHomeChartMode = HOME_CHART_MODE.PURCHASES;
 window.__skipBeforeUnloadWarning = false;
 const ANNUAL_INVENTORY_FIELDS = [
@@ -591,6 +592,12 @@ function showScreenWithoutHistory(screenName) {
   if (mainContent) {
     mainContent.scrollTop = 0;
   }
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  window.scrollTo(0, 0);
+  requestAnimationFrame(() => {
+    window.scrollTo(0, 0);
+  });
 
   // Load specific data for each screen
   switch (screenName) {
@@ -5064,7 +5071,6 @@ let salesSummaryCache = { sales: [], months: [], products: [] };
 let expandedSalesMonth = null;
 const SALES_SUMMARY_ORDER_KEY = 'sales-summary-order';
 const PROFIT_MANUAL_FIELDS = [
-  'oil_total',
   'bonuses',
   'commission_diff',
   'deposit_tax',
@@ -5081,7 +5087,7 @@ const PROFIT_TABLE_ROWS = [
   { key: 'fuel_80', label: 'بنزين ٨٠', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'fuel_92', label: 'بنزين ٩٢', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'fuel_95', label: 'بنزين ٩٥', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
-  { key: 'oil_total', label: 'الزيوت', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
+  { key: 'oil_total', label: 'الزيوت', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'wash_lube_month', label: 'غسيل و تشحيم', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'bonuses', label: 'حوافز', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
   { key: 'commission_diff', label: 'فرق العمولة', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
@@ -6698,6 +6704,14 @@ function calculateFuelTotal() {
   return total;
 }
 
+function normalizeOilName(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function isOilInitialEditable(oilName) {
+  return normalizeOilName(oilName) === EDITABLE_OIL_INITIAL_NAME;
+}
+
 // Load active oils and populate oil table
 async function loadActiveOils() {
   try {
@@ -6743,6 +6757,7 @@ async function loadActiveOils() {
 
     activeOils.forEach(oil => {
       const oilId = oil.id || oil.oil_type.replace(/\s+/g, '-').toLowerCase();
+      const initialEditable = isOilInitialEditable(oil.oil_type);
       const row = document.createElement('tr');
       row.setAttribute('data-oil-id', oilId);
       row.setAttribute('data-oil-name', oil.oil_type);
@@ -6750,50 +6765,70 @@ async function loadActiveOils() {
       row.classList.add('draggable-oil-row');
       row.innerHTML = `
         <td class="oil-name-cell">
-          <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
-          <strong>${oil.oil_type}</strong>
+          <div class="oil-cell-center oil-name-content">
+            <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
+            <strong>${oil.oil_type}</strong>
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control shift-oil-input"
-                 id="oil-${oilId}-initial" data-oil="${oil.oil_type}" data-field="initial"
-                 oninput="calculateOilRow('${oilId}')">
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control shift-oil-input"
+                   id="oil-${oilId}-initial" data-oil="${oil.oil_type}" data-field="initial"
+                   oninput="calculateOilRow('${oilId}')" ${initialEditable ? '' : 'readonly'}>
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control shift-oil-input"
-                 id="oil-${oilId}-added" data-oil="${oil.oil_type}" data-field="added"
-                 oninput="calculateOilRow('${oilId}')">
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control shift-oil-input"
+                   id="oil-${oilId}-added" data-oil="${oil.oil_type}" data-field="added"
+                   oninput="calculateOilRow('${oilId}')">
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control auto-calculated"
-                 id="oil-${oilId}-total" readonly>
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control auto-calculated"
+                   id="oil-${oilId}-total" readonly>
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control auto-calculated"
-                 id="oil-${oilId}-sold" readonly>
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control auto-calculated"
+                   id="oil-${oilId}-sold" readonly>
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control shift-oil-input"
-                 id="oil-${oilId}-remaining" data-oil="${oil.oil_type}" data-field="remaining"
-                 oninput="calculateOilRow('${oilId}')">
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control shift-oil-input"
+                   id="oil-${oilId}-remaining" data-oil="${oil.oil_type}" data-field="remaining"
+                   oninput="calculateOilRow('${oilId}')">
+          </div>
         </td>
         <td class="spacer-cell"></td>
         <td>
-          <input type="number" step="1" class="form-control shift-oil-input"
-                 id="oil-${oilId}-open" data-oil="${oil.oil_type}" data-field="open"
-                 oninput="calculateOilRow('${oilId}')">
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control shift-oil-input"
+                   id="oil-${oilId}-open" data-oil="${oil.oil_type}" data-field="open"
+                   oninput="calculateOilRow('${oilId}')">
+          </div>
         </td>
         <td>
-          <input type="number" step="1" class="form-control shift-oil-input"
-                 id="oil-${oilId}-customers" data-oil="${oil.oil_type}" data-field="customers"
-                 oninput="calculateOilRow('${oilId}')">
+          <div class="oil-cell-center">
+            <input type="number" step="1" class="form-control shift-oil-input"
+                   id="oil-${oilId}-customers" data-oil="${oil.oil_type}" data-field="customers"
+                   oninput="calculateOilRow('${oilId}')">
+          </div>
         </td>
         <td>
-          <input type="number" step="0.01" class="form-control auto-calculated"
-                 id="oil-${oilId}-price" readonly>
+          <div class="oil-cell-center">
+            <input type="number" step="0.01" class="form-control auto-calculated"
+                   id="oil-${oilId}-price" readonly>
+          </div>
         </td>
         <td>
-          <input type="number" step="0.01" class="form-control auto-calculated"
-                 id="oil-${oilId}-revenue" readonly>
+          <div class="oil-cell-center">
+            <input type="number" step="0.01" class="form-control auto-calculated"
+                   id="oil-${oilId}-revenue" readonly>
+          </div>
         </td>
       `;
       tableBody.appendChild(row);
@@ -8516,6 +8551,91 @@ function closeResetCountersModal() {
   if (modal) modal.classList.remove('show');
 }
 
+function openResetOilBalancesModal() {
+  document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
+  const modal = document.getElementById('reset-oil-balances-modal');
+  const msg = document.getElementById('reset-oil-balances-message');
+  if (msg) msg.textContent = '';
+  renderResetOilBalanceFields();
+  if (modal) modal.classList.add('show');
+}
+
+function closeResetOilBalancesModal() {
+  const modal = document.getElementById('reset-oil-balances-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+function renderResetOilBalanceFields() {
+  const container = document.getElementById('reset-oil-balance-fields');
+  if (!container) return;
+
+  const tableBody = document.getElementById('shift-oil-table-body');
+  const rows = tableBody
+    ? Array.from(tableBody.querySelectorAll('tr[data-oil-id]')).filter((row) => {
+        const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+        return isOilInitialEditable(oilName);
+      })
+    : [];
+
+  if (rows.length === 0) {
+    container.innerHTML = '<div style="color:#666;">لا يوجد زيت متاح لتعديل الرصيد</div>';
+    return;
+  }
+
+  container.innerHTML = rows.map((row) => {
+    const oilId = row.getAttribute('data-oil-id');
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+    const currentValue = document.getElementById(`oil-${oilId}-initial`)?.value || '';
+
+    return `
+      <div class="reset-counter-field">
+        <label>${escapeHtml(oilName)}</label>
+        <input type="number" id="reset-oil-balance-${oilId}" min="0" step="1" placeholder="${escapeHtml(currentValue)}">
+      </div>
+    `;
+  }).join('');
+}
+
+async function applyResetOilBalances() {
+  const msg = document.getElementById('reset-oil-balances-message');
+  const tableBody = document.getElementById('shift-oil-table-body');
+  const rows = tableBody ? Array.from(tableBody.querySelectorAll('tr[data-oil-id]')) : [];
+  let hasChanges = false;
+
+  if (rows.length === 0) {
+    if (msg) msg.textContent = 'لا توجد زيوت نشطة';
+    return;
+  }
+
+  for (const row of rows) {
+    const oilId = row.getAttribute('data-oil-id');
+    const sourceInput = document.getElementById(`reset-oil-balance-${oilId}`);
+    const targetInput = document.getElementById(`oil-${oilId}-initial`);
+    const rawValue = String(sourceInput?.value ?? '').trim();
+
+    if (!targetInput || rawValue === '') {
+      continue;
+    }
+
+    const numericValue = parseInt(rawValue, 10);
+
+    if (Number.isFinite(numericValue) && numericValue >= 0) {
+      const nextValue = String(numericValue);
+      if (targetInput.value !== nextValue) {
+        hasChanges = true;
+      }
+      targetInput.value = nextValue;
+      await calculateOilRow(oilId);
+    }
+  }
+
+  if (hasChanges) {
+    currentShiftData.hasUnsavedChanges = true;
+  }
+  if (msg) msg.textContent = '';
+  closeResetOilBalancesModal();
+}
+
 function onResetFuelChange() {
   const select = document.getElementById('reset-fuel-type');
   const fuel = select?.value || '';
@@ -8525,13 +8645,29 @@ function onResetFuelChange() {
 function renderResetCounterFields(fuel) {
   const container = document.getElementById('reset-counter-fields');
   if (!container) return;
+
+  const getCurrentCounterValue = (counterIndex) => {
+    let inputId = '';
+
+    if (fuel === 'diesel') {
+      inputId = `fuel-diesel-first-${counterIndex}`;
+    } else if (fuel === 'gas') {
+      inputId = `fuel-gas-first-${counterIndex}`;
+    } else if (fuel === '95' || fuel === '92' || fuel === '80') {
+      inputId = `fuel-${fuel}-first-${counterIndex}`;
+    }
+
+    return inputId ? (document.getElementById(inputId)?.value || '') : '';
+  };
+
   const buildInputs = (count) => {
     let html = '';
     for (let i = 1; i <= count; i++) {
+      const currentValue = getCurrentCounterValue(i);
       html += `
         <div class="reset-counter-field">
           <label>${convertToArabicNumerals(i)}</label>
-          <input type="number" id="reset-counter-${i}" min="0" step="0.01">
+          <input type="number" id="reset-counter-${i}" min="0" step="0.01" placeholder="${escapeHtml(currentValue)}">
         </div>
       `;
     }
@@ -8558,22 +8694,37 @@ function applyResetCounters() {
     if (el) el.value = val;
   };
 
-  const values = [];
+  let hasChanges = false;
   const maxCounters = fuel === 'diesel' ? 4 : 2;
   for (let i = 1; i <= maxCounters; i++) {
-    const val = parseFloat(document.getElementById(`reset-counter-${i}`)?.value) || 0;
-    values.push(val);
+    const rawValue = String(document.getElementById(`reset-counter-${i}`)?.value ?? '').trim();
+    if (rawValue === '') continue;
+
+    const val = parseFloat(rawValue);
+    if (!Number.isFinite(val) || val < 0) {
+      continue;
+    }
+
+    let targetId = '';
+    if (fuel === 'diesel') {
+      targetId = `fuel-diesel-first-${i}`;
+    } else if (fuel === 'gas') {
+      targetId = `fuel-gas-first-${i}`;
+    } else if (fuel === '95' || fuel === '92' || fuel === '80') {
+      targetId = `fuel-${fuel}-first-${i}`;
+    }
+
+    const targetEl = targetId ? document.getElementById(targetId) : null;
+    const nextValue = String(val);
+    if (targetEl?.value !== nextValue) {
+      hasChanges = true;
+    }
+    setValue(targetId, nextValue);
   }
 
-  if (fuel === 'diesel') {
-    values.forEach((v, idx) => setValue(`fuel-diesel-first-${idx + 1}`, v));
-  } else if (fuel === 'gas') {
-    values.forEach((v, idx) => setValue(`fuel-gas-first-${idx + 1}`, v));
-  } else if (fuel === '95' || fuel === '92' || fuel === '80') {
-    values.forEach((v, idx) => setValue(`fuel-${fuel}-first-${idx + 1}`, v));
+  if (hasChanges) {
+    currentShiftData.hasUnsavedChanges = true;
   }
-
-  currentShiftData.hasUnsavedChanges = true;
   if (msg) msg.textContent = '';
   closeResetCountersModal();
 }

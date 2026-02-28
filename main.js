@@ -551,6 +551,30 @@ function setupIPCHandlers() {
     return (totalQuantity - cars) * price;
   };
 
+  const getShiftOilProfitValue = (shiftRow) => {
+    let oilData = parseJsonObject(shiftRow?.oil_data, null);
+
+    if (!oilData) {
+      const legacyData = parseJsonObject(shiftRow?.data, null);
+      oilData = parseJsonObject(legacyData?.oil_data, null);
+    }
+
+    if (!oilData || typeof oilData !== 'object') {
+      return 0;
+    }
+
+    return Object.values(oilData).reduce((sum, oilEntry) => {
+      if (!oilEntry || typeof oilEntry !== 'object') {
+        return sum;
+      }
+
+      const sold = toNumber(oilEntry.sold);
+      const open = toNumber(oilEntry.open);
+      const price = toNumber(oilEntry.price);
+      return sum + ((sold - open) * price);
+    }, 0);
+  };
+
   const normalizeFuelProfitKey = (fuelType) => {
     const normalizedFuelType = String(fuelType || '').trim();
     switch (normalizedFuelType) {
@@ -643,6 +667,13 @@ function setupIPCHandlers() {
       rows.forEach((row) => addMonth(row.month_key));
     } catch (error) {
       console.warn('Unable to read fuel_invoices months:', error.message);
+    }
+
+    try {
+      const rows = await executeQuery('SELECT SUBSTR(date, 1, 7) AS month_key FROM oil_invoices WHERE date IS NOT NULL');
+      rows.forEach((row) => addMonth(row.month_key));
+    } catch (error) {
+      console.warn('Unable to read oil_invoices months:', error.message);
     }
 
     try {
@@ -1237,7 +1268,7 @@ function setupIPCHandlers() {
       });
 
       const shiftRows = await executeQuery(
-        'SELECT date, fuel_data, data, wash_lube_revenue, total_expenses FROM shifts WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)',
+        'SELECT date, fuel_data, oil_data, data, wash_lube_revenue, total_expenses FROM shifts WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)',
         [startDate, endDate]
       ).catch((error) => {
         console.warn('Unable to read shift wash rows:', error.message);
@@ -1257,6 +1288,14 @@ function setupIPCHandlers() {
           return [];
         });
         return fallbackRows.map((row) => ({ ...row, invoice_total: null }));
+      });
+
+      const oilInvoiceRows = await executeQuery(
+        'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
+        [startDate, endDate]
+      ).catch((error) => {
+        console.warn('Unable to read oil invoices for profit calculation:', error.message);
+        return [];
       });
 
       const manualByMonth = new Map();
@@ -1280,6 +1319,7 @@ function setupIPCHandlers() {
       const fuel80ByMonth = new Map();
       const fuel92ByMonth = new Map();
       const fuel95ByMonth = new Map();
+      const oilByMonth = new Map();
       const washByMonth = new Map();
       const expensesByMonth = new Map();
       for (const row of shiftRows) {
@@ -1289,6 +1329,7 @@ function setupIPCHandlers() {
         fuel80ByMonth.set(monthKey, (fuel80ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٨٠'));
         fuel92ByMonth.set(monthKey, (fuel92ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٩٢'));
         fuel95ByMonth.set(monthKey, (fuel95ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٩٥'));
+        oilByMonth.set(monthKey, (oilByMonth.get(monthKey) || 0) + getShiftOilProfitValue(row));
         washByMonth.set(monthKey, (washByMonth.get(monthKey) || 0) + toNumber(row.wash_lube_revenue));
         expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + toNumber(row.total_expenses));
       }
@@ -1338,6 +1379,46 @@ function setupIPCHandlers() {
         insuranceByMonth.set(entry.monthKey, (insuranceByMonth.get(entry.monthKey) || 0) + insurance);
       }
 
+      const groupedOilInvoices = new Map();
+      for (const row of oilInvoiceRows) {
+        const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
+        if (!monthKey) continue;
+
+        const invoiceNumber = String(row?.invoice_number || '').trim() || '__unknown__';
+        const groupKey = `${monthKey}__${invoiceNumber}`;
+        if (!groupedOilInvoices.has(groupKey)) {
+          groupedOilInvoices.set(groupKey, {
+            monthKey,
+            subtotal: 0,
+            immediateDiscount: null,
+            martyrsTax: null
+          });
+        }
+
+        const entry = groupedOilInvoices.get(groupKey);
+        entry.subtotal += toNumber(row?.total_purchase);
+
+        const discountValue = parseFloat(row?.immediate_discount);
+        if (Number.isFinite(discountValue)) {
+          entry.immediateDiscount = entry.immediateDiscount === null
+            ? discountValue
+            : Math.max(entry.immediateDiscount, discountValue);
+        }
+
+        const taxValue = parseFloat(row?.martyrs_tax);
+        if (Number.isFinite(taxValue)) {
+          entry.martyrsTax = entry.martyrsTax === null
+            ? taxValue
+            : Math.max(entry.martyrsTax, taxValue);
+        }
+      }
+
+      const oilPurchasesByMonth = new Map();
+      for (const entry of groupedOilInvoices.values()) {
+        const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
+        oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
+      }
+
       const monthlyRows = monthRange.map((monthKey) => {
         const manual = manualByMonth.get(monthKey) || {};
         const grossFuelDiesel = dieselByMonth.has(monthKey)
@@ -1356,7 +1437,10 @@ function setupIPCHandlers() {
         const fuel_80 = grossFuel80 - toNumber(fuelPurchasesByMonth.fuel_80.get(monthKey));
         const fuel_92 = grossFuel92 - toNumber(fuelPurchasesByMonth.fuel_92.get(monthKey));
         const fuel_95 = grossFuel95 - toNumber(fuelPurchasesByMonth.fuel_95.get(monthKey));
-        const oil_total = toNumber(manual.oil_total);
+        const grossOilTotal = oilByMonth.has(monthKey)
+          ? toNumber(oilByMonth.get(monthKey))
+          : toNumber(manual.oil_total);
+        const oil_total = grossOilTotal - toNumber(oilPurchasesByMonth.get(monthKey));
         const bonuses = toNumber(manual.bonuses);
         const commission_diff = toNumber(manual.commission_diff);
         const deposit_tax = toNumber(manual.deposit_tax);
