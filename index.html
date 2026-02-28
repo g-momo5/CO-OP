@@ -510,6 +510,7 @@
                 </button>
                 <div id="shift-menu" class="shift-menu">
                   <div class="shift-menu-item" onclick="openResetCountersModal()">إعادة ضبط عدادات أول الوردية</div>
+                  <div class="shift-menu-item" onclick="openResetOilBalancesModal()">إعادة ضبط رصيد الزيوت</div>
                 </div>
               </div>
             </div>
@@ -1721,6 +1722,26 @@
           <div class="modal-footer">
             <button class="btn btn-primary" onclick="applyResetCounters()">تأكيد</button>
             <button class="btn btn-secondary" onclick="closeResetCountersModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reset Oil Balances Modal -->
+      <div id="reset-oil-balances-modal" class="modal">
+        <div class="modal-content" style="max-width: 560px;">
+          <div class="modal-header">
+            <h3>إعادة ضبط رصيد الزيوت</h3>
+            <button class="close-modal" onclick="closeResetOilBalancesModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div id="reset-oil-balance-fields" class="reset-counter-grid">
+              <!-- dynamic inputs -->
+            </div>
+            <div id="reset-oil-balances-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="applyResetOilBalances()">تأكيد</button>
+            <button class="btn btn-secondary" onclick="closeResetOilBalancesModal()">إلغاء</button>
           </div>
         </div>
       </div>

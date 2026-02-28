@@ -2358,7 +2358,19 @@ body.safe-book-scroll-lock {
 .shift-oil-table td {
   padding: 1px 2px;
   border: none;
-  text-align: center;
+  text-align: center !important;
+  vertical-align: middle;
+}
+
+.shift-oil-table td > * {
+  margin-inline: auto;
+}
+
+.shift-oil-table .oil-cell-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .shift-oil-table tbody tr:nth-child(even) {
@@ -2371,10 +2383,14 @@ body.safe-book-scroll-lock {
 
 .shift-oil-table input {
   width: 3.5rem;
+  display: block;
+  margin: 0 auto !important;
   padding: 4px;
   border: 1px solid #ddd;
   border-radius: 2px;
-  text-align: center;
+  text-align: center !important;
+  text-align-last: center !important;
+  direction: ltr;
   font-size: 13px;
   box-sizing: border-box;
   -moz-appearance: textfield;
@@ -2404,18 +2420,25 @@ body.safe-book-scroll-lock {
   cursor: not-allowed;
 }
 
-/* Oil table first header (نوع الزيت) - centered */
+/* Oil table first header (نوع الزيت) - left aligned */
 .shift-oil-table th:first-child {
-  text-align: center;
+  text-align: left;
 }
 
 /* Oil table row labels */
 .shift-oil-table .oil-name-cell {
   background: #ecf0f1;
   font-weight: 600;
-  text-align: center;
+  text-align: left !important;
+  justify-content: flex-start;
   padding: 4px;
   min-width: 120px;
+  width: 100%;
+}
+
+.shift-oil-table .oil-name-content {
+  justify-content: flex-start;
+  gap: 0.5rem;
 }
 
 /* Total Cards */
@@ -6481,13 +6504,13 @@ select option {
 
 .drag-handle {
   display: inline-block;
-  margin-right: 0.4rem;
   color: #999;
   cursor: grab;
   font-weight: bold;
   user-select: none;
   font-size: 0.9rem;
   vertical-align: middle;
+  margin-right: 0.4rem;
   letter-spacing: -2px;
   line-height: 1;
 }
@@ -6498,12 +6521,6 @@ select option {
 
 .drag-handle:hover {
   color: #c4291d;
-}
-
-.oil-name-cell {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 /* Spacer column for oil table */
@@ -6519,6 +6536,13 @@ select option {
   background: transparent;
   border: none;
   padding: 0;
+}
+
+.oil-name-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 /* Update Settings Section */
