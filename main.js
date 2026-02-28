@@ -273,26 +273,32 @@ function createSplashWindow() {
   }
 
   const iconPath = getAppIconPath();
+  const isMac = process.platform === 'darwin';
 
   return new Promise((resolve, reject) => {
     let resolved = false;
-
-    splashWindow = new BrowserWindow({
+    const splashWindowOptions = {
       width: 560,
       height: 360,
       resizable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      frame: false,
       show: false,
       autoHideMenuBar: true,
       icon: iconPath,
+      title: 'CO-OP',
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false
       }
-    });
+    };
+
+    if (!isMac) {
+      splashWindowOptions.minimizable = false;
+      splashWindowOptions.maximizable = false;
+      splashWindowOptions.fullscreenable = false;
+      splashWindowOptions.frame = false;
+    }
+
+    splashWindow = new BrowserWindow(splashWindowOptions);
 
     splashWindow.on('closed', () => {
       splashWindow = null;
