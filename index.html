@@ -107,10 +107,17 @@
                   </div>
 
                   <!-- Card 9 - Expenses -->
-                  <div class="action-card" onclick="showMessage('صفحة المصاريف قيد التطوير', 'info')">
+                  <div class="action-card" onclick="showScreen('expenses', 'home')">
                     <div class="card-icon">📉</div>
                     <h3>المصاريف</h3>
                     <p>عرض وتتبع المصروفات</p>
+                  </div>
+
+                  <!-- Card 10 - Customer Management -->
+                  <div class="action-card" onclick="showMessage('سيتم ربط صفحة إدارة العملاء لاحقًا', 'info')">
+                    <div class="card-icon">👥</div>
+                    <h3>إدارة العملاء</h3>
+                    <p>إدارة بيانات العملاء</p>
                   </div>
 
                 </div>
@@ -306,6 +313,72 @@
         </div>
       </div>
 
+      <div id="expenses-screen" class="screen">
+        <div class="expenses-page">
+          <div class="expenses-header">
+            <div>
+              <h2>المصاريف</h2>
+              <p class="summary-subtitle">عرض مصروفات الورديات بالتفصيل</p>
+            </div>
+            <div class="expenses-filters">
+              <div class="summary-filters">
+                <div class="form-group compact">
+                  <label>من:</label>
+                  <div class="dual-select">
+                    <select id="expenses-start-month"></select>
+                    <select id="expenses-start-year"></select>
+                  </div>
+                </div>
+                <div class="form-group compact">
+                  <label>إلى:</label>
+                  <div class="dual-select">
+                    <select id="expenses-end-month"></select>
+                    <select id="expenses-end-year"></select>
+                  </div>
+                </div>
+                <div class="form-group compact">
+                  <label for="expenses-min-amount">أقل قيمة:</label>
+                  <input type="number" id="expenses-min-amount" class="expenses-filter-input" min="0" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group compact">
+                  <label for="expenses-max-amount">أعلى قيمة:</label>
+                  <input type="number" id="expenses-max-amount" class="expenses-filter-input" min="0" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group compact expenses-search-group">
+                  <label for="expenses-search">بحث:</label>
+                  <input type="text" id="expenses-search" class="expenses-filter-input" placeholder="وصف المصروف">
+                </div>
+                <button type="button" class="btn btn-secondary" id="expenses-filter-btn">تطبيق</button>
+                <button type="button" class="btn btn-secondary expenses-clear-filter-btn" id="expenses-clear-filter-btn" title="إعادة الفترة الافتراضية">
+                  ↺
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="expenses-table-shell">
+            <div class="expenses-table-scroll">
+              <table class="base-table expenses-table">
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>الوردية</th>
+                    <th>الوصف</th>
+                    <th>القيمة</th>
+                  </tr>
+                </thead>
+                <tbody id="expenses-table-body">
+                  <tr>
+                    <td colspan="4" style="text-align:center; color:#777;">جاري تحميل البيانات...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="expenses-empty" class="empty-state" style="display:none;">لا توجد مصروفات في الفترة المحددة</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Annual Inventory Screen -->
       <div id="annual-inventory-screen" class="screen">
         <div class="annual-inventory-container">
@@ -420,9 +493,9 @@
               <label for="shift-date">التاريخ:</label>
               <input type="date" id="shift-date" class="form-control">
             </div>
-            <div class="form-group">
+            <div class="form-group shift-filter-like-group">
               <label for="shift-number">رقم الوردية:</label>
-              <select id="shift-number" class="form-control">
+              <select id="shift-number" class="form-control shift-filter-like-select">
                 <option value="1">الوردية الأولى (الصباح)</option>
                 <option value="2">الوردية الثانية (الليل)</option>
               </select>
@@ -758,53 +831,53 @@
 
                 <div class="total-section">
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-1" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-1" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-1" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-1" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-2" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-2" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-2" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-2" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-3" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-3" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-3" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-3" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-4" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-4" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-4" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-4" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-5" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-5" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-5" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-5" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-6" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-6" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-6" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-6" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-7" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-7" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-7" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-7" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-8" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-8" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-8" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-8" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-9" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-9" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-9" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-9" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row">
-                    <input type="text" class="total-description-input" id="expense-desc-10" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input" id="expense-amount-10" oninput="calculateTotalExpenses()">
+                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-10" placeholder="وصف المصروف">
+                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-10" oninput="calculateTotalExpenses()">
                   </div>
 
                   <div class="total-row total-divider grand-total">

@@ -529,7 +529,7 @@ body.safe-book-scroll-lock {
 #sales-summary-wrapper > .summary-table-scroll {
   overflow-y: auto;
   max-height: clamp(320px, 60vh, 680px);
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -644,7 +644,7 @@ body.safe-book-scroll-lock {
 }
 
 .safe-book-card {
-  margin-top: 1.5rem;
+  margin-top: 0;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -679,6 +679,25 @@ body.safe-book-scroll-lock {
   gap: 0.35rem;
 }
 
+.safe-book-filters .summary-filters .form-group.compact {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: auto;
+}
+
+.safe-book-filters .summary-filters .form-group.compact label {
+  width: auto;
+  margin-bottom: 0;
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.safe-book-filters .summary-filters .dual-select {
+  justify-content: flex-start;
+}
+
 .summary-filters .form-group.compact {
   display: flex;
   flex-direction: column;
@@ -704,6 +723,25 @@ body.safe-book-scroll-lock {
 
 .summary-filters .dual-select select option {
   text-align: center !important;
+}
+
+.home-summary-header .summary-filters .form-group.compact {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: auto;
+}
+
+.home-summary-header .summary-filters .form-group.compact label {
+  width: auto;
+  margin-bottom: 0;
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.home-summary-header .summary-filters .dual-select {
+  justify-content: flex-start;
 }
 
 .safe-book-clear-filter-btn {
@@ -855,7 +893,7 @@ body.safe-book-scroll-lock {
   position: relative;
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   min-height: 0;
 }
@@ -962,7 +1000,7 @@ body.safe-book-scroll-lock {
 
 /* Profit page */
 .profit-page {
-  margin-top: 1.5rem;
+  margin-top: 0;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -1383,6 +1421,141 @@ body.safe-book-scroll-lock {
   outline: none;
   border-color: #2c3e50;
   box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.14);
+}
+
+.expenses-page {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.expenses-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.expenses-filters .summary-filters {
+  margin: 0;
+  gap: 0.35rem;
+}
+
+.expenses-filters .form-group.compact {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: auto;
+}
+
+.expenses-filters .form-group.compact label {
+  width: auto;
+  margin-bottom: 0;
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.expenses-filters .dual-select {
+  justify-content: flex-start;
+}
+
+.expenses-filter-input {
+  height: 40px;
+  min-width: 130px;
+  border: 1px solid #d8dde5;
+  border-radius: 10px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.95rem;
+  color: #2c3e50;
+  background: #fff;
+}
+
+.expenses-filter-input:focus {
+  outline: none;
+  border-color: #2c3e50;
+  box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.14);
+}
+
+.expenses-search-group .expenses-filter-input {
+  min-width: 220px;
+}
+
+.expenses-clear-filter-btn {
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.expenses-table-shell {
+  width: 100%;
+}
+
+.expenses-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: clamp(330px, 62vh, 700px);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.expenses-table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.expenses-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #2c3e50;
+  color: #fff;
+  font-size: 0.84rem;
+}
+
+.expenses-table th,
+.expenses-table td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.expenses-table td {
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.base-table.expenses-table td:first-child {
+  width: auto;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.expenses-table th:nth-child(3),
+.expenses-table td:nth-child(3) {
+  min-width: 260px;
+  text-align: right;
+  white-space: normal;
+}
+
+.expenses-amount-cell {
+  font-weight: 800;
+  color: #1f8f3a;
+}
+
+.expenses-aggregate-row td {
+  background: rgba(44, 62, 80, 0.05);
 }
 
 /* Action Cards Grid - 2x2 */
@@ -1997,6 +2170,19 @@ body.safe-book-scroll-lock {
 
 .shift-info-section .form-group {
   flex: 0 0 auto;
+}
+
+.shift-info-section .shift-filter-like-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.shift-info-section .shift-filter-like-group label {
+  width: auto;
+  margin-bottom: 0;
+  text-align: right !important;
 }
 
 .shift-info-section .form-group:last-child {
@@ -2707,6 +2893,14 @@ body.safe-book-scroll-lock {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23757575' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: left 12px center;
+}
+
+#shift-number.shift-filter-like-select {
+  text-align: center !important;
+  text-align-last: center !important;
+  padding-left: 1.8rem !important;
+  padding-right: 0.7rem !important;
+  background-position: left 8px center;
 }
 
 /* Focus State */
@@ -4124,6 +4318,28 @@ body.safe-book-scroll-lock {
   .profit-filters .summary-filters {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .expenses-header {
+    align-items: stretch;
+  }
+
+  .expenses-filters {
+    width: 100%;
+  }
+
+  .expenses-filters .summary-filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .expenses-search-group {
+    width: 100%;
+  }
+
+  .expenses-search-group .expenses-filter-input {
+    width: 100%;
+    min-width: 0;
   }
 
   .profit-kpis {

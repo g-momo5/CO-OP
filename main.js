@@ -32,6 +32,108 @@ const OFFLINE_RESTRICTED = {
     'get-price-history'
   ]
 };
+const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
+
+function toFiniteNumber(value) {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseOptionalNumber(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === 'string' && !value.trim()) {
+    return null;
+  }
+
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseStoredObject(value, fallback = {}) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || !value.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function normalizeFilterMonthKey(value) {
+  const normalized = String(value || '').trim();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : null;
+}
+
+function getMonthRangeBounds(fromMonth, toMonth) {
+  const startMonth = normalizeFilterMonthKey(fromMonth);
+  const endMonth = normalizeFilterMonthKey(toMonth);
+
+  if (!startMonth || !endMonth || startMonth > endMonth) {
+    return null;
+  }
+
+  const [endYearText, endMonthText] = endMonth.split('-');
+  const endYear = parseInt(endYearText, 10);
+  const endMonthNumber = parseInt(endMonthText, 10);
+  if (!Number.isFinite(endYear) || !Number.isFinite(endMonthNumber)) {
+    return null;
+  }
+
+  const lastDay = new Date(endYear, endMonthNumber, 0).getDate();
+  return {
+    startDate: `${startMonth}-01`,
+    endDate: `${endMonth}-${String(lastDay).padStart(2, '0')}`
+  };
+}
+
+function normalizeExpenseItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const amount = parseOptionalNumber(item.amount);
+      if (amount === null || amount <= 0) {
+        return null;
+      }
+
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function buildShiftExpenseSnapshot(shiftRow) {
+  const legacyData = parseStoredObject(shiftRow?.data, {});
+  const expenseItems = normalizeExpenseItems(legacyData.expense_items);
+  const totalExpenses = toFiniteNumber(shiftRow?.total_expenses ?? legacyData.total_expenses);
+
+  return {
+    legacyData,
+    expenseItems,
+    totalExpenses
+  };
+}
 
 function getAppIconPath() {
   return process.platform === 'darwin'
@@ -2424,6 +2526,7 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       fuel_total,
       oil_data,
       oil_total,
+      expense_items,
       wash_lube_revenue,
       total_expenses,
       grand_total,
@@ -2436,11 +2539,13 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
     const safeWashLubeRevenue = parseFloat(wash_lube_revenue) || 0;
     const safeTotalExpenses = parseFloat(total_expenses) || 0;
     const safeGrandTotal = parseFloat(grand_total) || 0;
+    const normalizedExpenseItems = normalizeExpenseItems(expense_items);
     const legacyShiftData = JSON.stringify({
       fuel_data: fuel_data || '{}',
       fuel_total: safeFuelTotal,
       oil_data: oil_data || '{}',
       oil_total: safeOilTotal,
+      expense_items: normalizedExpenseItems,
       wash_lube_revenue: safeWashLubeRevenue,
       total_expenses: safeTotalExpenses,
       grand_total: safeGrandTotal,
@@ -2526,6 +2631,121 @@ ipcMain.handle('get-last-shift', async (event) => {
   } catch (error) {
     console.error('Error getting last shift:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('get-expense-available-months', async () => {
+  try {
+    const rows = await executeQuery(
+      'SELECT date, data, total_expenses FROM shifts WHERE (is_saved = 1 OR is_saved IS NULL) ORDER BY date ASC, shift_number ASC'
+    );
+
+    const months = new Set();
+    rows.forEach((row) => {
+      const monthKey = normalizeFilterMonthKey(String(row?.date || '').slice(0, 7));
+      if (!monthKey) {
+        return;
+      }
+
+      const snapshot = buildShiftExpenseSnapshot(row);
+      if (snapshot.expenseItems.length > 0 || snapshot.totalExpenses > 0) {
+        months.add(monthKey);
+      }
+    });
+
+    return Array.from(months).sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    console.error('Error getting expense available months:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('get-expense-entries', async (_event, filters = {}) => {
+  try {
+    const bounds = getMonthRangeBounds(filters.fromMonth, filters.toMonth);
+    if (!bounds) {
+      return [];
+    }
+
+    const minAmount = parseOptionalNumber(filters.minAmount);
+    const maxAmount = parseOptionalNumber(filters.maxAmount);
+    const searchTerm = String(filters.searchTerm || '').trim().toLocaleLowerCase();
+
+    const rows = await executeQuery(
+      'SELECT date, shift_number, data, total_expenses FROM shifts WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL) ORDER BY date DESC, shift_number DESC',
+      [bounds.startDate, bounds.endDate]
+    );
+
+    const entries = [];
+
+    rows.forEach((row) => {
+      const snapshot = buildShiftExpenseSnapshot(row);
+      if (snapshot.expenseItems.length > 0) {
+        snapshot.expenseItems.forEach((item) => {
+          entries.push({
+            date: String(row?.date || ''),
+            shift_number: parseInt(row?.shift_number, 10) === 2 ? 2 : 1,
+            description: item.description,
+            amount: item.amount,
+            is_aggregated: false,
+            line_index: item.index
+          });
+        });
+        return;
+      }
+
+      if (snapshot.totalExpenses > 0) {
+        entries.push({
+          date: String(row?.date || ''),
+          shift_number: parseInt(row?.shift_number, 10) === 2 ? 2 : 1,
+          description: LEGACY_AGGREGATED_EXPENSE_LABEL,
+          amount: snapshot.totalExpenses,
+          is_aggregated: true,
+          line_index: null
+        });
+      }
+    });
+
+    return entries
+      .filter((entry) => {
+        const amount = toFiniteNumber(entry.amount);
+        if (minAmount !== null && amount < minAmount) {
+          return false;
+        }
+
+        if (maxAmount !== null && amount > maxAmount) {
+          return false;
+        }
+
+        if (!searchTerm) {
+          return true;
+        }
+
+        const description = String(entry.description || '').trim().toLocaleLowerCase();
+        return description.includes(searchTerm);
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) {
+          return a.date < b.date ? 1 : -1;
+        }
+
+        if (a.shift_number !== b.shift_number) {
+          return b.shift_number - a.shift_number;
+        }
+
+        const aAggregateRank = a.is_aggregated ? 1 : 0;
+        const bAggregateRank = b.is_aggregated ? 1 : 0;
+        if (aAggregateRank !== bAggregateRank) {
+          return aAggregateRank - bAggregateRank;
+        }
+
+        const aIndex = a.line_index ?? Number.MAX_SAFE_INTEGER;
+        const bIndex = b.line_index ?? Number.MAX_SAFE_INTEGER;
+        return aIndex - bIndex;
+      });
+  } catch (error) {
+    console.error('Error getting expense entries:', error);
+    return [];
   }
 });
 

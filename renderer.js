@@ -17,6 +17,8 @@ const HOME_CHART_MODE = {
   PURCHASES: 'purchases',
   SALES: 'sales'
 };
+const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
+const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 let currentHomeChartMode = HOME_CHART_MODE.PURCHASES;
 window.__skipBeforeUnloadWarning = false;
 const ANNUAL_INVENTORY_FIELDS = [
@@ -45,7 +47,8 @@ const screenTitles = {
   'depot': 'المخزن',
   'annual-inventory': 'جرد سنوي',
   'sales-summary': 'ملخص المبيعات',
-  'profit': 'المكسب'
+  'profit': 'المكسب',
+  'expenses': 'المصاريف'
 };
 
 const settingsSectionTitles = {
@@ -623,6 +626,9 @@ function showScreenWithoutHistory(screenName) {
       break;
     case 'profit':
       initializeProfitDashboard();
+      break;
+    case 'expenses':
+      initializeExpensesDashboard();
       break;
     case 'shift-entry':
       // Initialize customers table IMMEDIATELY to avoid visible delay
@@ -5068,6 +5074,8 @@ let profitRowsCache = [];
 let profitDefaultRange = null;
 let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
+let expenseEntriesCache = [];
+let expenseDefaultRange = null;
 const PROFIT_TABLE_ROWS = [
   { key: 'fuel_diesel', label: 'سولار', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'fuel_80', label: 'بنزين ٨٠', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
@@ -6294,6 +6302,256 @@ async function loadProfitMonthlyData() {
   }
 }
 
+function getDefaultExpenseRange(availableMonths) {
+  return getDefaultProfitRange(availableMonths);
+}
+
+function populateExpenseFilterOptions(availableMonths, defaultRange) {
+  const startMonthSel = document.getElementById('expenses-start-month');
+  const startYearSel = document.getElementById('expenses-start-year');
+  const endMonthSel = document.getElementById('expenses-end-month');
+  const endYearSel = document.getElementById('expenses-end-year');
+  if (!startMonthSel || !startYearSel || !endMonthSel || !endYearSel) return;
+
+  const validMonths = Array.isArray(availableMonths)
+    ? availableMonths
+        .map((monthKey) => normalizeMonthKey(monthKey))
+        .filter(Boolean)
+    : [];
+
+  const nowYear = new Date().getFullYear();
+  const yearValues = validMonths.map((monthKey) => parseInt(monthKey.slice(0, 4), 10)).filter(Number.isFinite);
+  const minYear = yearValues.length > 0 ? Math.min(...yearValues) : nowYear;
+  const maxYear = yearValues.length > 0 ? Math.max(nowYear, Math.max(...yearValues)) : nowYear;
+
+  const years = [];
+  for (let year = minYear; year <= maxYear; year += 1) {
+    years.push(year);
+  }
+
+  const monthOptions = SAFE_BOOK_MONTH_NAMES.map((label, index) => ({
+    value: String(index + 1).padStart(2, '0'),
+    label
+  }));
+  const yearOptions = years.map((year) => ({
+    value: String(year),
+    label: convertToArabicNumerals(year)
+  }));
+
+  const fillSelect = (select, options, selectedValue) => {
+    select.innerHTML = options.map((option) => (
+      `<option value="${option.value}">${option.label}</option>`
+    )).join('');
+    if (selectedValue) {
+      select.value = selectedValue;
+    }
+  };
+
+  const safeDefault = defaultRange && normalizeMonthKey(defaultRange.fromMonth) && normalizeMonthKey(defaultRange.toMonth)
+    ? defaultRange
+    : getDefaultExpenseRange(validMonths);
+
+  fillSelect(startMonthSel, monthOptions, safeDefault.fromMonth.slice(5, 7));
+  fillSelect(endMonthSel, monthOptions, safeDefault.toMonth.slice(5, 7));
+  fillSelect(startYearSel, yearOptions, safeDefault.fromMonth.slice(0, 4));
+  fillSelect(endYearSel, yearOptions, safeDefault.toMonth.slice(0, 4));
+
+  const filterBtn = document.getElementById('expenses-filter-btn');
+  if (filterBtn && filterBtn.dataset.bound !== 'true') {
+    filterBtn.addEventListener('click', () => {
+      loadExpenseEntries();
+    });
+    filterBtn.dataset.bound = 'true';
+  }
+
+  const clearBtn = document.getElementById('expenses-clear-filter-btn');
+  if (clearBtn && clearBtn.dataset.bound !== 'true') {
+    clearBtn.addEventListener('click', () => {
+      if (!expenseDefaultRange) {
+        expenseDefaultRange = getDefaultExpenseRange(validMonths);
+      }
+
+      if (expenseDefaultRange) {
+        startMonthSel.value = expenseDefaultRange.fromMonth.slice(5, 7);
+        startYearSel.value = expenseDefaultRange.fromMonth.slice(0, 4);
+        endMonthSel.value = expenseDefaultRange.toMonth.slice(5, 7);
+        endYearSel.value = expenseDefaultRange.toMonth.slice(0, 4);
+      }
+
+      const minInput = document.getElementById('expenses-min-amount');
+      const maxInput = document.getElementById('expenses-max-amount');
+      const searchInput = document.getElementById('expenses-search');
+      if (minInput) minInput.value = '';
+      if (maxInput) maxInput.value = '';
+      if (searchInput) searchInput.value = '';
+
+      loadExpenseEntries();
+    });
+    clearBtn.dataset.bound = 'true';
+  }
+
+  const searchInput = document.getElementById('expenses-search');
+  if (searchInput && searchInput.dataset.bound !== 'true') {
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      event.preventDefault();
+      loadExpenseEntries();
+    });
+    searchInput.dataset.bound = 'true';
+  }
+}
+
+function getExpenseFiltersRange() {
+  const startMonthSel = document.getElementById('expenses-start-month');
+  const startYearSel = document.getElementById('expenses-start-year');
+  const endMonthSel = document.getElementById('expenses-end-month');
+  const endYearSel = document.getElementById('expenses-end-year');
+  const minAmountInput = document.getElementById('expenses-min-amount');
+  const maxAmountInput = document.getElementById('expenses-max-amount');
+  const searchInput = document.getElementById('expenses-search');
+
+  const currentMonth = getCurrentMonthKey();
+  const startMonth = startMonthSel && startYearSel
+    ? normalizeMonthKey(`${startYearSel.value}-${startMonthSel.value}`)
+    : currentMonth;
+  const endMonth = endMonthSel && endYearSel
+    ? normalizeMonthKey(`${endYearSel.value}-${endMonthSel.value}`)
+    : currentMonth;
+
+  if (!startMonth || !endMonth) {
+    return { valid: false, message: 'صيغة الشهر غير صحيحة' };
+  }
+
+  if (startMonth > endMonth) {
+    return { valid: false, message: 'فترة زمنية غير صحيحة' };
+  }
+
+  const minAmountRaw = String(minAmountInput?.value || '').trim();
+  const maxAmountRaw = String(maxAmountInput?.value || '').trim();
+  const minAmount = minAmountRaw === '' ? null : parseFloat(minAmountRaw);
+  const maxAmount = maxAmountRaw === '' ? null : parseFloat(maxAmountRaw);
+
+  if (minAmountRaw !== '' && !Number.isFinite(minAmount)) {
+    return { valid: false, message: 'صيغة أقل قيمة غير صحيحة' };
+  }
+
+  if (maxAmountRaw !== '' && !Number.isFinite(maxAmount)) {
+    return { valid: false, message: 'صيغة أعلى قيمة غير صحيحة' };
+  }
+
+  if (minAmount !== null && maxAmount !== null && minAmount > maxAmount) {
+    return { valid: false, message: 'أقل قيمة يجب أن تكون أقل من أو تساوي أعلى قيمة' };
+  }
+
+  return {
+    valid: true,
+    fromMonth: startMonth,
+    toMonth: endMonth,
+    minAmount,
+    maxAmount,
+    searchTerm: String(searchInput?.value || '').trim()
+  };
+}
+
+async function initializeExpensesDashboard() {
+  try {
+    const availableMonths = await ipcRenderer.invoke('get-expense-available-months');
+    expenseDefaultRange = getDefaultExpenseRange(availableMonths);
+    populateExpenseFilterOptions(availableMonths, expenseDefaultRange);
+    await loadExpenseEntries();
+  } catch (error) {
+    console.error('Error initializing expenses dashboard:', error);
+    expenseEntriesCache = [];
+    renderExpenseTableMessage('حدث خطأ أثناء تحميل بيانات المصاريف', 'error');
+    const emptyState = document.getElementById('expenses-empty');
+    if (emptyState) emptyState.style.display = 'none';
+  }
+}
+
+function formatExpenseShiftLabel(shiftNumber) {
+  return parseInt(shiftNumber, 10) === 2 ? 'الثانية' : 'الأولى';
+}
+
+function renderExpenseTableMessage(message, tone = 'neutral') {
+  const tbody = document.getElementById('expenses-table-body');
+  if (!tbody) return;
+
+  const color = tone === 'error' ? '#c4291d' : '#777';
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="4" style="text-align:center; color:${color};">${escapeHtml(message)}</td>
+    </tr>
+  `;
+}
+
+function renderExpenseTableRows(entries) {
+  const tbody = document.getElementById('expenses-table-body');
+  const emptyState = document.getElementById('expenses-empty');
+  if (!tbody) return;
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    renderExpenseTableMessage('لا توجد مصروفات في الفترة أو حسب الفلاتر المحددة');
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+
+  if (emptyState) {
+    emptyState.style.display = 'none';
+  }
+
+  tbody.innerHTML = entries.map((entry) => {
+    const rawDescription = String(entry?.description || '').trim();
+    const description = entry?.is_aggregated
+      ? rawDescription || LEGACY_AGGREGATED_EXPENSE_LABEL
+      : rawDescription || EMPTY_EXPENSE_DESCRIPTION_LABEL;
+    const rowClass = entry?.is_aggregated ? 'expenses-aggregate-row' : '';
+
+    return `
+      <tr class="${rowClass}">
+        <td>${escapeHtml(formatSafeBookDate(entry?.date))}</td>
+        <td>${escapeHtml(formatExpenseShiftLabel(entry?.shift_number))}</td>
+        <td>${escapeHtml(description)}</td>
+        <td class="expenses-amount-cell">${escapeHtml(formatArabicCurrency(parseFloat(entry?.amount) || 0))}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadExpenseEntries() {
+  const range = getExpenseFiltersRange();
+  const emptyState = document.getElementById('expenses-empty');
+  const tbody = document.getElementById('expenses-table-body');
+  if (!tbody) return;
+
+  if (!range.valid) {
+    expenseEntriesCache = [];
+    renderExpenseTableMessage(range.message || 'فلاتر غير صالحة');
+    if (emptyState) emptyState.style.display = 'none';
+    return;
+  }
+
+  try {
+    const entries = await ipcRenderer.invoke('get-expense-entries', {
+      fromMonth: range.fromMonth,
+      toMonth: range.toMonth,
+      minAmount: range.minAmount,
+      maxAmount: range.maxAmount,
+      searchTerm: range.searchTerm
+    });
+
+    expenseEntriesCache = Array.isArray(entries) ? entries : [];
+    renderExpenseTableRows(expenseEntriesCache);
+  } catch (error) {
+    console.error('Error loading expense entries:', error);
+    expenseEntriesCache = [];
+    renderExpenseTableMessage('حدث خطأ أثناء تحميل بيانات المصاريف', 'error');
+    if (emptyState) emptyState.style.display = 'none';
+  }
+}
+
 let defaultCounters = {
   diesel: [0, 0, 0, 0],
   gas: [0, 0],
@@ -7244,6 +7502,75 @@ function collectOilData() {
   return oilData;
 }
 
+function collectExpenseItems() {
+  const items = [];
+
+  for (let i = 1; i <= 10; i += 1) {
+    const description = String(document.getElementById(`expense-desc-${i}`)?.value || '').trim();
+    const amount = parseFloat(document.getElementById(`expense-amount-${i}`)?.value);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+
+    items.push({
+      index: i,
+      description,
+      amount
+    });
+  }
+
+  return items;
+}
+
+function normalizeExpenseItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const index = parseInt(item.index, 10);
+      const amount = parseFloat(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return null;
+      }
+
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index)
+    .slice(0, 10);
+}
+
+function clearShiftExpenseInputs() {
+  for (let i = 1; i <= 10; i += 1) {
+    const descriptionInput = document.getElementById(`expense-desc-${i}`);
+    const amountInput = document.getElementById(`expense-amount-${i}`);
+
+    if (descriptionInput) {
+      descriptionInput.value = '';
+    }
+
+    if (amountInput) {
+      amountInput.value = '';
+    }
+  }
+
+  const totalExpensesInput = document.getElementById('total-expenses');
+  if (totalExpensesInput) {
+    totalExpensesInput.value = '';
+  }
+}
+
 // Validate shift data before saving
 function validateShiftData() {
   const errors = [];
@@ -7354,6 +7681,7 @@ async function saveShift() {
       fuel_total: calculateFuelTotal(),
       oil_data: JSON.stringify(collectOilData()),
       oil_total: calculateOilTotal(),
+      expense_items: collectExpenseItems(),
       wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
       total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
       grand_total: calculateGrandTotal(),
@@ -7524,6 +7852,9 @@ function clearFieldsAfterSave() {
   const car80Input = document.getElementById('fuel-80-cars');
   if (car80Input) car80Input.value = '';
 
+  clearShiftExpenseInputs();
+  calculateNetTotal();
+
   // Clear all customer table data
   clearCustomerTable();
 }
@@ -7544,7 +7875,7 @@ function enableReadOnlyMode() {
   }
 
   // Disable all input fields
-  document.querySelectorAll('.shift-fuel-input, .shift-oil-input').forEach(input => {
+  document.querySelectorAll('.shift-fuel-input, .shift-oil-input, .shift-expense-input').forEach(input => {
     input.disabled = true;
   });
 
@@ -7563,7 +7894,7 @@ function disableReadOnlyMode() {
   }
 
   // Enable all input fields
-  document.querySelectorAll('.shift-fuel-input, .shift-oil-input').forEach(input => {
+  document.querySelectorAll('.shift-fuel-input, .shift-oil-input, .shift-expense-input').forEach(input => {
     input.disabled = false;
   });
 
@@ -7737,6 +8068,9 @@ async function loadShiftData(date, shiftNumber) {
     const totalExpenses = parseFloat(
       shift.total_expenses ?? legacyData.total_expenses ?? 0
     ) || 0;
+    const expenseItems = normalizeExpenseItems(legacyData.expense_items);
+
+    clearShiftExpenseInputs();
 
     // Populate fuel data
     Object.entries(fuelData).forEach(([fuelType, data]) => {
@@ -7832,13 +8166,36 @@ async function loadShiftData(date, shiftNumber) {
       washLubeInput.value = Math.abs(washLubeRevenue) > 0.0001 ? formatPrice(washLubeRevenue) : '';
     }
 
+    expenseItems.forEach((item) => {
+      const rowIndex = item.index;
+      if (!Number.isFinite(rowIndex) || rowIndex < 1 || rowIndex > 10) {
+        return;
+      }
+
+      const descriptionInput = document.getElementById(`expense-desc-${rowIndex}`);
+      const amountInput = document.getElementById(`expense-amount-${rowIndex}`);
+
+      if (descriptionInput) {
+        descriptionInput.value = item.description;
+      }
+
+      if (amountInput) {
+        amountInput.value = formatPrice(item.amount);
+      }
+    });
+
     // Recalculate totals
     calculateFuelTotal();
     calculateOilTotal();
     calculateGrandTotal();
     const totalExpensesInput = document.getElementById('total-expenses');
-    if (totalExpensesInput && Math.abs(totalExpenses) > 0.0001) {
+    if (expenseItems.length > 0) {
+      calculateTotalExpenses();
+    } else if (totalExpensesInput && Math.abs(totalExpenses) > 0.0001) {
       totalExpensesInput.value = formatPrice(totalExpenses);
+      calculateNetTotal();
+    } else if (totalExpensesInput) {
+      totalExpensesInput.value = '';
       calculateNetTotal();
     }
 
@@ -7948,6 +8305,8 @@ function clearShiftForm() {
   if (washLubeInput) {
     washLubeInput.value = '';
   }
+
+  clearShiftExpenseInputs();
 
   // Reset totals
   calculateFuelTotal();
@@ -8275,6 +8634,18 @@ async function initializeShiftEntry() {
     if (shiftNumberSelect) {
       shiftNumberSelect.addEventListener('change', handleShiftIdentifierChange);
     }
+
+    document.querySelectorAll('.shift-expense-desc').forEach((input) => {
+      input.addEventListener('input', () => {
+        currentShiftData.hasUnsavedChanges = true;
+      });
+    });
+
+    document.querySelectorAll('.shift-expense-amount').forEach((input) => {
+      input.addEventListener('input', () => {
+        currentShiftData.hasUnsavedChanges = true;
+      });
+    });
 
     // Set up unsaved data warning on page navigation
     window.addEventListener('beforeunload', (e) => {
