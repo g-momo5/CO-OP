@@ -159,27 +159,41 @@ function showToast(message, type = 'info', duration = 3000) {
   }, duration);
 }
 
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function () {
-  // RTL configuration is now handled by rtl-config.js
-  // The configuration is automatically applied when the DOM loads
-  
-  initializeApp();
-  setupEventListeners();
-  loadTodayStats();
-  loadFuelPrices();
-  loadPurchasePrices();
-  initSalesSummaryFilters();
-  initSafeBookFilters();
-  loadSafeBookMovements();
+async function bootstrapApp() {
+  try {
+    // RTL configuration is handled by rtl-config.js before bootstrap runs.
+    initializeApp();
+    setupEventListeners();
+    setupDepotEventListeners();
+    initSalesSummaryFilters();
+    initSafeBookFilters();
+    initializeConnectionMonitoring();
 
-  // Check for updates on startup if enabled
-  setTimeout(() => {
-    const autoCheck = localStorage.getItem('auto-check-updates');
-    if (autoCheck === null || autoCheck === 'true') {
-      ipcRenderer.send('check-for-updates-manual');
-    }
-  }, 3000);
+    await Promise.allSettled([
+      loadHomeChart(),
+      loadTodayStats(),
+      loadFuelPrices(),
+      loadPurchasePrices(),
+      loadSafeBookMovements()
+    ]);
+  } catch (error) {
+    console.error('Renderer bootstrap failed:', error);
+  } finally {
+    ipcRenderer.send('renderer-bootstrap-complete');
+
+    // Check for updates on startup if enabled
+    setTimeout(() => {
+      const autoCheck = localStorage.getItem('auto-check-updates');
+      if (autoCheck === null || autoCheck === 'true') {
+        ipcRenderer.send('check-for-updates-manual');
+      }
+    }, 3000);
+  }
+}
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', () => {
+  bootstrapApp();
 });
 
 // Helper function to get today's date in local timezone (YYYY-MM-DD format)
@@ -217,18 +231,12 @@ function initializeApp() {
   if (startDateInput) startDateInput.value = firstDay;
   if (endDateInput) endDateInput.value = today;
 
-  // Prepare sales summary filters if present
-  initSalesSummaryFilters();
-  initSafeBookFilters();
-
   // Generate invoice number
   generateInvoiceNumber();
 
   // Sync home chart title with the selected mode
   updateHomeChartToggleUI();
 
-  // Load home chart on initialization
-  loadHomeChart();
   scheduleHomeChartHeightSync();
   setTimeout(scheduleHomeChartHeightSync, 80);
   setTimeout(scheduleHomeChartHeightSync, 220);
@@ -2603,6 +2611,15 @@ function formatArabicNumberFixed(number) {
   return convertToArabicNumerals(formatted);
 }
 
+function formatArabicNumberWhole(number) {
+  const formatted = new Intl.NumberFormat('ar-EG', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+    useGrouping: false
+  }).format(number);
+  return convertToArabicNumerals(formatted);
+}
+
 // Format currency with Arabic numerals (default: no decimals unless needed)
 function formatArabicCurrency(amount) {
   const hasDecimals = amount % 1 !== 0;
@@ -2623,6 +2640,17 @@ function formatArabicCurrencyFixed(amount) {
     currency: 'EGP',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
+    useGrouping: false
+  }).format(amount);
+  return convertToArabicNumerals(formatted);
+}
+
+function formatArabicCurrencyWhole(amount) {
+  const formatted = new Intl.NumberFormat('ar-EG', {
+    style: 'currency',
+    currency: 'EGP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
     useGrouping: false
   }).format(amount);
   return convertToArabicNumerals(formatted);
@@ -5045,7 +5073,6 @@ const PROFIT_TABLE_ROWS = [
   { key: 'fuel_80', label: 'بنزين ٨٠', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'fuel_92', label: 'بنزين ٩٢', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'fuel_95', label: 'بنزين ٩٥', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
-  { key: 'fuel_total_month', label: 'إجمالي الوقود', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'oil_total', label: 'الزيوت', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
   { key: 'wash_lube_month', label: 'غسيل و تشحيم', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'bonuses', label: 'حوافز', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
@@ -5578,11 +5605,35 @@ function buildProfitDisplayRows() {
   return [
     ...revenueRows,
     ...customRevenueRows,
-    { key: 'total_positive', label: 'إجمالي الإيرادات', type: 'auto', section: 'revenue-total', cellClass: 'positive-col auto-col' },
     ...deductionRows,
     ...customDeductionRows,
-    { key: 'total_deductions', label: 'إجمالي الخصومات', type: 'auto', section: 'deduction-total', cellClass: 'deduction-col auto-col' },
-    { key: 'net_profit', label: 'صافي المكسب', type: 'auto-net', section: 'net', cellClass: 'net-col' }
+    {
+      key: 'total_positive',
+      label: 'إجمالي الإيرادات',
+      type: 'auto',
+      section: 'revenue-total',
+      cellClass: 'positive-col auto-col',
+      rowClass: 'profit-summary-row',
+      numberFormat: 'whole'
+    },
+    {
+      key: 'total_deductions',
+      label: 'إجمالي الخصومات',
+      type: 'auto',
+      section: 'deduction-total',
+      cellClass: 'deduction-col auto-col',
+      rowClass: 'profit-summary-row',
+      numberFormat: 'whole'
+    },
+    {
+      key: 'net_profit',
+      label: 'صافي المكسب',
+      type: 'auto-net',
+      section: 'net',
+      cellClass: 'net-col',
+      rowClass: 'profit-net-row',
+      numberFormat: 'whole'
+    }
   ];
 }
 
@@ -5750,7 +5801,7 @@ function updateProfitKpis(rows) {
   const positiveEl = document.getElementById('profit-kpi-positive');
   const deductionsEl = document.getElementById('profit-kpi-deductions');
 
-  if (netEl) netEl.textContent = formatArabicCurrency(totals.net);
+  if (netEl) netEl.textContent = formatArabicCurrencyWhole(totals.net);
   if (positiveEl) positiveEl.textContent = formatArabicCurrency(totals.positive);
   if (deductionsEl) deductionsEl.textContent = formatArabicCurrency(totals.deductions);
 }
@@ -5821,10 +5872,13 @@ function renderProfitMonthlyRows(rows) {
     </td>
   `;
 
-  const renderNumberCell = (value, cellClass = '') => {
+  const renderNumberCell = (value, cellClass = '', numberFormat = 'fixed') => {
     const normalized = parseAnnualInventoryValue(value);
     const className = cellClass ? ` class="${cellClass}"` : '';
-    return `<td${className}>${formatArabicNumberFixed(normalized)}</td>`;
+    const formattedValue = numberFormat === 'whole'
+      ? formatArabicNumberWhole(normalized)
+      : formatArabicNumberFixed(normalized);
+    return `<td${className}>${formattedValue}</td>`;
   };
 
   const renderCustomValueInput = (rowKey, monthKey, value, cellClass = '') => `
@@ -5865,7 +5919,7 @@ function renderProfitMonthlyRows(rows) {
       : `<td class="profit-label-cell ${metric.cellClass || ''}"><strong>${escapeHtml(metric.label)}</strong></td>`;
 
     return `
-      <tr data-profit-row-key="${escapeHtml(metric.key)}">
+      <tr data-profit-row-key="${escapeHtml(metric.key)}" class="${escapeHtml(metric.rowClass || '')}">
         ${labelCell}
         ${months.map((monthKey) => {
           const monthRow = rows.find((row) => normalizeMonthKey(row.month_key) === monthKey) || {};
@@ -5879,9 +5933,9 @@ function renderProfitMonthlyRows(rows) {
           if (metric.type === 'auto-net') {
             const value = parseAnnualInventoryValue(monthRow[metric.key]);
             const netClass = value < 0 ? 'net-col negative' : 'net-col';
-            return renderNumberCell(value, netClass);
+            return renderNumberCell(value, netClass, metric.numberFormat);
           }
-          return renderNumberCell(monthRow[metric.key], metric.cellClass);
+          return renderNumberCell(monthRow[metric.key], metric.cellClass, metric.numberFormat);
         }).join('')}
       </tr>
     `;
@@ -8246,12 +8300,6 @@ async function initializeShiftEntry() {
     await loadFuelPricesForDate(dateInput.value);
   }
 }
-
-// Initialize depot event listeners quando DOM è pronto
-document.addEventListener('DOMContentLoaded', () => {
-  setupDepotEventListeners();
-  initializeConnectionMonitoring();
-});
 
 // ============================================
 // CONNECTION AND SYNC MONITORING

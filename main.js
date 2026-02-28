@@ -1,14 +1,22 @@
 const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 // Note: autoUpdater initialized after app.whenReady() to avoid initialization issues
 const path = require('path');
+const util = require('util');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
 
 let mainWindow;
+let splashWindow = null;
 let dbManager; // DatabaseManager instance (replaces db)
 let syncManager; // SyncManager instance
 let autoUpdater; // Initialized after app is ready
 let connectionCheckInterval; // Interval for checking connection status
+let startupPhase = { progress: 0, message: '', level: 'info' };
+let startupConsoleRestore = null;
+let mainWindowReady = false;
+let rendererBootstrapReady = false;
+let startupFallbackTimer = null;
+let startupComplete = false;
 let isForceClosingWindow = false; // Allow close after explicit user confirmation
 // Screens and sections that are limited when offline
 const OFFLINE_RESTRICTED = {
@@ -25,14 +33,200 @@ const OFFLINE_RESTRICTED = {
   ]
 };
 
-function createWindow() {
-  const iconPath = process.platform === 'darwin'
+function getAppIconPath() {
+  return process.platform === 'darwin'
     ? path.join(__dirname, 'assets', 'logo_cpc.icns')
     : path.join(__dirname, 'assets', 'logo_cpc.png');
+}
+
+function clearStartupFallbackTimer() {
+  if (!startupFallbackTimer) {
+    return;
+  }
+
+  clearTimeout(startupFallbackTimer);
+  startupFallbackTimer = null;
+}
+
+function restoreStartupConsoleMirror() {
+  if (typeof startupConsoleRestore === 'function') {
+    startupConsoleRestore();
+  }
+}
+
+function destroySplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.destroy();
+  }
+
+  splashWindow = null;
+}
+
+function normalizeStartupMessage(message) {
+  return String(message ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatStartupLogArgs(args) {
+  return normalizeStartupMessage(args.map((arg) => {
+    if (arg instanceof Error) {
+      return arg.stack || arg.message;
+    }
+
+    if (typeof arg === 'string') {
+      return arg;
+    }
+
+    return util.inspect(arg, {
+      depth: 2,
+      breakLength: Infinity,
+      compact: true
+    });
+  }).join(' '));
+}
+
+function emitStartupStatus(message, progress = startupPhase.progress, level = 'info') {
+  const nextProgress = Number.isFinite(progress)
+    ? Math.max(0, Math.min(100, Math.round(progress)))
+    : startupPhase.progress;
+  const nextMessage = normalizeStartupMessage(message) || startupPhase.message;
+  const nextLevel = level === 'warn' || level === 'error' ? level : 'info';
+
+  startupPhase = {
+    progress: nextProgress,
+    message: nextMessage,
+    level: nextLevel
+  };
+
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('startup-status', startupPhase);
+  }
+}
+
+function installStartupConsoleMirror() {
+  if (typeof startupConsoleRestore === 'function') {
+    return startupConsoleRestore;
+  }
+
+  const originalLog = console.log.bind(console);
+  const originalWarn = console.warn.bind(console);
+  const originalError = console.error.bind(console);
+
+  console.log = (...args) => {
+    originalLog(...args);
+    const message = formatStartupLogArgs(args);
+    if (message) {
+      emitStartupStatus(message, startupPhase.progress, 'info');
+    }
+  };
+
+  console.warn = (...args) => {
+    originalWarn(...args);
+    const message = formatStartupLogArgs(args);
+    if (message) {
+      emitStartupStatus(message, startupPhase.progress, 'warn');
+    }
+  };
+
+  console.error = (...args) => {
+    originalError(...args);
+    const message = formatStartupLogArgs(args);
+    if (message) {
+      emitStartupStatus(message, startupPhase.progress, 'error');
+    }
+  };
+
+  startupConsoleRestore = () => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+    startupConsoleRestore = null;
+  };
+
+  return startupConsoleRestore;
+}
+
+function finalizeStartupIfReady() {
+  if (startupComplete || !mainWindowReady || !rendererBootstrapReady) {
+    return;
+  }
+
+  emitStartupStatus('Interfaccia pronta', 100, 'info');
+  startupComplete = true;
+  clearStartupFallbackTimer();
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  destroySplashWindow();
+  restoreStartupConsoleMirror();
+}
+
+function createSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    return Promise.resolve(splashWindow);
+  }
+
+  const iconPath = getAppIconPath();
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+
+    splashWindow = new BrowserWindow({
+      width: 560,
+      height: 360,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      frame: false,
+      show: false,
+      autoHideMenuBar: true,
+      icon: iconPath,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+
+    splashWindow.on('closed', () => {
+      splashWindow = null;
+    });
+
+    splashWindow.webContents.on('did-finish-load', () => {
+      if (startupPhase.message && splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.webContents.send('startup-status', startupPhase);
+      }
+    });
+
+    splashWindow.once('ready-to-show', () => {
+      if (!splashWindow || splashWindow.isDestroyed()) {
+        return;
+      }
+
+      splashWindow.show();
+      resolved = true;
+      resolve(splashWindow);
+    });
+
+    splashWindow.loadFile('loading.html').catch((error) => {
+      if (!resolved) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function createWindow({ deferShow = false } = {}) {
+  const iconPath = getAppIconPath();
 
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: !deferShow,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -41,6 +235,37 @@ function createWindow() {
     icon: iconPath,
     title: 'محطة بنزين سمنود - الجمعية التعاونية للبترول - مصر'
   });
+
+  if (deferShow) {
+    mainWindowReady = false;
+    clearStartupFallbackTimer();
+    startupFallbackTimer = setTimeout(() => {
+      if (startupComplete) {
+        return;
+      }
+
+      emitStartupStatus('Avvio prolungato, apertura interfaccia...', 88, 'warn');
+      startupComplete = true;
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+
+      destroySplashWindow();
+      clearStartupFallbackTimer();
+      restoreStartupConsoleMirror();
+      console.warn('Renderer bootstrap timeout, showing main window before bootstrap completed');
+    }, 12000);
+
+    mainWindow.once('ready-to-show', () => {
+      mainWindowReady = true;
+      emitStartupStatus('Finestra principale pronta', 88, 'info');
+      finalizeStartupIfReady();
+    });
+  } else {
+    mainWindowReady = true;
+  }
 
   mainWindow.loadFile('index.html');
 
@@ -103,6 +328,9 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     isForceClosingWindow = false;
+    if (mainWindow && mainWindow.isDestroyed()) {
+      mainWindow = null;
+    }
   });
 
   // Open DevTools in development
@@ -1884,165 +2112,194 @@ function setupIPCHandlers() {
   });
 } // End of setupIPCHandlers
 
+ipcMain.on('renderer-bootstrap-complete', () => {
+  rendererBootstrapReady = true;
+  finalizeStartupIfReady();
+});
+
 app.whenReady().then(async () => {
-  // Initialize database (with 5 second timeout)
-  const dbResult = await initializeDatabase();
+  let dbResult;
 
-  setupIPCHandlers();
-  createWindow();
+  startupPhase = { progress: 0, message: '', level: 'info' };
+  mainWindowReady = false;
+  rendererBootstrapReady = false;
+  startupComplete = false;
 
-  // Show offline warning if needed (after 2 seconds to let UI load)
-  if (!dbResult.online) {
-    setTimeout(() => {
-      if (mainWindow) {
-        mainWindow.webContents.send('offline-mode-warning', {
-          message: 'تعمل في وضع عدم الاتصال. سيتم مزامنة البيانات عند استعادة الاتصال بالإنترنت.',
-          offline: true
-        });
-      }
-    }, 2000);
-  }
+  try {
+    await createSplashWindow();
+    emitStartupStatus('Avvio applicazione...', 5, 'info');
+    installStartupConsoleMirror();
+    emitStartupStatus('Inizializzazione database...', 15, 'info');
 
-  // Start connection monitoring (check every 10 seconds)
-  connectionCheckInterval = setInterval(async () => {
-    const wasOnline = dbManager.isOnline;
-    const isNowOnline = net.isOnline() && await dbManager.checkConnection();
+    // Initialize database (with 5 second timeout)
+    dbResult = await initializeDatabase();
+    emitStartupStatus('Database pronto', 60, 'info');
 
-    if (!wasOnline && isNowOnline) {
-      // Connection restored!
-      dbManager.isOnline = true;
-      console.log('📡 Connection restored, starting automatic sync...');
+    setupIPCHandlers();
+    emitStartupStatus('Canali applicazione pronti', 72, 'info');
+    createWindow({ deferShow: true });
 
-      if (mainWindow) {
-        mainWindow.webContents.send('connection-status', {
-          online: true,
-          syncing: true
-        });
-      }
-
-      // Trigger automatic sync
-      try {
-        const syncResult = await syncManager.syncAll();
-        console.log('✅ Auto-sync completed:', syncResult);
-
-        if (mainWindow) {
-          mainWindow.webContents.send('sync-completed', {
-            success: syncResult.success,
-            synced: syncResult.synced,
-            failed: syncResult.failed,
-            timestamp: Date.now()
+    // Show offline warning if needed (after 2 seconds to let UI load)
+    if (!dbResult.online) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('offline-mode-warning', {
+            message: 'تعمل في وضع عدم الاتصال. سيتم مزامنة البيانات عند استعادة الاتصال بالإنترنت.',
+            offline: true
           });
         }
-      } catch (error) {
-        console.error('❌ Auto-sync failed:', error);
-      }
-    } else if (wasOnline && !isNowOnline) {
-      // Connection lost
-      dbManager.isOnline = false;
-      console.log('📡 Connection lost, switching to offline mode');
-
-      if (mainWindow) {
-        mainWindow.webContents.send('connection-status', {
-          online: false,
-          syncing: false
-        });
-      }
+      }, 2000);
     }
 
-    // Send status update to renderer
-    if (mainWindow) {
-      const status = syncManager.getSyncStatus();
-      mainWindow.webContents.send('sync-status-update', status);
+    // Start connection monitoring (check every 10 seconds)
+    connectionCheckInterval = setInterval(async () => {
+      const wasOnline = dbManager.isOnline;
+      const isNowOnline = net.isOnline() && await dbManager.checkConnection();
+
+      if (!wasOnline && isNowOnline) {
+        // Connection restored!
+        dbManager.isOnline = true;
+        console.log('📡 Connection restored, starting automatic sync...');
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('connection-status', {
+            online: true,
+            syncing: true
+          });
+        }
+
+        // Trigger automatic sync
+        try {
+          const syncResult = await syncManager.syncAll();
+          console.log('✅ Auto-sync completed:', syncResult);
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sync-completed', {
+              success: syncResult.success,
+              synced: syncResult.synced,
+              failed: syncResult.failed,
+              timestamp: Date.now()
+            });
+          }
+        } catch (error) {
+          console.error('❌ Auto-sync failed:', error);
+        }
+      } else if (wasOnline && !isNowOnline) {
+        // Connection lost
+        dbManager.isOnline = false;
+        console.log('📡 Connection lost, switching to offline mode');
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('connection-status', {
+            online: false,
+            syncing: false
+          });
+        }
+      }
+
+      // Send status update to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const status = syncManager.getSyncStatus();
+        mainWindow.webContents.send('sync-status-update', status);
+      }
+    }, 10000);
+
+    // Initialize autoUpdater after app is ready (only if online)
+    try {
+      const { autoUpdater: au } = require('electron-updater');
+      autoUpdater = au;
+
+      // Configurazione auto-updater
+      autoUpdater.autoDownload = false;
+      autoUpdater.autoInstallOnAppQuit = true;
+
+      // Fix per Windows: forza il download differenziale se disponibile
+      autoUpdater.allowDowngrade = false;
+      autoUpdater.allowPrerelease = false;
+
+      // Logger per debugging
+      autoUpdater.logger = require('electron-log');
+      autoUpdater.logger.transports.file.level = 'info';
+
+      // Auto-updater event handlers (registered only if autoUpdater is available)
+      autoUpdater.on('checking-for-update', () => {
+        console.log('Checking for updates...');
+      });
+
+      autoUpdater.on('update-available', (info) => {
+        console.log('Update available:', info.version);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-available', info);
+        }
+      });
+
+      autoUpdater.on('update-not-available', () => {
+        console.log('Update not available');
+      });
+
+      autoUpdater.on('error', (err) => {
+        console.error('Error in auto-updater:', err);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          // Invia errore al renderer per mostrare all'utente
+          mainWindow.webContents.send('update-error', { message: err.message });
+        }
+      });
+
+      // Evento download-progress con fallback manuale per Windows
+      let lastProgress = 0;
+      autoUpdater.on('download-progress', (progressObj) => {
+        const percent = Math.round(progressObj.percent) || 0;
+
+        // Log dettagliato
+        console.log(`Download progress: ${percent}% (${progressObj.transferred}/${progressObj.total} bytes)`);
+        console.log(`Speed: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s`);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('download-progress', {
+            percent: percent,
+            transferred: progressObj.transferred,
+            total: progressObj.total,
+            bytesPerSecond: progressObj.bytesPerSecond
+          });
+        }
+
+        lastProgress = percent;
+      });
+
+      autoUpdater.on('update-downloaded', (info) => {
+        console.log('Update downloaded');
+
+        // Forza invio 100% se non è stato ricevuto
+        if (lastProgress < 100 && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('download-progress', {
+            percent: 100,
+            transferred: info.files?.[0]?.size || 0,
+            total: info.files?.[0]?.size || 0,
+            bytesPerSecond: 0
+          });
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-downloaded', info);
+        }
+      });
+    } catch (err) {
+      console.log('AutoUpdater not available:', err.message);
     }
-  }, 10000);
 
-  // Initialize autoUpdater after app is ready (only if online)
-  try {
-    const { autoUpdater: au } = require('electron-updater');
-    autoUpdater = au;
-
-    // Configurazione auto-updater
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = true;
-
-    // Fix per Windows: forza il download differenziale se disponibile
-    autoUpdater.allowDowngrade = false;
-    autoUpdater.allowPrerelease = false;
-
-    // Logger per debugging
-    autoUpdater.logger = require('electron-log');
-    autoUpdater.logger.transports.file.level = 'info';
-
-    // Auto-updater event handlers (registered only if autoUpdater is available)
-    autoUpdater.on('checking-for-update', () => {
-      console.log('Checking for updates...');
-    });
-
-    autoUpdater.on('update-available', (info) => {
-      console.log('Update available:', info.version);
-      if (mainWindow) {
-        mainWindow.webContents.send('update-available', info);
-      }
-    });
-
-    autoUpdater.on('update-not-available', (info) => {
-      console.log('Update not available');
-    });
-
-    autoUpdater.on('error', (err) => {
-      console.error('Error in auto-updater:', err);
-      if (mainWindow) {
-        // Invia errore al renderer per mostrare all'utente
-        mainWindow.webContents.send('update-error', { message: err.message });
-      }
-    });
-
-    // Evento download-progress con fallback manuale per Windows
-    let lastProgress = 0;
-    autoUpdater.on('download-progress', (progressObj) => {
-      const percent = Math.round(progressObj.percent) || 0;
-
-      // Log dettagliato
-      console.log(`Download progress: ${percent}% (${progressObj.transferred}/${progressObj.total} bytes)`);
-      console.log(`Speed: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s`);
-
-      if (mainWindow) {
-        mainWindow.webContents.send('download-progress', {
-          percent: percent,
-          transferred: progressObj.transferred,
-          total: progressObj.total,
-          bytesPerSecond: progressObj.bytesPerSecond
-        });
-      }
-
-      lastProgress = percent;
-    });
-
-    autoUpdater.on('update-downloaded', (info) => {
-      console.log('Update downloaded');
-
-      // Forza invio 100% se non è stato ricevuto
-      if (lastProgress < 100 && mainWindow) {
-        mainWindow.webContents.send('download-progress', {
-          percent: 100,
-          transferred: info.files?.[0]?.size || 0,
-          total: info.files?.[0]?.size || 0,
-          bytesPerSecond: 0
-        });
-      }
-
-      if (mainWindow) {
-        mainWindow.webContents.send('update-downloaded', info);
-      }
-    });
-  } catch (err) {
-    console.log('AutoUpdater not available:', err.message);
+    // Check for updates after window is created (if auto-check is enabled)
+    setTimeout(() => {
+      // Will be triggered by renderer after checking localStorage
+    }, 3000);
+  } catch (error) {
+    emitStartupStatus(error.message, startupPhase.progress || 15, 'error');
+    restoreStartupConsoleMirror();
+    clearStartupFallbackTimer();
+    dialog.showErrorBox('Errore di avvio', error.message);
+    destroySplashWindow();
+    app.quit();
+    return;
   }
-
-  // Check for updates after window is created (if auto-check is enabled)
-  setTimeout(() => {
-    // Will be triggered by renderer after checking localStorage
-  }, 3000);
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -2285,10 +2542,15 @@ app.on('before-quit', async () => {
   // Stop connection monitoring
   if (connectionCheckInterval) {
     clearInterval(connectionCheckInterval);
+    connectionCheckInterval = null;
   }
 
   // Close database connections
   if (dbManager) {
-    dbManager.close();
+    try {
+      await dbManager.close();
+    } catch (error) {
+      console.error('Error while closing database connections:', error);
+    }
   }
 });

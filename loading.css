@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light;
+  --bg-top: #eef4ef;
+  --bg-bottom: #d7e4da;
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --panel-border: rgba(29, 74, 43, 0.12);
+  --text-strong: #183623;
+  --text-muted: #486251;
+  --progress-bg: rgba(24, 54, 35, 0.12);
+  --progress-fill: linear-gradient(90deg, #1f6b44 0%, #2d8a59 100%);
+  --status-info: #274235;
+  --status-warn: #9a6700;
+  --status-error: #b42318;
+  --shadow: 0 18px 48px rgba(24, 54, 35, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.55), transparent 36%),
+    linear-gradient(160deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  color: var(--text-strong);
+}
+
+#loading-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+}
+
+.loading-panel {
+  width: min(100%, 480px);
+  min-height: 300px;
+  padding: 32px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 28px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow);
+}
+
+#loading-logo {
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 22px rgba(31, 107, 68, 0.16));
+}
+
+#loading-title {
+  margin: 0;
+  letter-spacing: 0.18em;
+  font-size: 1.85rem;
+  font-weight: 700;
+}
+
+.loading-footer {
+  width: 100%;
+  margin-top: auto;
+}
+
+#loading-status-line {
+  min-height: 1.25rem;
+  margin-bottom: 12px;
+  color: var(--status-info);
+  font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#loading-status-line.is-warn {
+  color: var(--status-warn);
+}
+
+#loading-status-line.is-error {
+  color: var(--status-error);
+}
+
+#loading-progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--progress-bg);
+}
+
+#loading-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--progress-fill);
+  transition: width 220ms ease;
+}

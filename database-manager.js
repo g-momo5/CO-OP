@@ -16,6 +16,7 @@ class DatabaseManager {
     this.isOnline = false;
     this.pgPool = null;
     this.sqlite = null;
+    this.closePromise = null;
     this.sqlitePath = null;
     this.lastSyncTime = null;
     this.connectionString = 'postgresql://postgres.ihajlcodsypvjwfnkcjc:Ghaly1997.@aws-1-eu-west-2.pooler.supabase.com:6543/postgres';
@@ -683,13 +684,29 @@ class DatabaseManager {
   /**
    * Close database connections
    */
-  close() {
-    if (this.pgPool) {
-      this.pgPool.end();
+  async close() {
+    if (this.closePromise) {
+      return this.closePromise;
     }
-    if (this.sqlite) {
-      this.sqlite.close();
-    }
+
+    const pgPool = this.pgPool;
+    const sqlite = this.sqlite;
+
+    // Clear handles immediately so repeated shutdown paths are no-ops.
+    this.pgPool = null;
+    this.sqlite = null;
+
+    this.closePromise = (async () => {
+      if (pgPool) {
+        await pgPool.end();
+      }
+
+      if (sqlite) {
+        sqlite.close();
+      }
+    })();
+
+    return this.closePromise;
   }
 }
 

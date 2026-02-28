@@ -1056,6 +1056,14 @@ body.safe-book-scroll-lock {
   border-color: rgba(44, 62, 80, 0.3);
 }
 
+.profit-kpi-card.net .profit-kpi-label {
+  font-size: 1.12rem;
+}
+
+.profit-kpi-card.net .profit-kpi-value {
+  font-size: 1.65rem;
+}
+
 .profit-kpi-label {
   color: #667;
   font-weight: 700;
@@ -1136,7 +1144,7 @@ body.safe-book-scroll-lock {
   border: none;
   border-radius: 0;
   background: transparent;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -1286,6 +1294,30 @@ body.safe-book-scroll-lock {
 
 .profit-table .net-col.negative {
   color: #c4291d;
+}
+
+.profit-table tr.profit-summary-row td {
+  font-weight: 800;
+}
+
+.profit-table tr[data-profit-row-key="total_positive"] td,
+.profit-table tr[data-profit-row-key="net_profit"] td {
+  border-top: 3px solid rgba(44, 62, 80, 0.28);
+}
+
+.profit-table tr.profit-summary-row .profit-label-cell strong {
+  font-size: 0.98rem;
+  font-weight: 900;
+}
+
+.profit-table tr.profit-net-row td {
+  font-size: 1.03rem;
+  font-weight: 900;
+}
+
+.profit-table tr.profit-net-row .profit-label-cell strong {
+  font-size: 1.08rem;
+  font-weight: 900;
 }
 
 .profit-label-cell strong {
