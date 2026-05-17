@@ -14,7 +14,8 @@ body {
   unicode-bidi: bidi-override;
 }
 
-body.safe-book-scroll-lock {
+body.safe-book-scroll-lock,
+body.modal-scroll-lock {
   overflow: hidden;
 }
 
@@ -2168,6 +2169,49 @@ body.safe-book-scroll-lock {
   color: #555;
 }
 
+#reset-oil-balance-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 0.8rem;
+  row-gap: 0.55rem;
+}
+
+#reset-oil-balance-fields .reset-oil-balance-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  align-items: center;
+  column-gap: 0.28rem;
+}
+
+#reset-oil-balance-fields .reset-oil-balance-field label {
+  margin: 0;
+  color: #2c3e50;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#reset-oil-balance-fields .reset-oil-balance-field input.form-control {
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  min-width: 0;
+  text-align: center;
+  direction: ltr;
+}
+
+@media (max-width: 640px) {
+  #reset-oil-balance-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #reset-oil-balance-fields .reset-oil-balance-field {
+    grid-template-columns: minmax(0, 1fr) 96px;
+    column-gap: 0.25rem;
+  }
+}
+
 .shift-info-section .form-group {
   flex: 0 0 auto;
 }
@@ -4094,6 +4138,24 @@ body.safe-book-scroll-lock {
   text-align: center !important;
 }
 
+#manage-fuel-section .btn-icon,
+#manage-oil-section .btn-icon {
+  width: auto;
+  height: auto;
+  padding: 0.25rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#manage-fuel-section .btn-icon:hover,
+#manage-oil-section .btn-icon:hover {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
 /* Checkbox styling for oil products table */
 #manage-oil-section input[type="checkbox"] {
   width: 18px;
@@ -4126,44 +4188,6 @@ body.safe-book-scroll-lock {
 .product-name {
   font-weight: 500;
   color: #2c3e50;
-}
-
-/* Edit Prices Modal - Center السعر الحالي column */
-#edit-prices-modal .base-table th:nth-child(3),
-#edit-prices-modal .base-table td:nth-child(3) {
-  text-align: center !important;
-}
-
-#edit-prices-modal .current-price {
-  display: block;
-  text-align: center !important;
-  width: 100%;
-}
-
-/* Edit Prices Modal - Column widths */
-#edit-prices-modal .base-table th:nth-child(1),
-#edit-prices-modal .base-table td:nth-child(1) {
-  width: 10%;
-}
-
-#edit-prices-modal .base-table th:nth-child(2),
-#edit-prices-modal .base-table td:nth-child(2) {
-  width: 50%;
-}
-
-#edit-prices-modal .base-table th:nth-child(3),
-#edit-prices-modal .base-table td:nth-child(3),
-#edit-prices-modal .base-table th:nth-child(4),
-#edit-prices-modal .base-table td:nth-child(4) {
-  width: 20%;
-}
-
-#edit-prices-modal .modal-body {
-  padding-bottom: 0rem;
-}
-
-#edit-prices-modal .modal-footer {
-  padding-top: 0rem;
 }
 
 /* Toast Notifications */
@@ -5206,6 +5230,7 @@ select option {
   backdrop-filter: blur(5px);
   align-items: center;
   justify-content: center;
+  overscroll-behavior: contain;
 }
 
 .modal.show {
@@ -5224,6 +5249,7 @@ select option {
   overflow-y: auto;
   direction: rtl;
   animation: modalSlideIn 0.3s ease-out;
+  overscroll-behavior: contain;
 }
 
 @keyframes modalSlideIn {
@@ -5283,6 +5309,137 @@ select option {
   gap: 1rem;
   justify-content: center;
   direction: rtl;
+}
+
+.modal-compact {
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+.modal-narrow {
+  max-width: 420px;
+}
+
+.modal-medium {
+  max-width: 460px;
+}
+
+.modal-oil-balance {
+  max-width: 620px;
+}
+
+.modal-compact > .modal-header {
+  flex: 0 0 auto;
+  padding: 1rem 1.25rem 0.75rem;
+}
+
+.modal-compact > .modal-header h3 {
+  font-size: 1.25rem;
+}
+
+.modal-compact > .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-compact > .modal-footer {
+  flex: 0 0 auto;
+  padding: 0.75rem 1.25rem 1rem;
+}
+
+.modal-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.modal-form .form-group {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  align-items: stretch;
+}
+
+.modal-form .form-group label {
+  margin: 0;
+  color: #2c3e50;
+  font-weight: 600;
+  text-align: right;
+}
+
+.modal-form .form-group input,
+.modal-form .form-group select,
+.modal-form .form-group textarea {
+  text-align: right;
+  text-align-last: right;
+}
+
+.modal-form .form-group.is-hidden {
+  display: none;
+}
+
+.price-edit-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 180px) auto;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.85rem;
+}
+
+.price-edit-toolbar label {
+  color: #2c3e50;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.price-edit-tabs {
+  margin-bottom: 0.75rem;
+}
+
+.price-edit-tabs .price-type-tab {
+  padding: 0.35rem 1rem;
+  font-size: 0.95rem;
+}
+
+.price-edit-table-wrapper {
+  margin-bottom: 0;
+}
+
+.price-edit-table th,
+.price-edit-table td {
+  padding: 0.55rem 0.6rem;
+  vertical-align: middle;
+}
+
+.price-edit-table th:nth-child(2),
+.price-edit-table th:nth-child(3),
+.price-edit-table td:nth-child(2),
+.price-edit-table td:nth-child(3) {
+  width: 130px;
+  text-align: center;
+}
+
+.price-edit-table .table-price-input {
+  height: 32px;
+  min-height: 32px;
+  line-height: 32px;
+  padding: 0 0.55rem;
+}
+
+@media (max-width: 640px) {
+  .modal-compact {
+    width: 94%;
+    max-height: 86vh;
+  }
+
+  .price-edit-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Movement Table Styles */
@@ -6148,7 +6305,7 @@ select option {
 }
 
 .price-history-filter-row {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   display: flex;
   gap: 1rem;
   align-items: center;
@@ -6169,12 +6326,12 @@ select option {
 }
 
 .price-history-filter-select {
-  height: 44px;
-  min-height: 44px;
+  height: 36px;
+  min-height: 36px;
   width: 100%;
-  min-width: 200px;
-  padding: 0 16px;
-  border-radius: 12px;
+  min-width: 180px;
+  padding: 0 12px;
+  border-radius: 6px;
   border: 1px solid #e0e0e0;
   background-color: #ffffff;
   color: #333333;
@@ -6182,7 +6339,7 @@ select option {
   box-shadow: none;
   font-family: 'Noto Naskh Arabic', serif;
   font-size: 14px;
-  line-height: 44px;
+  line-height: 36px;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -6203,6 +6360,50 @@ select option {
 .price-history-filter-select:focus {
   border-color: #c4291d;
   box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
+}
+
+.price-history-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+
+.price-history-table {
+  min-width: 650px;
+  box-shadow: none;
+}
+
+.price-history-table th {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.price-history-table td {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.92rem;
+}
+
+.price-history-table td:first-child {
+  width: auto;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.price-history-price {
+  color: #c4291d !important;
+  font-size: 1.05rem !important;
+  font-weight: 800;
+}
+
+.price-history-created-at {
+  color: #5f6b7a !important;
+  font-size: 0.9rem;
+}
+
+.price-history-empty {
+  color: #5f6b7a;
+  margin: 0;
+  padding: 2rem;
+  text-align: center;
 }
 
 /* filter-group select and input already handled by standardized input system above (line 974) */

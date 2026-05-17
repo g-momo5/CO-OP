@@ -99,7 +99,8 @@ class DatabaseSchema {
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
         start_date TEXT NOT NULL,
-        product_id INTEGER
+        product_id INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
   }
@@ -354,6 +355,15 @@ class DatabaseSchema {
         db.exec('ALTER TABLE price_history ADD COLUMN product_id INTEGER');
         console.log('Migration completed: product_id column added');
       }
+
+      const hasCreatedAt = priceHistoryTableInfo.some(col => col.name === 'created_at');
+
+      if (!hasCreatedAt) {
+        console.log('Adding created_at column to price_history table...');
+        db.exec('ALTER TABLE price_history ADD COLUMN created_at INTEGER');
+        console.log('Migration completed: created_at column added to price_history');
+      }
+      db.exec("UPDATE price_history SET created_at = strftime('%s', 'now') WHERE created_at IS NULL");
 
       // Check if fuel_invoices has obsolete columns to remove (sale_price/profit)
       const fuelInvoicesTableInfo = db.prepare("PRAGMA table_info(fuel_invoices)").all();

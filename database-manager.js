@@ -193,8 +193,15 @@ class DatabaseManager {
       product_type TEXT NOT NULL,
       product_name TEXT NOT NULL,
       price REAL NOT NULL,
-      start_date DATE NOT NULL
+      start_date DATE NOT NULL,
+      product_id INTEGER,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    await this.pgPool.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS product_id INTEGER`);
+    await this.pgPool.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE price_history ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`UPDATE price_history SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
 
     // Oil movements table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_movements (
