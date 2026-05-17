@@ -1126,115 +1126,6 @@
           </aside>
           <div class="settings-content">
             <h2>الإعدادات</h2>
-            <section id="settings-section-sale-prices" class="settings-section">
-              <!-- Header with actions -->
-              <div class="prices-header">
-                <div style="display: flex; gap: 0.5rem; align-items: center;">
-                  <span class="prices-label">تعديل الأسعار ابتداءً من</span>
-                  <input type="date" id="price-start-date" class="date-input-compact">
-                  <button class="btn btn-primary" onclick="saveAllPrices()">حفظ</button>
-                </div>
-                <button class="btn btn-secondary" onclick="showPriceHistory()">سجل الأسعار</button>
-              </div>
-
-              <!-- Price Type Tabs -->
-              <div class="price-type-tabs">
-                <div class="price-type-tab active" data-price-type="fuel" onclick="switchPriceType('fuel')">
-                  أسعار الوقود
-                </div>
-                <div class="price-type-tab" data-price-type="oil" onclick="switchPriceType('oil')">
-                  أسعار الزيوت
-                </div>
-              </div>
-
-              <!-- Fuel Prices Table -->
-              <div id="fuel-prices-section" class="price-type-section active">
-                <div class="prices-table-wrapper">
-                  <table class="base-table prices-table-full">
-                    <thead>
-                      <tr>
-                        <th style="width: 50px;">#</th>
-                        <th>المنتج</th>
-                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
-                        <th style="width: 150px; text-align: center;">السعر الجديد</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr data-product="بنزين ٨٠">
-                        <td>1</td>
-                        <td class="product-name">بنزين ٨٠</td>
-                        <td style="text-align: center;"><span class="current-price" id="current-price-80">—</span></td>
-                        <td style="text-align: center;"><input type="number" id="price-80" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                      </tr>
-                      <tr data-product="بنزين ٩٢">
-                        <td>2</td>
-                        <td class="product-name">بنزين ٩٢</td>
-                        <td style="text-align: center;"><span class="current-price" id="current-price-92">—</span></td>
-                        <td style="text-align: center;"><input type="number" id="price-92" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                      </tr>
-                      <tr data-product="بنزين ٩٥">
-                        <td>3</td>
-                        <td class="product-name">بنزين ٩٥</td>
-                        <td style="text-align: center;"><span class="current-price" id="current-price-95">—</span></td>
-                        <td style="text-align: center;"><input type="number" id="price-95" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                      </tr>
-                      <tr data-product="سولار">
-                        <td>4</td>
-                        <td class="product-name">سولار</td>
-                        <td style="text-align: center;"><span class="current-price" id="current-price-diesel">—</span></td>
-                        <td style="text-align: center;"><input type="number" id="price-diesel" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Oil Prices Table -->
-              <div id="oil-prices-section" class="price-type-section">
-                <div class="prices-table-wrapper">
-                  <table class="base-table prices-table-full">
-                    <thead>
-                      <tr>
-                        <th style="width: 50px;">#</th>
-                        <th>المنتج</th>
-                        <th style="width: 200px; text-align: center;">السعر الحالي</th>
-                        <th style="width: 150px; text-align: center;">السعر الجديد</th>
-                      </tr>
-                    </thead>
-                    <tbody id="oil-prices-table-body">
-                      <!-- Oil prices will be added here dynamically -->
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
-
-            <!-- Add New Product Section -->
-            <section id="settings-section-add-product" class="settings-section">
-              <h3 style="color: #2c3e50; margin-bottom: 2rem;">إضافة منتج جديد</h3>
-              <div class="form-group" style="margin-bottom: 1.5rem;">
-                <label for="new-product-name" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">اسم المنتج:</label>
-                <input type="text" id="new-product-name" placeholder="أدخل اسم المنتج" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
-              </div>
-              <div class="form-group" style="margin-bottom: 1.5rem;">
-                <label for="new-product-type" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">نوع المنتج:</label>
-                <select id="new-product-type" onchange="toggleVatField()" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
-                  <option value="">اختر النوع</option>
-                  <option value="fuel">وقود</option>
-                  <option value="oil">زيت</option>
-                </select>
-              </div>
-              <div class="form-group" id="vat-field" style="margin-bottom: 1.5rem; display: none;">
-                <label for="new-product-vat" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">الضريبة المضافة (%):</label>
-                <input type="number" id="new-product-vat" placeholder="0" step="0.01" min="0" max="100" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
-              </div>
-              <div class="form-group" style="margin-bottom: 1.5rem;">
-                <label for="new-product-price" style="display: block; margin-bottom: 0.5rem; color: #2c3e50; font-weight: 600;">سعر البيع:</label>
-                <input type="number" id="new-product-price" placeholder="0.00" step="0.01" min="0" style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-family: 'Noto Naskh Arabic', serif; font-size: 1rem;">
-              </div>
-              <button class="btn btn-primary" onclick="addNewProduct()" style="padding: 0.75rem 2rem; font-size: 1rem;">إضافة المنتج</button>
-            </section>
-
             <!-- Manage Products Section -->
             <section id="settings-section-manage-products" class="settings-section active">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
@@ -1697,27 +1588,29 @@
 
       <!-- Reset Counters Modal -->
       <div id="reset-counters-modal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content modal-compact modal-medium">
           <div class="modal-header">
             <h3>إعادة ضبط عدادات أول الوردية</h3>
             <button class="close-modal" onclick="closeResetCountersModal()">&times;</button>
           </div>
           <div class="modal-body">
-            <div class="form-group">
-              <label for="reset-fuel-type">نوع الوقود:</label>
-              <select id="reset-fuel-type" onchange="onResetFuelChange()">
-                <option value="">اختر نوع الوقود</option>
-                <option value="diesel">سولار</option>
-                <option value="gas">غاز سيارات</option>
-                <option value="95">بنزين ٩٥</option>
-                <option value="92">بنزين ٩٢</option>
-                <option value="80">بنزين ٨٠</option>
-              </select>
+            <div class="modal-form">
+              <div class="form-group">
+                <label for="reset-fuel-type">نوع الوقود:</label>
+                <select id="reset-fuel-type" onchange="onResetFuelChange()">
+                  <option value="">اختر نوع الوقود</option>
+                  <option value="diesel">سولار</option>
+                  <option value="gas">غاز سيارات</option>
+                  <option value="95">بنزين ٩٥</option>
+                  <option value="92">بنزين ٩٢</option>
+                  <option value="80">بنزين ٨٠</option>
+                </select>
+              </div>
+              <div id="reset-counter-fields" class="reset-counter-grid">
+                <!-- dynamic inputs -->
+              </div>
+              <div id="reset-counters-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
             </div>
-            <div id="reset-counter-fields" class="reset-counter-grid">
-              <!-- dynamic inputs -->
-            </div>
-            <div id="reset-counters-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-primary" onclick="applyResetCounters()">تأكيد</button>
@@ -1728,16 +1621,18 @@
 
       <!-- Reset Oil Balances Modal -->
       <div id="reset-oil-balances-modal" class="modal">
-        <div class="modal-content" style="max-width: 560px;">
+        <div class="modal-content modal-compact modal-oil-balance">
           <div class="modal-header">
             <h3>إعادة ضبط رصيد الزيوت</h3>
             <button class="close-modal" onclick="closeResetOilBalancesModal()">&times;</button>
           </div>
           <div class="modal-body">
-            <div id="reset-oil-balance-fields" class="reset-counter-grid">
-              <!-- dynamic inputs -->
+            <div class="modal-form">
+              <div id="reset-oil-balance-fields" class="reset-counter-grid">
+                <!-- dynamic inputs -->
+              </div>
+              <div id="reset-oil-balances-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
             </div>
-            <div id="reset-oil-balances-message" style="color:#c4291d; font-weight:600; min-height:1.2rem;"></div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-primary" onclick="applyResetOilBalances()">تأكيد</button>
@@ -1746,24 +1641,123 @@
         </div>
       </div>
 
+      <!-- Add Product Modal -->
+      <div id="add-product-modal" class="modal">
+        <div class="modal-content modal-compact modal-narrow">
+          <div class="modal-header">
+            <h3>إضافة منتج جديد</h3>
+            <button class="close-modal" onclick="closeAddProductModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form class="modal-form" onsubmit="event.preventDefault(); addNewProduct();">
+              <div class="form-group">
+                <label for="new-product-name">اسم المنتج</label>
+                <input type="text" id="new-product-name" placeholder="أدخل اسم المنتج" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="new-product-type">نوع المنتج</label>
+                <select id="new-product-type" onchange="toggleVatField()">
+                  <option value="">اختر النوع</option>
+                  <option value="fuel">وقود</option>
+                  <option value="oil">زيت</option>
+                </select>
+              </div>
+              <div class="form-group is-hidden" id="vat-field">
+                <label for="new-product-vat">الضريبة المضافة (%)</label>
+                <input type="number" id="new-product-vat" placeholder="0" step="0.01" min="0" max="100">
+              </div>
+              <div class="form-group">
+                <label for="new-product-price">سعر البيع</label>
+                <input type="number" id="new-product-price" placeholder="0.00" step="0.01" min="0">
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="addNewProduct()">إضافة المنتج</button>
+            <button class="btn btn-secondary" onclick="closeAddProductModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compact Price Edit Modal -->
+      <div id="price-edit-modal" class="modal">
+        <div class="modal-content modal-compact modal-medium">
+          <div class="modal-header">
+            <h3>تعديل الأسعار</h3>
+            <button class="close-modal" onclick="closePriceEditModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="price-edit-toolbar">
+              <label for="price-start-date">ابتداءً من</label>
+              <input type="date" id="price-start-date" class="date-input-compact">
+              <button class="btn btn-secondary" onclick="showPriceHistory()">سجل الأسعار</button>
+            </div>
+
+            <div class="price-type-tabs price-edit-tabs">
+              <div class="price-type-tab active" data-price-type="fuel" onclick="switchPriceType('fuel')">
+                أسعار الوقود
+              </div>
+              <div class="price-type-tab" data-price-type="oil" onclick="switchPriceType('oil')">
+                أسعار الزيوت
+              </div>
+            </div>
+
+            <div id="fuel-prices-section" class="price-type-section active">
+              <div class="prices-table-wrapper price-edit-table-wrapper">
+                <table class="base-table prices-table-full price-edit-table">
+                  <thead>
+                    <tr>
+                      <th>المنتج</th>
+                      <th>الحالي</th>
+                      <th>الجديد</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fuel-prices-table-body">
+                    <!-- Fuel prices will be added here dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="oil-prices-section" class="price-type-section">
+              <div class="prices-table-wrapper price-edit-table-wrapper">
+                <table class="base-table prices-table-full price-edit-table">
+                  <thead>
+                    <tr>
+                      <th>المنتج</th>
+                      <th>الحالي</th>
+                      <th>الجديد</th>
+                    </tr>
+                  </thead>
+                  <tbody id="oil-prices-table-body">
+                    <!-- Oil prices will be added here dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveAllPrices()">حفظ</button>
+            <button class="btn btn-secondary" onclick="closePriceEditModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Price History Modal -->
       <div id="price-history-modal" class="modal">
-        <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-content modal-compact">
           <div class="modal-header">
             <h3>سجل تغييرات الأسعار</h3>
             <button class="close-modal" onclick="closePriceHistoryModal()">&times;</button>
           </div>
-            <div class="modal-body">
-              <div class="price-history-filter-row">
-                <div class="price-history-filter-group">
-                  <label for="history-product-filter" class="price-history-filter-label">نوع المنتج:</label>
-                  <select id="history-product-filter" class="price-history-filter-select" onchange="loadPriceHistory()">
-                    <option value="">الكل</option>
-                    <optgroup label="الوقود">
-                      <option value="بنزين ٨٠">بنزين ٨٠</option>
-                      <option value="بنزين ٩٢">بنزين ٩٢</option>
-                      <option value="بنزين ٩٥">بنزين ٩٥</option>
-                    <option value="سولار">سولار</option>
+          <div class="modal-body">
+            <div class="price-history-filter-row">
+              <div class="price-history-filter-group">
+                <label for="history-product-filter" class="price-history-filter-label">نوع المنتج:</label>
+                <select id="history-product-filter" class="price-history-filter-select" onchange="loadPriceHistory()">
+                  <option value="">الكل</option>
+                  <optgroup label="الوقود" id="fuel-filter-group">
+                    <!-- Will be populated dynamically -->
                   </optgroup>
                   <optgroup label="الزيوت" id="oil-filter-group">
                     <!-- Will be populated dynamically -->
@@ -1922,98 +1916,6 @@
       <button class="nav-btn" data-screen="report">التقارير</button>
       <button class="nav-btn" data-screen="settings">الإعدادات</button>
     </nav>
-  </div>
-
-  <!-- Edit Prices Modal -->
-  <div id="edit-prices-modal" class="modal">
-    <div class="modal-content" style="max-width: 800px;">
-      <div class="modal-header">
-        <h3>تعديل الأسعار</h3>
-        <button class="close-modal" onclick="closeEditPricesModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <!-- Header with date -->
-        <div style="margin-bottom: 1.5rem; display: flex; gap: 0.5rem; align-items: center;">
-          <span style="font-weight: 600; color: #2c3e50;">تعديل الأسعار ابتداءً من:</span>
-          <input type="date" id="modal-price-start-date" class="date-input-compact">
-        </div>
-
-        <!-- Price Type Tabs -->
-        <div class="price-type-tabs" style="margin-bottom: 1.5rem;">
-          <div class="price-type-tab active" data-price-type="fuel" onclick="switchModalPriceType('fuel')">
-            أسعار الوقود
-          </div>
-          <div class="price-type-tab" data-price-type="oil" onclick="switchModalPriceType('oil')">
-            أسعار الزيوت
-          </div>
-        </div>
-
-        <!-- Fuel Prices Table -->
-        <div id="modal-fuel-prices-section" class="price-type-section active">
-          <div class="prices-table-wrapper">
-            <table class="base-table prices-table-full">
-              <thead>
-                <tr>
-                  <th style="width: 50px; text-align: center;">#</th>
-                  <th style="text-align: center;">المنتج</th>
-                  <th style="width: 200px; text-align: center;">السعر الحالي</th>
-                  <th style="width: 150px; text-align: center;">السعر الجديد</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr data-product="بنزين ٨٠">
-                  <td>1</td>
-                  <td class="product-name">بنزين ٨٠</td>
-                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-80">—</span></td>
-                  <td style="text-align: center;"><input type="number" id="modal-price-80" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                </tr>
-                <tr data-product="بنزين ٩٢">
-                  <td>2</td>
-                  <td class="product-name">بنزين ٩٢</td>
-                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-92">—</span></td>
-                  <td style="text-align: center;"><input type="number" id="modal-price-92" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                </tr>
-                <tr data-product="بنزين ٩٥">
-                  <td>3</td>
-                  <td class="product-name">بنزين ٩٥</td>
-                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-95">—</span></td>
-                  <td style="text-align: center;"><input type="number" id="modal-price-95" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                </tr>
-                <tr data-product="سولار">
-                  <td>4</td>
-                  <td class="product-name">سولار</td>
-                  <td style="text-align: center;"><span class="current-price" id="modal-current-price-diesel">—</span></td>
-                  <td style="text-align: center;"><input type="number" id="modal-price-diesel" step="0.01" class="table-price-input" placeholder="0.00"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Oil Prices Table -->
-        <div id="modal-oil-prices-section" class="price-type-section">
-          <div class="prices-table-wrapper">
-            <table class="base-table prices-table-full">
-              <thead>
-                <tr>
-                  <th style="width: 50px; text-align: center;">#</th>
-                  <th style="text-align: center;">المنتج</th>
-                  <th style="width: 200px; text-align: center;">السعر الحالي</th>
-                  <th style="width: 150px; text-align: center;">السعر الجديد</th>
-                </tr>
-              </thead>
-              <tbody id="modal-oil-prices-table-body">
-                <!-- Oil prices will be added here dynamically -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" onclick="saveModalPrices()">حفظ</button>
-        <button class="btn btn-secondary" onclick="closeEditPricesModal()">إلغاء</button>
-      </div>
-    </div>
   </div>
 
   <!-- Toast Notification Container -->

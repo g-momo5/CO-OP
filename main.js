@@ -34,6 +34,42 @@ const OFFLINE_RESTRICTED = {
 };
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 
+function isBrokenPipeError(error) {
+  return error && (error.code === 'EPIPE' || /EPIPE/.test(String(error.message || '')));
+}
+
+function installConsolePipeGuards() {
+  const wrapConsoleMethod = (methodName) => {
+    const original = console[methodName]?.bind(console);
+    if (typeof original !== 'function') {
+      return;
+    }
+
+    console[methodName] = (...args) => {
+      try {
+        original(...args);
+      } catch (error) {
+        if (!isBrokenPipeError(error)) {
+          throw error;
+        }
+      }
+    };
+  };
+
+  ['log', 'warn', 'error', 'info', 'debug'].forEach(wrapConsoleMethod);
+
+  const ignoreBrokenPipe = (error) => {
+    if (!isBrokenPipeError(error)) {
+      throw error;
+    }
+  };
+
+  process.stdout?.on?.('error', ignoreBrokenPipe);
+  process.stderr?.on?.('error', ignoreBrokenPipe);
+}
+
+installConsolePipeGuards();
+
 function toFiniteNumber(value) {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -716,16 +752,6 @@ function setupIPCHandlers() {
     }
   });
 
-  ipcMain.handle('update-fuel-price', async (event, { fuel_type, price }) => {
-    try {
-      const updateQuery = 'UPDATE products SET current_price = $1 WHERE product_type = $2 AND product_name = $3';
-      return await executeUpdate(updateQuery, [price, 'fuel', fuel_type]);
-    } catch (error) {
-      console.error('Error updating fuel price:', error);
-      throw error;
-    }
-  });
-
   ipcMain.handle('get-purchase-prices', async () => {
     try {
       return await executeQuery('SELECT * FROM purchase_prices ORDER BY fuel_type');
@@ -751,23 +777,6 @@ function setupIPCHandlers() {
       return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, is_active, effective_date FROM products WHERE product_type = 'oil' ORDER BY product_name");
     } catch (error) {
       console.error('Error getting oil prices:', error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle('update-oil-price', async (event, { oil_type, price }) => {
-    try {
-      const updateQuery = 'UPDATE products SET current_price = $1 WHERE product_type = $2 AND product_name = $3';
-      const result = await executeUpdate(updateQuery, [price, 'oil', oil_type]);
-
-      // If no rows were updated, insert new product
-      if (result === 0) {
-        const insertQuery = 'INSERT INTO products (product_type, product_name, current_price) VALUES ($1, $2, $3)';
-        return await executeInsert(insertQuery, ['oil', oil_type, price], 'products');
-      }
-      return result;
-    } catch (error) {
-      console.error('Error updating oil price:', error);
       throw error;
     }
   });
@@ -881,22 +890,53 @@ function setupIPCHandlers() {
   // Save all prices with history
   ipcMain.handle('save-all-prices', async (event, prices) => {
     try {
-      if (!prices || prices.length === 0) {
+      if (!Array.isArray(prices) || prices.length === 0) {
         throw new Error('No prices to save');
       }
 
-      for (const item of prices) {
-        const { product_type, product_name, price, start_date } = item;
-
-        // Validate price
-        if (!price || isNaN(price) || price <= 0) {
-          console.warn(`Invalid price for ${product_name}: ${price}`);
-          continue; // Skip invalid prices
+      const normalizeDateOnly = (value) => {
+        if (!value) return '';
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+          return value.toISOString().split('T')[0];
         }
 
-        // Validate required fields
-        if (!product_type || !product_name || !start_date) {
-          console.warn(`Missing required fields for price: ${JSON.stringify(item)}`);
+        const raw = String(value).trim();
+        const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (dateOnlyMatch) {
+          return dateOnlyMatch[1];
+        }
+
+        const parsed = new Date(raw);
+        return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
+      };
+
+      const isValidDateOnly = (value) => {
+        const dateOnly = normalizeDateOnly(value);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false;
+
+        const parsed = new Date(`${dateOnly}T00:00:00Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().split('T')[0] === dateOnly;
+      };
+
+      const skipped = [];
+      let saved = 0;
+      let updatedCurrent = 0;
+
+      for (const item of prices) {
+        const product_type = String(item?.product_type || '').trim();
+        const product_name = String(item?.product_name || '').trim();
+        const price = parseFloat(item?.price);
+        const start_date = normalizeDateOnly(item?.start_date);
+
+        if (!['fuel', 'oil'].includes(product_type) || !product_name || !isValidDateOnly(start_date)) {
+          console.warn(`Missing or invalid required fields for price: ${JSON.stringify(item)}`);
+          skipped.push({ product_name, reason: 'invalid_fields' });
+          continue;
+        }
+
+        if (!Number.isFinite(price) || price <= 0) {
+          console.warn(`Invalid price for ${product_name}: ${item?.price}`);
+          skipped.push({ product_name, reason: 'invalid_price' });
           continue;
         }
 
@@ -906,27 +946,27 @@ function setupIPCHandlers() {
 
         if (productResult.length === 0) {
           console.warn(`Product not found: ${product_type} - ${product_name}`);
+          skipped.push({ product_name, reason: 'product_not_found' });
           continue;
         }
 
         const product_id = productResult[0].id;
-        const current_effective_date = productResult[0].effective_date;
+        const current_effective_date = normalizeDateOnly(productResult[0].effective_date);
 
         // Save to history with product_id (always save to history)
-        const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)';
+        const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id, created_at) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)';
         await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id], 'price_history');
+        saved++;
 
         // Update current price in products table ONLY if new date is more recent
         // If no current date exists, always update
-        if (!current_effective_date || new Date(start_date) >= new Date(current_effective_date)) {
+        if (!current_effective_date || start_date >= current_effective_date) {
           const updateQuery = 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3';
           await executeUpdate(updateQuery, [price, start_date, product_id]);
-          console.log(`Updated current price for ${product_name}: ${price} (effective: ${start_date})`);
-        } else {
-          console.log(`Skipped updating current price for ${product_name}: new date ${start_date} is older than current ${current_effective_date}`);
+          updatedCurrent++;
         }
       }
-      return { success: true };
+      return { success: true, saved, skipped, updatedCurrent };
     } catch (error) {
       console.error('Error saving prices:', error);
       throw error;
@@ -956,25 +996,33 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-price-by-date', async (event, { product_name, date }) => {
     try {
+      const productResult = await executeQuery(
+        'SELECT id, current_price as price FROM products WHERE product_name = $1',
+        [product_name]
+      );
+      const productId = productResult.length > 0 ? productResult[0].id : null;
+
       // Get the most recent price that was effective on or before the given date
-      const query = `
-        SELECT price
-        FROM price_history
-        WHERE product_name = $1 AND start_date <= $2
-        ORDER BY start_date DESC
-        LIMIT 1
-      `;
-      const result = await executeQuery(query, [product_name, date]);
+      const query = productId
+        ? `
+          SELECT price
+          FROM price_history
+          WHERE (product_id = $1 OR (product_id IS NULL AND product_name = $2)) AND start_date <= $3
+          ORDER BY start_date DESC, created_at DESC, id DESC
+          LIMIT 1
+        `
+        : `
+          SELECT price
+          FROM price_history
+          WHERE product_name = $1 AND start_date <= $2
+          ORDER BY start_date DESC, created_at DESC, id DESC
+          LIMIT 1
+        `;
+      const result = await executeQuery(query, productId ? [productId, product_name, date] : [product_name, date]);
 
       // If no historical price found, try to get current price from products table
       if (result.length === 0) {
-        const currentPriceQuery = `
-          SELECT current_price as price
-          FROM products
-          WHERE product_name = $1
-        `;
-        const currentResult = await executeQuery(currentPriceQuery, [product_name]);
-        return currentResult.length > 0 ? currentResult[0].price : null;
+        return productResult.length > 0 ? productResult[0].price : null;
       }
 
       return result[0].price;
@@ -2134,8 +2182,24 @@ function setupIPCHandlers() {
       // Import price history
       if (backupData.priceHistory) {
         for (const item of backupData.priceHistory) {
-          const query = 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at) VALUES ($1, $2, $3, $4, $5)';
-          await executeInsert(query, [item.product_type, item.product_name, item.price, item.start_date, item.created_at], 'price_history');
+          const rawCreatedAt = item.created_at;
+          let createdAt = rawCreatedAt || new Date().toISOString();
+
+          if (typeof rawCreatedAt === 'number') {
+            createdAt = new Date(rawCreatedAt * 1000).toISOString();
+          } else if (typeof rawCreatedAt === 'string' && /^\d+$/.test(rawCreatedAt)) {
+            createdAt = new Date(parseInt(rawCreatedAt, 10) * 1000).toISOString();
+          }
+
+          const query = 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at, product_id) VALUES ($1, $2, $3, $4, $5, $6)';
+          await executeInsert(query, [
+            item.product_type,
+            item.product_name,
+            item.price,
+            item.start_date,
+            createdAt,
+            item.product_id || null
+          ], 'price_history');
         }
       }
 
