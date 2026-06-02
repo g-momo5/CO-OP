@@ -155,24 +155,50 @@
                 <h2>دفتر الخزينة</h2>
                 <p class="summary-subtitle">جميع حركات الدخول والخروج من الخزينة</p>
               </div>
-              <div class="safe-book-filters">
-                <div class="summary-filters">
-                  <div class="form-group compact">
-                    <label>من:</label>
-                    <div class="dual-select">
-                      <select id="safe-book-start-month"></select>
-                      <select id="safe-book-start-year"></select>
+              <div class="safe-book-toolbar">
+                <div class="safe-book-filters">
+                  <div class="summary-filters">
+                    <div class="form-group compact">
+                      <label>من:</label>
+                      <div class="dual-select">
+                        <select id="safe-book-start-month"></select>
+                        <select id="safe-book-start-year"></select>
+                      </div>
+                    </div>
+                    <div class="form-group compact">
+                      <label>إلى:</label>
+                      <div class="dual-select">
+                        <select id="safe-book-end-month"></select>
+                        <select id="safe-book-end-year"></select>
+                      </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary safe-book-clear-filter-btn" id="safe-book-clear-filter-btn" title="إلغاء الفلتر">
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <div class="safe-book-balance">
+                  <span class="safe-book-balance-label">رصيد الخزنة</span>
+                  <strong id="safe-book-balance-value" class="safe-book-balance-value">٠ ج.م.‏</strong>
+                  <div id="safe-book-period-balances" class="safe-book-period-balances" style="display: none;">
+                    <div class="safe-book-period-item">
+                      <span class="safe-book-period-label">رصيد بداية الفترة</span>
+                      <strong id="safe-book-period-start-value" class="safe-book-period-value">٠ ج.م.‏</strong>
+                    </div>
+                    <div class="safe-book-period-item">
+                      <span class="safe-book-period-label">رصيد نهاية الفترة</span>
+                      <strong id="safe-book-period-end-value" class="safe-book-period-value">٠ ج.م.‏</strong>
                     </div>
                   </div>
-                  <div class="form-group compact">
-                    <label>إلى:</label>
-                    <div class="dual-select">
-                      <select id="safe-book-end-month"></select>
-                      <select id="safe-book-end-year"></select>
-                    </div>
-                  </div>
-                  <button type="button" class="btn btn-secondary safe-book-clear-filter-btn" id="safe-book-clear-filter-btn" title="إلغاء الفلتر">
-                    ✕
+                </div>
+
+                <div class="safe-book-actions">
+                  <button type="button" class="btn btn-secondary safe-book-add-btn" onclick="toggleSafeBookForm()">
+                    إضافة حركة
+                  </button>
+                  <button type="button" class="btn btn-secondary safe-book-audit-btn" onclick="toggleSafeBookAuditForm()">
+                    جرد الخزينة
                   </button>
                 </div>
               </div>
@@ -206,23 +232,20 @@
               </div>
             </div>
 
-            <div class="safe-book-balance-row">
-              <button type="button" class="btn btn-secondary safe-book-add-btn" onclick="toggleSafeBookForm()">
-                إضافة حركة
-              </button>
-              <div class="safe-book-balance">
-                <span class="safe-book-balance-label">رصيد الخزنة</span>
-                <strong id="safe-book-balance-value" class="safe-book-balance-value">٠ ج.م.‏</strong>
-                <div id="safe-book-period-balances" class="safe-book-period-balances" style="display: none;">
-                  <div class="safe-book-period-item">
-                    <span class="safe-book-period-label">رصيد بداية الفترة</span>
-                    <strong id="safe-book-period-start-value" class="safe-book-period-value">٠ ج.م.‏</strong>
-                  </div>
-                  <div class="safe-book-period-item">
-                    <span class="safe-book-period-label">رصيد نهاية الفترة</span>
-                    <strong id="safe-book-period-end-value" class="safe-book-period-value">٠ ج.م.‏</strong>
-                  </div>
+            <div id="safe-book-audit-form" class="safe-book-audit-form" style="display: none;">
+              <div class="safe-book-audit-grid">
+                <div class="safe-book-audit-current">
+                  <span>رصيد البرنامج</span>
+                  <strong id="safe-book-audit-program-balance">٠ ج.م.‏</strong>
                 </div>
+                <div class="form-group compact">
+                  <label for="safe-book-audit-actual">الرصيد الفعلي:</label>
+                  <input type="number" step="0.01" min="0" id="safe-book-audit-actual" placeholder="0.00">
+                </div>
+              </div>
+              <div class="safe-book-form-actions">
+                <button type="button" class="btn btn-primary" onclick="saveSafeBookAuditMovement()">حفظ الجرد</button>
+                <button type="button" class="btn btn-secondary" onclick="toggleSafeBookAuditForm(false)">إلغاء</button>
               </div>
             </div>
 
@@ -318,8 +341,11 @@
           <div class="expenses-header">
             <div>
               <h2>المصاريف</h2>
-              <p class="summary-subtitle">عرض مصروفات الورديات بالتفصيل</p>
+              <p class="summary-subtitle">عرض المصاريف حسب الأشهر</p>
             </div>
+          </div>
+
+          <div class="expenses-filters-panel">
             <div class="expenses-filters">
               <div class="summary-filters">
                 <div class="form-group compact">
@@ -336,45 +362,35 @@
                     <select id="expenses-end-year"></select>
                   </div>
                 </div>
-                <div class="form-group compact">
-                  <label for="expenses-min-amount">أقل قيمة:</label>
-                  <input type="number" id="expenses-min-amount" class="expenses-filter-input" min="0" step="0.01" placeholder="0.00">
-                </div>
-                <div class="form-group compact">
-                  <label for="expenses-max-amount">أعلى قيمة:</label>
-                  <input type="number" id="expenses-max-amount" class="expenses-filter-input" min="0" step="0.01" placeholder="0.00">
-                </div>
-                <div class="form-group compact expenses-search-group">
-                  <label for="expenses-search">بحث:</label>
-                  <input type="text" id="expenses-search" class="expenses-filter-input" placeholder="وصف المصروف">
-                </div>
-                <button type="button" class="btn btn-secondary" id="expenses-filter-btn">تطبيق</button>
-                <button type="button" class="btn btn-secondary expenses-clear-filter-btn" id="expenses-clear-filter-btn" title="إعادة الفترة الافتراضية">
-                  ↺
-                </button>
+              </div>
+            </div>
+            <div class="expenses-live-filters">
+              <div class="form-group compact">
+                <label for="expenses-min-amount">من مبلغ:</label>
+                <input type="number" step="0.01" min="0" id="expenses-min-amount" class="expenses-filter-input expenses-amount-filter-input" placeholder="0">
+              </div>
+              <div class="form-group compact">
+                <label for="expenses-max-amount">إلى مبلغ:</label>
+                <input type="number" step="0.01" min="0" id="expenses-max-amount" class="expenses-filter-input expenses-amount-filter-input" placeholder="0">
+              </div>
+              <div class="form-group compact expenses-search-group">
+                <label for="expenses-search-term">المصروف:</label>
+                <input type="text" id="expenses-search-term" class="expenses-filter-input" placeholder="بحث باسم المصروف">
               </div>
             </div>
           </div>
 
-          <div class="expenses-table-shell">
-            <div class="expenses-table-scroll">
-              <table class="base-table expenses-table">
+          <div class="summary-table-wrapper" id="expenses-summary-wrapper">
+            <div class="summary-table-scroll">
+              <table class="base-table summary-table expenses-summary-table">
                 <thead>
-                  <tr>
-                    <th>التاريخ</th>
-                    <th>الوردية</th>
-                    <th>الوصف</th>
-                    <th>القيمة</th>
-                  </tr>
+                  <tr id="expenses-summary-head"></tr>
                 </thead>
                 <tbody id="expenses-table-body">
-                  <tr>
-                    <td colspan="4" style="text-align:center; color:#777;">جاري تحميل البيانات...</td>
-                  </tr>
                 </tbody>
               </table>
             </div>
-            <div id="expenses-empty" class="empty-state" style="display:none;">لا توجد مصروفات في الفترة المحددة</div>
+            <div id="expenses-empty" class="empty-state" style="display:none;">لا توجد بيانات في الفترة المحددة</div>
           </div>
         </div>
       </div>
@@ -513,6 +529,7 @@
                   <div class="shift-menu-item" onclick="openResetOilBalancesModal()">إعادة ضبط رصيد الزيوت</div>
                 </div>
               </div>
+              <div id="shift-draft-status" class="shift-draft-status idle">جاهز</div>
             </div>
           </div>
         </div>
@@ -560,12 +577,12 @@
                   <!-- أول الوردية -->
                   <tr>
                     <td class="row-label">أول الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-1" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-2" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-3" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-4" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-1" oninput="calculateDieselQuantity()" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-2" oninput="calculateDieselQuantity()" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-3" oninput="calculateDieselQuantity()" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-4" oninput="calculateDieselQuantity()" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
@@ -636,12 +653,12 @@
                   <!-- أول الوردية -->
                   <tr>
                     <td class="row-label">أول الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-2" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-1" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-2" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-1" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
@@ -736,7 +753,7 @@
                     <th>مفتوح</th>
                     <th>عملاء</th>
                     <th>السعر</th>
-                    <th>الاجمالى</th>
+                    <th>اجمالى النقدى</th>
                   </tr>
                 </thead>
                 <tbody id="shift-oil-table-body">
@@ -893,7 +910,7 @@
             <div class="shift-final-total">
               <div class="final-total-row">
                 <label>صافى الوردية:</label>
-                <input type="number" step="0.01" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
+                <input type="text" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
               </div>
             </div>
           </div>
@@ -1756,6 +1773,8 @@
                 <label for="history-product-filter" class="price-history-filter-label">نوع المنتج:</label>
                 <select id="history-product-filter" class="price-history-filter-select" onchange="loadPriceHistory()">
                   <option value="">الكل</option>
+                  <option value="__all_fuel__">كل أنواع الوقود</option>
+                  <option value="__all_oil__">كل أنواع الزيوت</option>
                   <optgroup label="الوقود" id="fuel-filter-group">
                     <!-- Will be populated dynamically -->
                   </optgroup>

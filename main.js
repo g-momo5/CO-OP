@@ -159,6 +159,45 @@ function normalizeExpenseItems(items) {
     .sort((a, b) => a.index - b.index);
 }
 
+function parseShiftJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function validateShiftPayload(shiftData = {}) {
+  const errors = [];
+  const fuelData = parseShiftJsonObject(shiftData.fuel_data);
+  const oilData = parseShiftJsonObject(shiftData.oil_data);
+
+  Object.entries(fuelData).forEach(([fuelType, data]) => {
+    const countersCount = fuelType === 'سولار' ? 4 : 2;
+    for (let i = 1; i <= countersCount; i += 1) {
+      const firstShift = parseFloat(data?.[`firstShift${i}`]) || 0;
+      const lastShift = parseFloat(data?.[`lastShift${i}`]) || 0;
+      if (firstShift > 0 && lastShift < firstShift) {
+        errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
+      }
+    }
+  });
+
+  Object.entries(oilData).forEach(([oilName, data]) => {
+    const total = parseFloat(data?.total) || 0;
+    const sold = parseFloat(data?.sold) || 0;
+    if (sold > total && sold > 0) {
+      errors.push(`${oilName}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
+    }
+  });
+
+  return errors;
+}
+
 function buildShiftExpenseSnapshot(shiftRow) {
   const legacyData = parseStoredObject(shiftRow?.data, {});
   const expenseItems = normalizeExpenseItems(legacyData.expense_items);
@@ -985,7 +1024,7 @@ function setupIPCHandlers() {
         params.push(filter);
       }
 
-      query += ' ORDER BY created_at DESC LIMIT 100';
+      query += ' ORDER BY created_at DESC';
 
       return await executeQuery(query, params);
     } catch (error) {
@@ -1032,6 +1071,45 @@ function setupIPCHandlers() {
     }
   });
 
+  ipcMain.handle('get-oil-prices-by-date', async (event, { date }) => {
+    try {
+      const shiftDate = String(date || '').trim();
+      const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(shiftDate)
+        ? shiftDate
+        : new Date().toISOString().slice(0, 10);
+
+      const rows = await executeQuery(
+        `
+          SELECT
+            p.product_name,
+            COALESCE(
+              (
+                SELECT ph.price
+                FROM price_history ph
+                WHERE (ph.product_id = p.id OR (ph.product_id IS NULL AND ph.product_name = p.product_name))
+                  AND ph.start_date <= $1
+                ORDER BY ph.start_date DESC, ph.created_at DESC, ph.id DESC
+                LIMIT 1
+              ),
+              p.current_price
+            ) AS price
+          FROM products p
+          WHERE p.product_type = 'oil'
+          ORDER BY p.product_name
+        `,
+        [normalizedDate]
+      );
+
+      return rows.map((row) => ({
+        product_name: row.product_name,
+        price: parseFloat(row.price) || 0
+      }));
+    } catch (error) {
+      console.error('Error getting oil prices by date:', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('get-sales-report', async (event, { startDate, endDate }) => {
     try {
       requireOnline('التقارير');
@@ -1043,7 +1121,7 @@ function setupIPCHandlers() {
     }
   });
 
-  ipcMain.handle('get-sales-summary', async () => {
+ipcMain.handle('get-sales-summary', async () => {
     try {
       requireOnline('ملخص المبيعات');
       return await executeQuery(`
@@ -1058,6 +1136,90 @@ function setupIPCHandlers() {
       `);
     } catch (error) {
       console.error('Error getting sales summary:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-shift-fuel-sales', async () => {
+    try {
+      const rows = await executeQuery(
+        'SELECT date, fuel_data, data FROM shifts WHERE is_saved = 1 ORDER BY date ASC, shift_number ASC, id ASC'
+      );
+
+      const entries = [];
+
+      rows.forEach((row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
+        const shiftDate = String(row?.date || '').slice(0, 10);
+        if (!shiftDate) return;
+
+        Object.entries(fuelData).forEach(([fuelType, data]) => {
+          if (!data || typeof data !== 'object') return;
+
+          let quantity = toFiniteNumber(data.totalQuantity);
+          if (quantity <= 0) {
+            if (fuelType === 'سولار') {
+              quantity =
+                toFiniteNumber(data.quantity1) +
+                toFiniteNumber(data.quantity2) +
+                toFiniteNumber(data.quantity3) +
+                toFiniteNumber(data.quantity4);
+            } else {
+              quantity =
+                toFiniteNumber(data.quantity1) +
+                toFiniteNumber(data.quantity2);
+            }
+          }
+
+          if (quantity <= 0) return;
+
+          entries.push({
+            date: shiftDate,
+            fuel_type: fuelType,
+            quantity
+          });
+        });
+      });
+
+      return entries;
+    } catch (error) {
+      console.error('Error getting shift fuel sales:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-shift-oil-sales', async () => {
+    try {
+      const rows = await executeQuery(
+        'SELECT date, oil_data, data FROM shifts WHERE is_saved = 1 ORDER BY date ASC, shift_number ASC, id ASC'
+      );
+
+      const entries = [];
+
+      rows.forEach((row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const oilData = parseStoredObject(row?.oil_data || legacyData.oil_data, {});
+        const shiftDate = String(row?.date || '').slice(0, 10);
+        if (!shiftDate) return;
+
+        Object.entries(oilData).forEach(([oilName, data]) => {
+          if (!data || typeof data !== 'object') return;
+
+          const sold = toFiniteNumber(data.sold);
+          if (sold <= 0) return;
+
+          entries.push({
+            date: shiftDate,
+            product_name: String(oilName || '').trim(),
+            quantity: sold
+          });
+        });
+      });
+
+      return entries;
+    } catch (error) {
+      console.error('Error getting shift oil sales:', error);
       throw error;
     }
   });
@@ -2673,6 +2835,11 @@ ipcMain.handle('update-customer', async (event, { id, name }) => {
 // Shift management handlers
 ipcMain.handle('save-shift', async (event, shiftData) => {
   try {
+    const validationErrors = validateShiftPayload(shiftData);
+    if (validationErrors.length > 0) {
+      return { success: false, error: 'validation_failed', validationErrors };
+    }
+
     const {
       date,
       shift_number,
@@ -2680,6 +2847,7 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       fuel_total,
       oil_data,
       oil_total,
+      customer_rows,
       expense_items,
       wash_lube_revenue,
       total_expenses,
@@ -2694,11 +2862,29 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
     const safeTotalExpenses = parseFloat(total_expenses) || 0;
     const safeGrandTotal = parseFloat(grand_total) || 0;
     const normalizedExpenseItems = normalizeExpenseItems(expense_items);
+    const normalizedCustomerRows = Array.isArray(customer_rows)
+      ? customer_rows
+          .map((row) => {
+            if (!row || typeof row !== 'object') return null;
+            const diesel = parseFloat(row.diesel) || 0;
+            const fuel80 = parseFloat(row['80']) || 0;
+            const fuel92 = parseFloat(row['92']) || 0;
+            const fuel95 = parseFloat(row['95']) || 0;
+            const name = String(row.name || '').trim();
+            const voucher = Boolean(row.voucher);
+            if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !voucher) {
+              return null;
+            }
+            return { diesel, '80': fuel80, '92': fuel92, '95': fuel95, name, voucher };
+          })
+          .filter(Boolean)
+      : [];
     const legacyShiftData = JSON.stringify({
       fuel_data: fuel_data || '{}',
       fuel_total: safeFuelTotal,
       oil_data: oil_data || '{}',
       oil_total: safeOilTotal,
+      customer_rows: normalizedCustomerRows,
       expense_items: normalizedExpenseItems,
       wash_lube_revenue: safeWashLubeRevenue,
       total_expenses: safeTotalExpenses,
@@ -2769,6 +2955,41 @@ ipcMain.handle('get-shift', async (event, { date, shift_number }) => {
   }
 });
 
+ipcMain.handle('delete-shift-draft', async (_event, { date, shift_number }) => {
+  try {
+    if (!date || !Number.isFinite(parseInt(shift_number, 10))) {
+      return { success: false, error: 'invalid_shift_identifier' };
+    }
+
+    const deleted = await executeUpdate(
+      'DELETE FROM shifts WHERE date = $1 AND shift_number = $2 AND is_saved = 0',
+      [date, parseInt(shift_number, 10)]
+    );
+
+    return { success: true, deleted };
+  } catch (error) {
+    console.error('Error deleting shift draft:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-saved-shift', async (_event, { date, shift_number }) => {
+  try {
+    const query = 'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2 AND is_saved = 1';
+    const result = await executeQuery(query, [date, shift_number]);
+    if (result.length > 0) {
+      return {
+        ...result[0],
+        data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting saved shift:', error);
+    throw error;
+  }
+});
+
 // Get last shift (highest ID)
 ipcMain.handle('get-last-shift', async (event) => {
   try {
@@ -2784,6 +3005,23 @@ ipcMain.handle('get-last-shift', async (event) => {
     return null;
   } catch (error) {
     console.error('Error getting last shift:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-last-saved-shift', async () => {
+  try {
+    const query = 'SELECT * FROM shifts WHERE is_saved = 1 ORDER BY id DESC LIMIT 1';
+    const result = await executeQuery(query, []);
+    if (result.length > 0) {
+      return {
+        ...result[0],
+        data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting last saved shift:', error);
     throw error;
   }
 });
