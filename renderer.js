@@ -684,6 +684,11 @@ function showScreen(screenName, parentScreen = null) {
     showMessage('هذه الشاشة تتطلب اتصالاً بالإنترنت', 'warning');
     return;
   }
+
+  if (currentScreen === 'shift-entry' && screenName !== 'shift-entry') {
+    flushShiftDraftAutoSave();
+  }
+
   // Update global parent screen tracker
   currentParentScreen = parentScreen;
 
@@ -692,6 +697,10 @@ function showScreen(screenName, parentScreen = null) {
 
   // Call the version without history
   showScreenWithoutHistory(screenName);
+
+  if (screenName !== 'shift-entry') {
+    lockResetInlineFields();
+  }
 
   // Reset shift view mode when leaving shift-entry
   if (screenName !== 'shift-entry' && shiftViewMode === 'history') {
@@ -825,6 +834,7 @@ const SAFE_BOOK_MONTH_NAMES = [
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
 ];
 const SAFE_BOOK_DEFAULT_VISIBLE_ROWS = 15;
+let safeBookCurrentBalance = 0;
 
 function formatSafeBookArabicLongDate(dateString) {
   const parts = parseIsoDateParts(dateString);
@@ -1128,6 +1138,7 @@ async function loadSafeBookMovements() {
 
     if (!Array.isArray(allMovements) || allMovements.length === 0) {
       const filtersRange = getSafeBookFiltersRange();
+      safeBookCurrentBalance = 0;
       updateSafeBookBalanceDisplay(0);
       updateSafeBookPeriodBalancesDisplay(0, 0);
       setSafeBookPeriodBalancesVisibility(false);
@@ -1150,6 +1161,7 @@ async function loadSafeBookMovements() {
     const getMovementDate = (movement) => String(movement?.date || '').split('T')[0];
 
     const currentBalance = allMovements.reduce((sum, movement) => sum + signedAmount(movement), 0);
+    safeBookCurrentBalance = currentBalance;
     updateSafeBookBalanceDisplay(currentBalance);
 
     const filtersRange = getSafeBookFiltersRange();
@@ -1272,6 +1284,7 @@ async function loadSafeBookMovements() {
     setTimeout(updateSafeBookStickyMonthSummary, 80);
   } catch (error) {
     console.error('Error loading safe book movements:', error);
+    safeBookCurrentBalance = 0;
     updateSafeBookBalanceDisplay(0);
     updateSafeBookPeriodBalancesDisplay(0, 0);
     setSafeBookPeriodBalancesVisibility(false);
@@ -1294,6 +1307,7 @@ function toggleSafeBookForm(forceShow) {
     : form.style.display === 'none';
 
   if (shouldShow) {
+    toggleSafeBookAuditForm(false);
     form.style.display = 'block';
     const dateInput = document.getElementById('safe-book-date');
     const typeInput = document.getElementById('safe-book-type');
@@ -1320,6 +1334,81 @@ function toggleSafeBookForm(forceShow) {
     scheduleSafeBookTableViewportSync();
     setTimeout(scheduleSafeBookTableViewportSync, 60);
     setTimeout(updateSafeBookStickyMonthSummary, 60);
+  }
+}
+
+function toggleSafeBookAuditForm(forceShow) {
+  const form = document.getElementById('safe-book-audit-form');
+  if (!form) return;
+
+  const shouldShow = typeof forceShow === 'boolean'
+    ? forceShow
+    : form.style.display === 'none';
+
+  const balanceEl = document.getElementById('safe-book-audit-program-balance');
+  const actualInput = document.getElementById('safe-book-audit-actual');
+
+  if (shouldShow) {
+    toggleSafeBookForm(false);
+    if (balanceEl) {
+      balanceEl.textContent = formatArabicCurrency(safeBookCurrentBalance);
+      balanceEl.classList.toggle('negative', safeBookCurrentBalance < 0);
+    }
+    if (actualInput) {
+      actualInput.value = '';
+      actualInput.placeholder = formatPrice(Math.max(safeBookCurrentBalance, 0));
+      if (!actualInput.dataset.bound) {
+        actualInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            saveSafeBookAuditMovement();
+          }
+        });
+        actualInput.dataset.bound = 'true';
+      }
+      setTimeout(() => actualInput.focus(), 0);
+    }
+    form.style.display = 'block';
+  } else {
+    form.style.display = 'none';
+    if (actualInput) actualInput.value = '';
+  }
+
+  scheduleSafeBookTableViewportSync();
+  setTimeout(scheduleSafeBookTableViewportSync, 60);
+  setTimeout(updateSafeBookStickyMonthSummary, 60);
+}
+
+async function saveSafeBookAuditMovement() {
+  const actualInput = document.getElementById('safe-book-audit-actual');
+  const actualBalance = parseFloat(actualInput?.value);
+
+  if (!Number.isFinite(actualBalance) || actualBalance < 0) {
+    showMessage('يرجى إدخال رصيد فعلي صحيح', 'error');
+    return;
+  }
+
+  const difference = Math.round((actualBalance - safeBookCurrentBalance + Number.EPSILON) * 100) / 100;
+  if (Math.abs(difference) < 0.005) {
+    showMessage('رصيد الخزينة مطابق للرصيد الفعلي', 'info');
+    toggleSafeBookAuditForm(false);
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('add-safe-book-movement', {
+      date: getTodayDate(),
+      movement_type: 'فرق الجرد',
+      amount: Math.abs(difference),
+      direction: difference > 0 ? 'in' : 'out'
+    });
+
+    showMessage('تمت إضافة فرق الجرد وتحديث رصيد الخزينة', 'success');
+    toggleSafeBookAuditForm(false);
+    await loadSafeBookMovements();
+  } catch (error) {
+    console.error('Error saving safe book audit movement:', error);
+    showMessage(error.message || 'حدث خطأ أثناء حفظ جرد الخزينة', 'error');
   }
 }
 
@@ -1989,7 +2078,9 @@ async function loadHomeChart() {
         console.error('Invalid sales data');
         return;
       }
-      chartData = sales;
+      chartData = sales.length > 0
+        ? sales
+        : await ipcRenderer.invoke('get-shift-fuel-sales');
     } else {
       const movements = await ipcRenderer.invoke('get-fuel-movements');
       if (!movements || !Array.isArray(movements)) {
@@ -2009,6 +2100,19 @@ async function loadHomeChart() {
     createMonthlyFuelSalesChart([], currentHomeChartMode);
     scheduleHomeChartHeightSync();
   }
+}
+
+function normalizeFuelTypeForHomeChart(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  if (text === 'سولار' || text === 'ديزل' || text.toLowerCase() === 'diesel') return 'سولار';
+  if (text === 'غاز سيارات' || text.toLowerCase() === 'gas') return 'غاز سيارات';
+  if (text.includes('٩٥') || text.includes('95')) return 'بنزين ٩٥';
+  if (text.includes('٩٢') || text.includes('92')) return 'بنزين ٩٢';
+  if (text === 'بنزين ٨' || text.includes('٨٠') || text.includes('80')) return 'بنزين ٨٠';
+
+  return text;
 }
 
 async function loadFuelPrices() {
@@ -2414,14 +2518,15 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
 
   // Group entries by month and fuel type
   const monthlyData = {};
-  const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار'];
-  const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'];
+  const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
+  const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
 
   // Initialize data structure
   entries.forEach(entry => {
     if (!entry || !entry.date || !entry.fuel_type) return;
 
     const month = entry.date.substring(0, 7); // YYYY-MM
+    const normalizedFuelType = normalizeFuelTypeForHomeChart(entry.fuel_type);
     if (!monthlyData[month]) {
       monthlyData[month] = {};
       fuelTypes.forEach(type => {
@@ -2429,8 +2534,8 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
       });
     }
 
-    if (Object.prototype.hasOwnProperty.call(monthlyData[month], entry.fuel_type)) {
-      monthlyData[month][entry.fuel_type] += parseFloat(entry.quantity) || 0;
+    if (Object.prototype.hasOwnProperty.call(monthlyData[month], normalizedFuelType)) {
+      monthlyData[month][normalizedFuelType] += parseFloat(entry.quantity) || 0;
     }
   });
 
@@ -3750,6 +3855,16 @@ function switchManageProductType(type) {
 
 // Shift Entry Tab Switching
 function switchShiftTab(tab) {
+  if (fuelInlineResetMode && tab !== 'fuel') {
+    fuelInlineResetMode = false;
+    lockFuelFirstShiftInputs();
+  }
+
+  if (oilInlineResetMode && tab !== 'oil') {
+    oilInlineResetMode = false;
+    lockOilInitialInputs();
+  }
+
   // Update tabs
   const tabs = document.querySelectorAll('#shift-entry-screen .price-type-tab');
   tabs.forEach(t => {
@@ -4254,41 +4369,178 @@ async function loadPriceHistory() {
   }
   try {
     const filter = document.getElementById('history-product-filter').value;
-    const history = await ipcRenderer.invoke('get-price-history', filter);
+    let serverFilter = '';
+    let historyTypeFilter = '';
+
+    if (filter === '__all_fuel__') {
+      historyTypeFilter = 'fuel';
+    } else if (filter === '__all_oil__') {
+      historyTypeFilter = 'oil';
+    } else if (filter) {
+      serverFilter = filter;
+    }
+
+    const [historyRaw, fuelProductsRaw, oilProductsRaw] = await Promise.all([
+      ipcRenderer.invoke('get-price-history', serverFilter),
+      ipcRenderer.invoke('get-fuel-prices'),
+      ipcRenderer.invoke('get-oil-prices')
+    ]);
+
+    let history = historyTypeFilter
+      ? historyRaw.filter((item) => item?.product_type === historyTypeFilter)
+      : historyRaw;
     const container = document.getElementById('price-history-content');
 
     if (!container) return;
+
+    const fuelProducts = Array.isArray(fuelProductsRaw) ? fuelProductsRaw : [];
+    const oilProducts = Array.isArray(oilProductsRaw) ? oilProductsRaw : [];
+    const allProducts = [
+      ...fuelProducts.map((item) => ({ type: 'fuel', name: item?.fuel_type, price: item?.price, effective_date: item?.effective_date })),
+      ...oilProducts.map((item) => ({ type: 'oil', name: item?.oil_type, price: item?.price, effective_date: item?.effective_date }))
+    ].filter((item) => String(item?.name || '').trim() !== '');
+
+    const productCatalog = allProducts.filter((item) => {
+      if (filter === '__all_fuel__') return item.type === 'fuel';
+      if (filter === '__all_oil__') return item.type === 'oil';
+      if (filter) return item.name === filter;
+      return true;
+    });
+
+    const historyProductNames = new Set(
+      history.map((item) => String(item?.product_name || '').trim()).filter(Boolean)
+    );
+
+    const fallbackRows = [];
+    productCatalog.forEach((product) => {
+      if (historyProductNames.has(product.name)) {
+        return;
+      }
+
+      const numericPrice = parseFloat(product.price);
+      if (!Number.isFinite(numericPrice)) {
+        return;
+      }
+
+      fallbackRows.push({
+        product_type: product.type,
+        product_name: product.name,
+        price: numericPrice,
+        start_date: product.effective_date || getTodayDate(),
+        created_at: 0
+      });
+    });
+
+    history = [...history, ...fallbackRows];
 
     if (history.length === 0) {
       container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
       return;
     }
 
+    const parseDateKey = (value) => {
+      const parts = parseIsoDateParts(value);
+      if (parts) {
+        return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+      }
+
+      const parsedDate = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(parsedDate.getTime())) {
+        return '';
+      }
+
+      const year = parsedDate.getFullYear();
+      const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(parsedDate.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const dateSet = new Set();
+    const changesByProduct = new Map();
+    const productTypeByName = new Map();
+
+    history.forEach((item) => {
+      const productName = String(item?.product_name || '').trim();
+      const dateKey = parseDateKey(item?.start_date);
+      const priceValue = parseFloat(item?.price);
+
+      if (!productName || !dateKey || !Number.isFinite(priceValue)) {
+        return;
+      }
+
+      dateSet.add(dateKey);
+
+      if (!changesByProduct.has(productName)) {
+        changesByProduct.set(productName, new Map());
+      }
+      if (!productTypeByName.has(productName)) {
+        productTypeByName.set(productName, item?.product_type || '');
+      }
+
+      const perDate = changesByProduct.get(productName);
+      const createdAtMs = (() => {
+        if (typeof item?.created_at === 'number') return item.created_at * 1000;
+        const parsed = new Date(item?.created_at).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+      })();
+
+      const existing = perDate.get(dateKey);
+      if (!existing || createdAtMs >= existing.createdAtMs) {
+        perDate.set(dateKey, { price: priceValue, createdAtMs });
+      }
+    });
+
+    const dateColumns = Array.from(dateSet).sort((a, b) => b.localeCompare(a));
+    const typeRank = (productName) => {
+      const t = productTypeByName.get(productName);
+      if (t === 'fuel') return 0;
+      if (t === 'oil') return 1;
+      return 2;
+    };
+    const products = Array.from(changesByProduct.keys()).sort((a, b) => {
+      const rankDiff = typeRank(a) - typeRank(b);
+      if (rankDiff !== 0) return rankDiff;
+      return a.localeCompare(b);
+    });
+
+    if (dateColumns.length === 0 || products.length === 0) {
+      container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
+      return;
+    }
+
+    const getEffectivePriceAtDate = (productName, targetDateKey) => {
+      const perDate = changesByProduct.get(productName);
+      if (!perDate) return null;
+
+      let bestDate = null;
+      perDate.forEach((_entry, dateKey) => {
+        if (dateKey <= targetDateKey && (!bestDate || dateKey > bestDate)) {
+          bestDate = dateKey;
+        }
+      });
+
+      if (!bestDate) return null;
+      return perDate.get(bestDate)?.price ?? null;
+    };
+
     let html = '<div class="price-history-table-wrapper"><table class="base-table price-history-table">';
     html += '<thead><tr>';
-    html += '<th>المنتج</th>';
-    html += '<th>النوع</th>';
-    html += '<th>السعر</th>';
-    html += '<th>تاريخ البدء</th>';
-    html += '<th>تاريخ التسجيل</th>';
+    html += '<th class="price-history-product-col">المنتج</th>';
+    html += dateColumns
+      .map((dateKey) => `<th>${escapeHtml(formatDateOnlyDisplay(dateKey))}</th>`)
+      .join('');
     html += '</tr></thead><tbody>';
 
-    for (const item of history) {
-      const price = parseFloat(item.price) || 0;
-      const startDateText = formatDateOnlyDisplay(item.start_date);
-      const createdAtValue = typeof item.created_at === 'number'
-        ? new Date(item.created_at * 1000)
-        : new Date(item.created_at);
-      const createdAtText = Number.isNaN(createdAtValue.getTime())
-        ? ''
-        : createdAtValue.toLocaleString('ar-EG');
-
+    for (const productName of products) {
       html += '<tr>';
-      html += `<td>${escapeHtml(item.product_name)}</td>`;
-      html += `<td>${item.product_type === 'fuel' ? 'وقود' : 'زيت'}</td>`;
-      html += `<td class="price-history-price">${escapeHtml(price.toFixed(2))} جنيه</td>`;
-      html += `<td>${escapeHtml(startDateText)}</td>`;
-      html += `<td class="price-history-created-at">${escapeHtml(createdAtText)}</td>`;
+      html += `<td class="price-history-product-col">${escapeHtml(productName)}</td>`;
+      html += dateColumns.map((dateKey) => {
+        const price = getEffectivePriceAtDate(productName, dateKey);
+        if (!Number.isFinite(price)) {
+          return '<td>-</td>';
+        }
+        return `<td class="price-history-price">${escapeHtml(formatArabicNumber(price))}</td>`;
+      }).join('');
       html += '</tr>';
     }
 
@@ -5034,9 +5286,21 @@ let currentShiftData = {
   date: null,
   shiftNumber: null,
   isSaved: false,
-  hasUnsavedChanges: false
+  hasUnsavedChanges: false,
+  draftCleanupQueue: []
 };
 let shiftViewMode = 'edit'; // 'edit' | 'history'
+const SHIFT_DRAFT_AUTOSAVE_DELAY_MS = 900;
+let shiftDraftAutoSaveTimer = null;
+let shiftDraftAutoSaveInFlight = false;
+let shiftDraftAutoSaveQueued = false;
+const SHIFT_DRAFT_STATUS_MESSAGES = {
+  idle: 'جاهز',
+  dirty: 'تغييرات غير محفوظة',
+  saving: 'جاري حفظ المسودة...',
+  saved: 'تم حفظ المسودة',
+  error: 'تعذر حفظ المسودة'
+};
 let salesSummaryCache = { sales: [], months: [], products: [] };
 let expandedSalesMonth = null;
 const SALES_SUMMARY_ORDER_KEY = 'sales-summary-order';
@@ -5052,11 +5316,94 @@ let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
 let expenseEntriesCache = [];
 let expenseDefaultRange = null;
+let expenseFilterDebounceTimer = null;
 
 function getCurrentShiftIdentifier() {
   const date = document.getElementById('shift-date')?.value || '';
   const shiftNumber = document.getElementById('shift-number')?.value || '';
   return { date, shiftNumber };
+}
+
+function getShiftIdentifierKey(date, shiftNumber) {
+  const shift = parseInt(shiftNumber, 10);
+  if (!date || !Number.isFinite(shift)) return '';
+  return `${date}#${shift}`;
+}
+
+function queueDraftIdentifierForCleanup(date, shiftNumber) {
+  const key = getShiftIdentifierKey(date, shiftNumber);
+  if (!key) return;
+  if (!Array.isArray(currentShiftData.draftCleanupQueue)) {
+    currentShiftData.draftCleanupQueue = [];
+  }
+  if (!currentShiftData.draftCleanupQueue.includes(key)) {
+    currentShiftData.draftCleanupQueue.push(key);
+  }
+}
+
+async function cleanupQueuedDraftIdentifiers() {
+  const queue = Array.isArray(currentShiftData.draftCleanupQueue)
+    ? [...currentShiftData.draftCleanupQueue]
+    : [];
+  if (queue.length === 0) return;
+
+  const { date, shiftNumber } = getCurrentShiftIdentifier();
+  const activeKey = getShiftIdentifierKey(date, shiftNumber);
+  const remaining = [];
+
+  for (const key of queue) {
+    if (!key || key === activeKey) {
+      continue;
+    }
+
+    const [draftDate, draftShiftText] = key.split('#');
+    const draftShift = parseInt(draftShiftText, 10);
+    if (!draftDate || !Number.isFinite(draftShift)) {
+      continue;
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('delete-shift-draft', {
+        date: draftDate,
+        shift_number: draftShift
+      });
+      if (!result?.success) {
+        remaining.push(key);
+      }
+    } catch (error) {
+      console.warn('Failed cleaning old draft identifier:', key, error);
+      remaining.push(key);
+    }
+  }
+
+  currentShiftData.draftCleanupQueue = remaining;
+}
+
+function getShiftInputDisplayValue(value) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  const textValue = String(value).trim();
+  if (textValue === '') {
+    return '';
+  }
+
+  const numericValue = Number(textValue);
+  if (Number.isFinite(numericValue) && Math.abs(numericValue) < 0.0000001) {
+    return '';
+  }
+
+  return textValue;
+}
+
+function setShiftDraftStatus(state = 'idle', customMessage = '') {
+  const statusEl = document.getElementById('shift-draft-status');
+  if (!statusEl) return;
+
+  statusEl.classList.remove('idle', 'dirty', 'saving', 'saved', 'error');
+  statusEl.classList.add(state || 'idle');
+  statusEl.textContent = customMessage || SHIFT_DRAFT_STATUS_MESSAGES[state] || SHIFT_DRAFT_STATUS_MESSAGES.idle;
 }
 
 async function persistCurrentShiftDraftToDatabase() {
@@ -5074,6 +5421,7 @@ async function persistCurrentShiftDraftToDatabase() {
     fuel_total: calculateFuelTotal(),
     oil_data: JSON.stringify(collectOilData()),
     oil_total: calculateOilTotal(),
+    customer_rows: collectCustomerRowsData(),
     expense_items: collectExpenseItems(),
     wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
     total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
@@ -5090,6 +5438,178 @@ async function persistCurrentShiftDraftToDatabase() {
   } catch (error) {
     console.error('Error persisting shift draft:', error);
     return { success: false, error: error?.message || 'save_failed' };
+  }
+}
+
+function canAutoSaveShiftDraft() {
+  if (currentScreen !== 'shift-entry') return false;
+  if (shiftViewMode === 'history') return false;
+  if (currentShiftData.isSaved) return false;
+  const { date, shiftNumber } = getCurrentShiftIdentifier();
+  return Boolean(date && shiftNumber);
+}
+
+async function runShiftDraftAutoSave() {
+  if (!canAutoSaveShiftDraft() || !currentShiftData.hasUnsavedChanges) {
+    return;
+  }
+
+  const validationErrors = validateShiftData();
+  if (validationErrors.length > 0) {
+    // Never persist invalid shifts as drafts.
+    setShiftDraftStatus('dirty');
+    return;
+  }
+
+  if (shiftDraftAutoSaveInFlight) {
+    shiftDraftAutoSaveQueued = true;
+    return;
+  }
+
+  setShiftDraftStatus('saving');
+  shiftDraftAutoSaveInFlight = true;
+  const saveResult = await persistCurrentShiftDraftToDatabase();
+  shiftDraftAutoSaveInFlight = false;
+
+  if (saveResult.success) {
+    currentShiftData.hasUnsavedChanges = false;
+    await cleanupQueuedDraftIdentifiers();
+    setShiftDraftStatus('saved');
+  } else {
+    if (saveResult.error === 'validation_failed') {
+      setShiftDraftStatus('dirty');
+    } else {
+      setShiftDraftStatus('error');
+    }
+  }
+
+  if (shiftDraftAutoSaveQueued) {
+    shiftDraftAutoSaveQueued = false;
+    if (currentShiftData.hasUnsavedChanges) {
+      runShiftDraftAutoSave();
+    }
+  }
+}
+
+function scheduleShiftDraftAutoSave() {
+  if (!canAutoSaveShiftDraft()) return;
+
+  if (shiftDraftAutoSaveTimer) {
+    clearTimeout(shiftDraftAutoSaveTimer);
+  }
+
+  setShiftDraftStatus('dirty');
+
+  shiftDraftAutoSaveTimer = setTimeout(() => {
+    shiftDraftAutoSaveTimer = null;
+    runShiftDraftAutoSave();
+  }, SHIFT_DRAFT_AUTOSAVE_DELAY_MS);
+}
+
+function isShiftAutoFilledField(target) {
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  if (target.classList.contains('auto-calculated')) {
+    return true;
+  }
+
+  const id = String(target.id || '');
+  if (!id) return false;
+
+  return (
+    /-price$/.test(id) ||
+    /-cash$/.test(id) ||
+    /-quantity-\d+$/.test(id) ||
+    /-total-qty$/.test(id) ||
+    /^total-/.test(id) ||
+    id === 'final-net-total' ||
+    // Oil derived fields (الإجمالى بعد وارد + المباع + اجمالى النقدى)
+    /^oil-.+-total$/.test(id) ||
+    /^oil-.+-sold$/.test(id) ||
+    /^oil-.+-revenue$/.test(id)
+  );
+}
+
+function getShiftNavigableFields(container) {
+  if (!container) return [];
+
+  const elements = Array.from(container.querySelectorAll('input, textarea, select'));
+  return elements.filter((el) => {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
+      return false;
+    }
+
+    if (el.disabled || el.readOnly) return false;
+    if (!el.id || el.id === 'shift-date' || el.id === 'shift-number') return false;
+    if (el instanceof HTMLInputElement) {
+      if (el.type === 'hidden' || el.type === 'button' || el.type === 'submit') return false;
+    }
+
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+}
+
+function findAdjacentShiftField(currentField, fields, direction) {
+  if (!currentField || !Array.isArray(fields) || fields.length === 0) return null;
+
+  const currentRect = currentField.getBoundingClientRect();
+  const currentX = currentRect.left + (currentRect.width / 2);
+  const currentY = currentRect.top + (currentRect.height / 2);
+
+  let bestField = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  fields.forEach((field) => {
+    if (field === currentField) return;
+    const rect = field.getBoundingClientRect();
+    const x = rect.left + (rect.width / 2);
+    const y = rect.top + (rect.height / 2);
+    const dx = x - currentX;
+    const dy = y - currentY;
+
+    let primary = 0;
+    let secondary = 0;
+
+    if (direction === 'ArrowUp') {
+      if (dy >= -1) return;
+      primary = Math.abs(dy);
+      secondary = Math.abs(dx);
+    } else if (direction === 'ArrowDown') {
+      if (dy <= 1) return;
+      primary = Math.abs(dy);
+      secondary = Math.abs(dx);
+    } else if (direction === 'ArrowLeft') {
+      if (dx >= -1) return;
+      primary = Math.abs(dx);
+      secondary = Math.abs(dy);
+    } else if (direction === 'ArrowRight') {
+      if (dx <= 1) return;
+      primary = Math.abs(dx);
+      secondary = Math.abs(dy);
+    } else {
+      return;
+    }
+
+    const score = (primary * 1000) + secondary;
+    if (score < bestScore) {
+      bestScore = score;
+      bestField = field;
+    }
+  });
+
+  return bestField;
+}
+
+function flushShiftDraftAutoSave() {
+  if (shiftDraftAutoSaveTimer) {
+    clearTimeout(shiftDraftAutoSaveTimer);
+    shiftDraftAutoSaveTimer = null;
+  }
+  if (currentShiftData.hasUnsavedChanges) {
+    runShiftDraftAutoSave();
   }
 }
 const PROFIT_TABLE_ROWS = [
@@ -5214,11 +5734,53 @@ async function loadSalesSummary() {
   const endDateStr = formatDate(endDateObj);
 
   try {
-    const [sales, fuelProducts, oilProducts] = await Promise.all([
-      ipcRenderer.invoke('get-sales-report', { startDate: startDateStr, endDate: endDateStr }),
+    const [fuelProducts, oilProducts] = await Promise.all([
       ipcRenderer.invoke('get-fuel-prices'),
       ipcRenderer.invoke('get-oil-prices')
     ]);
+
+    let sales = [];
+    try {
+      const salesReport = await ipcRenderer.invoke('get-sales-report', { startDate: startDateStr, endDate: endDateStr });
+      sales = Array.isArray(salesReport) ? salesReport : [];
+    } catch (error) {
+      console.warn('Sales report unavailable, trying shift sales fallback:', error);
+      sales = [];
+    }
+
+    if (sales.length === 0) {
+      try {
+        const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
+          ipcRenderer.invoke('get-shift-fuel-sales'),
+          ipcRenderer.invoke('get-shift-oil-sales')
+        ]);
+
+        const shiftFuelSales = Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [];
+        const shiftOilSales = Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [];
+
+        const fallbackFuelRows = shiftFuelSales
+          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+          .map((entry) => ({
+            date: entry.date,
+            fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
+            quantity: parseFloat(entry.quantity) || 0,
+            total_amount: 0
+          }));
+
+        const fallbackOilRows = shiftOilSales
+          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+          .map((entry) => ({
+            date: entry.date,
+            fuel_type: String(entry.product_name || '').trim(),
+            quantity: parseFloat(entry.quantity) || 0,
+            total_amount: 0
+          }));
+
+        sales = [...fallbackFuelRows, ...fallbackOilRows];
+      } catch (error) {
+        console.warn('Shift sales fallback unavailable:', error);
+      }
+    }
 
     // Build list of months in range (YYYY-MM)
     const months = [];
@@ -5252,10 +5814,11 @@ async function loadSalesSummary() {
     // Aggregate by product and month (YYYY-MM)
     const map = new Map();
     sales.forEach(sale => {
+      const normalizedFuelType = normalizeFuelTypeForHomeChart(sale.fuel_type);
       const month = sale.date?.slice(0, 7) || '';
-      const key = `${sale.fuel_type}__${month}`;
+      const key = `${normalizedFuelType}__${month}`;
       if (!map.has(key)) {
-        map.set(key, { product: sale.fuel_type, month, qty: 0, revenue: 0 });
+        map.set(key, { product: normalizedFuelType, month, qty: 0, revenue: 0 });
       }
       const entry = map.get(key);
       entry.qty += parseFloat(sale.quantity) || 0;
@@ -5441,7 +6004,7 @@ function renderMonthDetails(month) {
   productsList.forEach(p => grid.set(p, Array(daysInMonth).fill(0)));
 
   filtered.forEach(sale => {
-    const product = sale.fuel_type || 'غير معروف';
+    const product = normalizeFuelTypeForHomeChart(sale.fuel_type) || 'غير معروف';
     const dayStr = sale.date.slice(8, 10);
     const dayIdx = parseInt(dayStr, 10) - 1;
     if (dayIdx >= 0 && dayIdx < daysInMonth) {
@@ -6318,8 +6881,69 @@ async function loadProfitMonthlyData() {
   }
 }
 
-function getDefaultExpenseRange(availableMonths) {
-  return getDefaultProfitRange(availableMonths);
+function getDefaultExpenseRange() {
+  const now = new Date();
+  return {
+    fromMonth: `${now.getFullYear()}-01`,
+    toMonth: getCurrentMonthKey()
+  };
+}
+
+function buildMonthRange(fromMonth, toMonth) {
+  const from = normalizeMonthKey(fromMonth);
+  const to = normalizeMonthKey(toMonth);
+  if (!from || !to || from > to) {
+    return [];
+  }
+
+  const [fromYear, fromMonthNumber] = from.split('-').map((value) => parseInt(value, 10));
+  const [toYear, toMonthNumber] = to.split('-').map((value) => parseInt(value, 10));
+
+  const cursor = new Date(fromYear, fromMonthNumber - 1, 1);
+  const end = new Date(toYear, toMonthNumber - 1, 1);
+  const months = [];
+
+  while (cursor <= end) {
+    months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
+}
+
+function formatExpenseMonthLabel(monthKey) {
+  const normalized = normalizeMonthKey(monthKey);
+  if (!normalized) return '-';
+  const [yearText, monthText] = normalized.split('-');
+  const monthIndex = Math.max(0, Math.min(11, parseInt(monthText, 10) - 1));
+  return `${SAFE_BOOK_MONTH_NAMES[monthIndex]} ${convertToArabicNumerals(yearText)}`;
+}
+
+function parseExpenseAmountFilter(value) {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return null;
+  }
+
+  const amount = parseFloat(text);
+  return Number.isFinite(amount) ? amount : Number.NaN;
+}
+
+function scheduleExpenseFiltersReload(delay = 0) {
+  if (expenseFilterDebounceTimer) {
+    clearTimeout(expenseFilterDebounceTimer);
+    expenseFilterDebounceTimer = null;
+  }
+
+  if (delay > 0) {
+    expenseFilterDebounceTimer = setTimeout(() => {
+      expenseFilterDebounceTimer = null;
+      loadExpenseEntries();
+    }, delay);
+    return;
+  }
+
+  loadExpenseEntries();
 }
 
 function populateExpenseFilterOptions(availableMonths, defaultRange) {
@@ -6365,59 +6989,31 @@ function populateExpenseFilterOptions(availableMonths, defaultRange) {
 
   const safeDefault = defaultRange && normalizeMonthKey(defaultRange.fromMonth) && normalizeMonthKey(defaultRange.toMonth)
     ? defaultRange
-    : getDefaultExpenseRange(validMonths);
+    : getDefaultExpenseRange();
 
   fillSelect(startMonthSel, monthOptions, safeDefault.fromMonth.slice(5, 7));
   fillSelect(endMonthSel, monthOptions, safeDefault.toMonth.slice(5, 7));
   fillSelect(startYearSel, yearOptions, safeDefault.fromMonth.slice(0, 4));
   fillSelect(endYearSel, yearOptions, safeDefault.toMonth.slice(0, 4));
 
-  const filterBtn = document.getElementById('expenses-filter-btn');
-  if (filterBtn && filterBtn.dataset.bound !== 'true') {
-    filterBtn.addEventListener('click', () => {
-      loadExpenseEntries();
-    });
-    filterBtn.dataset.bound = 'true';
-  }
+  [startMonthSel, startYearSel, endMonthSel, endYearSel].forEach((select) => {
+    if (select.dataset.bound !== 'true') {
+      select.addEventListener('change', () => scheduleExpenseFiltersReload());
+      select.dataset.bound = 'true';
+    }
+  });
 
-  const clearBtn = document.getElementById('expenses-clear-filter-btn');
-  if (clearBtn && clearBtn.dataset.bound !== 'true') {
-    clearBtn.addEventListener('click', () => {
-      if (!expenseDefaultRange) {
-        expenseDefaultRange = getDefaultExpenseRange(validMonths);
-      }
+  const minAmountInput = document.getElementById('expenses-min-amount');
+  const maxAmountInput = document.getElementById('expenses-max-amount');
+  const searchInput = document.getElementById('expenses-search-term');
 
-      if (expenseDefaultRange) {
-        startMonthSel.value = expenseDefaultRange.fromMonth.slice(5, 7);
-        startYearSel.value = expenseDefaultRange.fromMonth.slice(0, 4);
-        endMonthSel.value = expenseDefaultRange.toMonth.slice(5, 7);
-        endYearSel.value = expenseDefaultRange.toMonth.slice(0, 4);
-      }
+  [minAmountInput, maxAmountInput, searchInput].forEach((input) => {
+    if (input && input.dataset.bound !== 'true') {
+      input.addEventListener('input', () => scheduleExpenseFiltersReload(250));
+      input.dataset.bound = 'true';
+    }
+  });
 
-      const minInput = document.getElementById('expenses-min-amount');
-      const maxInput = document.getElementById('expenses-max-amount');
-      const searchInput = document.getElementById('expenses-search');
-      if (minInput) minInput.value = '';
-      if (maxInput) maxInput.value = '';
-      if (searchInput) searchInput.value = '';
-
-      loadExpenseEntries();
-    });
-    clearBtn.dataset.bound = 'true';
-  }
-
-  const searchInput = document.getElementById('expenses-search');
-  if (searchInput && searchInput.dataset.bound !== 'true') {
-    searchInput.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter') {
-        return;
-      }
-
-      event.preventDefault();
-      loadExpenseEntries();
-    });
-    searchInput.dataset.bound = 'true';
-  }
 }
 
 function getExpenseFiltersRange() {
@@ -6427,7 +7023,7 @@ function getExpenseFiltersRange() {
   const endYearSel = document.getElementById('expenses-end-year');
   const minAmountInput = document.getElementById('expenses-min-amount');
   const maxAmountInput = document.getElementById('expenses-max-amount');
-  const searchInput = document.getElementById('expenses-search');
+  const searchInput = document.getElementById('expenses-search-term');
 
   const currentMonth = getCurrentMonthKey();
   const startMonth = startMonthSel && startYearSel
@@ -6445,21 +7041,16 @@ function getExpenseFiltersRange() {
     return { valid: false, message: 'فترة زمنية غير صحيحة' };
   }
 
-  const minAmountRaw = String(minAmountInput?.value || '').trim();
-  const maxAmountRaw = String(maxAmountInput?.value || '').trim();
-  const minAmount = minAmountRaw === '' ? null : parseFloat(minAmountRaw);
-  const maxAmount = maxAmountRaw === '' ? null : parseFloat(maxAmountRaw);
+  const minAmount = parseExpenseAmountFilter(minAmountInput?.value);
+  const maxAmount = parseExpenseAmountFilter(maxAmountInput?.value);
 
-  if (minAmountRaw !== '' && !Number.isFinite(minAmount)) {
-    return { valid: false, message: 'صيغة أقل قيمة غير صحيحة' };
-  }
-
-  if (maxAmountRaw !== '' && !Number.isFinite(maxAmount)) {
-    return { valid: false, message: 'صيغة أعلى قيمة غير صحيحة' };
+  if ((minAmount !== null && (!Number.isFinite(minAmount) || minAmount < 0))
+    || (maxAmount !== null && (!Number.isFinite(maxAmount) || maxAmount < 0))) {
+    return { valid: false, message: 'قيمة المبلغ غير صحيحة', fromMonth: startMonth, toMonth: endMonth };
   }
 
   if (minAmount !== null && maxAmount !== null && minAmount > maxAmount) {
-    return { valid: false, message: 'أقل قيمة يجب أن تكون أقل من أو تساوي أعلى قيمة' };
+    return { valid: false, message: 'فترة المبلغ غير صحيحة', fromMonth: startMonth, toMonth: endMonth };
   }
 
   return {
@@ -6475,7 +7066,7 @@ function getExpenseFiltersRange() {
 async function initializeExpensesDashboard() {
   try {
     const availableMonths = await ipcRenderer.invoke('get-expense-available-months');
-    expenseDefaultRange = getDefaultExpenseRange(availableMonths);
+    expenseDefaultRange = getDefaultExpenseRange();
     populateExpenseFilterOptions(availableMonths, expenseDefaultRange);
     await loadExpenseEntries();
   } catch (error) {
@@ -6487,29 +7078,41 @@ async function initializeExpensesDashboard() {
   }
 }
 
-function formatExpenseShiftLabel(shiftNumber) {
-  return parseInt(shiftNumber, 10) === 2 ? 'الثانية' : 'الأولى';
-}
-
-function renderExpenseTableMessage(message, tone = 'neutral') {
+function renderExpenseTableMessage(message, tone = 'neutral', months = []) {
+  const headRow = document.getElementById('expenses-summary-head');
   const tbody = document.getElementById('expenses-table-body');
-  if (!tbody) return;
+  if (!tbody || !headRow) return;
+
+  const safeMonths = Array.isArray(months) ? months : [];
+  headRow.innerHTML = [
+    '<th>المصروف</th>',
+    ...safeMonths.map((month) => `<th>${formatExpenseMonthLabel(month)}</th>`),
+    '<th>الإجمالي</th>'
+  ].join('');
 
   const color = tone === 'error' ? '#c4291d' : '#777';
   tbody.innerHTML = `
     <tr>
-      <td colspan="4" style="text-align:center; color:${color};">${escapeHtml(message)}</td>
+      <td colspan="${safeMonths.length + 2}" style="text-align:center; color:${color};">${escapeHtml(message)}</td>
     </tr>
   `;
 }
 
-function renderExpenseTableRows(entries) {
+function renderExpenseTableRows(entries, months = []) {
+  const headRow = document.getElementById('expenses-summary-head');
   const tbody = document.getElementById('expenses-table-body');
   const emptyState = document.getElementById('expenses-empty');
-  if (!tbody) return;
+  if (!tbody || !headRow) return;
+
+  const safeMonths = Array.isArray(months) ? months : [];
+  if (safeMonths.length === 0) {
+    renderExpenseTableMessage('لا توجد أشهر ضمن الفترة المحددة');
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
 
   if (!Array.isArray(entries) || entries.length === 0) {
-    renderExpenseTableMessage('لا توجد مصروفات في الفترة أو حسب الفلاتر المحددة');
+    renderExpenseTableMessage('لا توجد مصروفات في الفترة المحددة', 'neutral', safeMonths);
     if (emptyState) emptyState.style.display = 'block';
     return;
   }
@@ -6518,19 +7121,63 @@ function renderExpenseTableRows(entries) {
     emptyState.style.display = 'none';
   }
 
-  tbody.innerHTML = entries.map((entry) => {
+  const monthSet = new Set(safeMonths);
+  const rowMap = new Map();
+
+  entries.forEach((entry) => {
+    const monthKey = normalizeMonthKey(String(entry?.date || '').slice(0, 7));
+    if (!monthKey || !monthSet.has(monthKey)) {
+      return;
+    }
+
     const rawDescription = String(entry?.description || '').trim();
     const description = entry?.is_aggregated
       ? rawDescription || LEGACY_AGGREGATED_EXPENSE_LABEL
       : rawDescription || EMPTY_EXPENSE_DESCRIPTION_LABEL;
-    const rowClass = entry?.is_aggregated ? 'expenses-aggregate-row' : '';
+    const amount = parseFloat(entry?.amount) || 0;
+
+    if (!rowMap.has(description)) {
+      rowMap.set(description, { total: 0, byMonth: new Map() });
+    }
+
+    const row = rowMap.get(description);
+    row.total += amount;
+    row.byMonth.set(monthKey, (row.byMonth.get(monthKey) || 0) + amount);
+  });
+
+  const descriptions = Array.from(rowMap.keys()).sort((a, b) => {
+    const totalA = rowMap.get(a)?.total || 0;
+    const totalB = rowMap.get(b)?.total || 0;
+    if (Math.abs(totalB - totalA) > 0.0001) {
+      return totalB - totalA;
+    }
+    return a.localeCompare(b, 'ar');
+  });
+
+  if (descriptions.length === 0) {
+    renderExpenseTableMessage('لا توجد مصروفات في الفترة المحددة', 'neutral', safeMonths);
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+
+  headRow.innerHTML = [
+    '<th>المصروف</th>',
+    ...safeMonths.map((month) => `<th>${formatExpenseMonthLabel(month)}</th>`),
+    '<th>الإجمالي</th>'
+  ].join('');
+
+  tbody.innerHTML = descriptions.map((description) => {
+    const row = rowMap.get(description);
+    const monthCells = safeMonths.map((month) => {
+      const value = row.byMonth.get(month) || 0;
+      return `<td class="expenses-month-cell">${value > 0 ? formatArabicNumber(value) : ''}</td>`;
+    }).join('');
 
     return `
-      <tr class="${rowClass}">
-        <td>${escapeHtml(formatSafeBookDate(entry?.date))}</td>
-        <td>${escapeHtml(formatExpenseShiftLabel(entry?.shift_number))}</td>
-        <td>${escapeHtml(description)}</td>
-        <td class="expenses-amount-cell">${escapeHtml(formatArabicCurrency(parseFloat(entry?.amount) || 0))}</td>
+      <tr>
+        <td class="oil-name-cell"><strong>${escapeHtml(description)}</strong></td>
+        ${monthCells}
+        <td class="cell-total expenses-total-cell">${formatArabicNumber(row.total)}</td>
       </tr>
     `;
   }).join('');
@@ -6539,12 +7186,13 @@ function renderExpenseTableRows(entries) {
 async function loadExpenseEntries() {
   const range = getExpenseFiltersRange();
   const emptyState = document.getElementById('expenses-empty');
+  const months = buildMonthRange(range.fromMonth, range.toMonth);
   const tbody = document.getElementById('expenses-table-body');
   if (!tbody) return;
 
   if (!range.valid) {
     expenseEntriesCache = [];
-    renderExpenseTableMessage(range.message || 'فلاتر غير صالحة');
+    renderExpenseTableMessage(range.message || 'فلاتر غير صالحة', 'neutral', months);
     if (emptyState) emptyState.style.display = 'none';
     return;
   }
@@ -6559,11 +7207,11 @@ async function loadExpenseEntries() {
     });
 
     expenseEntriesCache = Array.isArray(entries) ? entries : [];
-    renderExpenseTableRows(expenseEntriesCache);
+    renderExpenseTableRows(expenseEntriesCache, months);
   } catch (error) {
     console.error('Error loading expense entries:', error);
     expenseEntriesCache = [];
-    renderExpenseTableMessage('حدث خطأ أثناء تحميل بيانات المصاريف', 'error');
+    renderExpenseTableMessage('حدث خطأ أثناء تحميل بيانات المصاريف', 'error', months);
     if (emptyState) emptyState.style.display = 'none';
   }
 }
@@ -6622,9 +7270,6 @@ function calculateFuelQuantity(fuelType) {
     totalQtyInput.value = totalQuantity >= 0 ? Math.round(totalQuantity) : '';
   }
 
-  // Mark as unsaved
-  currentShiftData.hasUnsavedChanges = true;
-
   // Calculate cash (نقدى) automatically
   calculateCashForFuel(fuelId);
 }
@@ -6664,9 +7309,6 @@ function calculateDieselQuantity() {
   if (totalQtyInput) {
     totalQtyInput.value = totalQuantity >= 0 ? Math.round(totalQuantity) : '';
   }
-
-  // Mark as unsaved
-  currentShiftData.hasUnsavedChanges = true;
 
   // Calculate cash (نقدى) automatically
   calculateCashForFuel('diesel');
@@ -6714,8 +7356,58 @@ function calculateFuelTotal() {
   return total;
 }
 
+function recalculateFuelDerivedRows() {
+  calculateDieselQuantity();
+  calculateFuelQuantity('بنزين ٩٥');
+  calculateFuelQuantity('بنزين ٩٢');
+  calculateFuelQuantity('بنزين ٨٠');
+  calculateFuelQuantity('غاز سيارات');
+  calculateFuelTotal();
+}
+
 function normalizeOilName(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+const oilPricesByDateCache = new Map();
+
+function normalizeShiftDate(value) {
+  const date = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getTodayDate();
+}
+
+function getCachedOilPrice(oilName, date) {
+  const dateKey = normalizeShiftDate(date);
+  const pricesMap = oilPricesByDateCache.get(dateKey);
+  if (!pricesMap) return null;
+  const key = normalizeOilName(oilName);
+  if (!pricesMap.has(key)) return null;
+  return pricesMap.get(key);
+}
+
+function cacheOilPrice(oilName, date, price) {
+  const dateKey = normalizeShiftDate(date);
+  const key = normalizeOilName(oilName);
+  if (!key) return;
+
+  if (!oilPricesByDateCache.has(dateKey)) {
+    oilPricesByDateCache.set(dateKey, new Map());
+  }
+
+  oilPricesByDateCache.get(dateKey).set(key, parseFloat(price) || 0);
+}
+
+function cacheOilPricesBatch(date, rows = []) {
+  const dateKey = normalizeShiftDate(date);
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const key = normalizeOilName(row?.product_name || row?.oil_type || '');
+    if (!key) return;
+    map.set(key, parseFloat(row?.price) || 0);
+  });
+
+  oilPricesByDateCache.set(dateKey, map);
 }
 
 function parseOilQuantity(value) {
@@ -6777,7 +7469,6 @@ async function loadActiveOils() {
 
     activeOils.forEach(oil => {
       const oilId = oil.id || oil.oil_type.replace(/\s+/g, '-').toLowerCase();
-      const initialEditable = isOilInitialEditable(oil.oil_type);
       const row = document.createElement('tr');
       row.setAttribute('data-oil-id', oilId);
       row.setAttribute('data-oil-name', oil.oil_type);
@@ -6794,7 +7485,7 @@ async function loadActiveOils() {
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
                    id="oil-${oilId}-initial" data-oil="${oil.oil_type}" data-field="initial"
-                   oninput="calculateOilRow('${oilId}')" ${initialEditable ? '' : 'readonly'}>
+                   oninput="calculateOilRow('${oilId}')" readonly>
           </div>
         </td>
         <td>
@@ -6935,7 +7626,9 @@ async function calculateOilRow(oilId) {
 
   const initial = parseOilQuantity(initialInput.value);
   const added = parseOilQuantity(addedInput.value);
-  const remaining = parseOilQuantity(remainingInput.value);
+  const remainingRaw = String(remainingInput.value ?? '').trim();
+  const remainingParsed = parseFloat(String(remainingRaw).replace(',', '.'));
+  const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
   const open = parseOilQuantity(openInput?.value);
   const customers = parseOilQuantity(customersInput?.value);
 
@@ -6948,6 +7641,10 @@ async function calculateOilRow(oilId) {
     remainingInput.classList.add('input-error');
     alert('خطأ: الكمية المتبقية يجب أن تكون أقل من أو تساوي الإجمالي المتاح');
     soldInput.value = '';
+    if (revenueInput) {
+      revenueInput.value = '';
+    }
+    calculateOilTotal();
     return;
   } else {
     remainingInput.classList.remove('input-error');
@@ -6971,17 +7668,14 @@ async function calculateOilRow(oilId) {
       const revenueQuantity = roundOilQuantity(sold - customers - open);
       const revenue = revenueQuantity * price;
       if (revenueInput) {
-        revenueInput.value = revenue >= 0 ? formatPrice(revenue) : '0';
+        revenueInput.value = revenue >= 0 ? formatOilCashTotalDisplay(revenue) : '';
       }
     } catch (error) {
       console.error('Error getting oil price:', error);
       priceInput.value = '0';
-      if (revenueInput) revenueInput.value = '0';
+      if (revenueInput) revenueInput.value = '';
     }
   }
-
-  // Mark as unsaved
-  currentShiftData.hasUnsavedChanges = true;
 
   // Recalculate oil total
   calculateOilTotal();
@@ -6989,13 +7683,19 @@ async function calculateOilRow(oilId) {
 
 // Get oil price by date
 async function getOilPriceByDate(oilName, date) {
+  const cachedPrice = getCachedOilPrice(oilName, date);
+  if (cachedPrice !== null) {
+    return cachedPrice;
+  }
+
   try {
     const price = await ipcRenderer.invoke('get-price-by-date', {
       product_name: oilName,
       date
     });
-
-    return parseFloat(price) || 0;
+    const numericPrice = parseFloat(price) || 0;
+    cacheOilPrice(oilName, date, numericPrice);
+    return numericPrice;
   } catch (error) {
     console.error('Error fetching oil price:', error);
     return 0;
@@ -7010,6 +7710,14 @@ function formatPrice(value) {
   return num % 1 === 0 ? num.toString() : num.toFixed(2);
 }
 
+function formatOilCashTotalDisplay(value) {
+  const num = parseFloat(value);
+  if (!Number.isFinite(num) || Math.abs(num) < 0.0001) {
+    return '';
+  }
+  return formatPrice(num);
+}
+
 // Load oil prices for all oils in the table
 async function loadAllOilPrices() {
   const tableBody = document.getElementById('shift-oil-table-body');
@@ -7018,21 +7726,45 @@ async function loadAllOilPrices() {
   }
 
   const dateInput = document.getElementById('shift-date');
-  const shiftDate = dateInput ? dateInput.value : getTodayDate();
+  const shiftDate = normalizeShiftDate(dateInput ? dateInput.value : getTodayDate());
 
   try {
     const rows = tableBody.querySelectorAll('tr[data-oil-id]');
+
+    try {
+      const batchPrices = await ipcRenderer.invoke('get-oil-prices-by-date', { date: shiftDate });
+      if (Array.isArray(batchPrices)) {
+        cacheOilPricesBatch(shiftDate, batchPrices);
+      }
+    } catch (batchError) {
+      console.warn('loadAllOilPrices: Batch loading failed, using per-row fallback:', batchError);
+    }
 
     for (const row of rows) {
       const oilId = row.getAttribute('data-oil-id');
       const oilName = row.getAttribute('data-oil-name');
       const priceInput = document.getElementById(`oil-${oilId}-price`);
+      const soldInput = document.getElementById(`oil-${oilId}-sold`);
+      const openInput = document.getElementById(`oil-${oilId}-open`);
+      const customersInput = document.getElementById(`oil-${oilId}-customers`);
+      const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
 
       if (priceInput && oilName) {
         const price = await getOilPriceByDate(oilName, shiftDate);
         priceInput.value = formatPrice(price);
+
+        if (revenueInput) {
+          const sold = parseOilQuantity(soldInput?.value);
+          const open = parseOilQuantity(openInput?.value);
+          const customers = parseOilQuantity(customersInput?.value);
+          const revenueQuantity = roundOilQuantity(sold - customers - open);
+          const revenue = revenueQuantity * price;
+          revenueInput.value = revenue >= 0 ? formatOilCashTotalDisplay(revenue) : '';
+        }
       }
     }
+
+    calculateOilTotal();
   } catch (error) {
     console.error('loadAllOilPrices: Error fetching oils:', error);
   }
@@ -7125,6 +7857,109 @@ function addCustomerRow(index) {
   tableBody.appendChild(row);
 }
 
+function normalizeCustomerRowsData(items) {
+  const toVoucherBoolean = (value) => {
+    if (value === true || value === 1) return true;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+    }
+    return false;
+  };
+
+  let normalizedItems = items;
+  if (typeof normalizedItems === 'string') {
+    try {
+      normalizedItems = JSON.parse(normalizedItems);
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(normalizedItems)) return [];
+
+  return normalizedItems
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const diesel = parseFloat(item.diesel) || 0;
+      const fuel80 = parseFloat(item['80']) || 0;
+      const fuel92 = parseFloat(item['92']) || 0;
+      const fuel95 = parseFloat(item['95']) || 0;
+      const name = String(item.name || '').trim();
+      const voucher = toVoucherBoolean(item.voucher);
+
+      if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !voucher) {
+        return null;
+      }
+
+      return {
+        diesel,
+        '80': fuel80,
+        '92': fuel92,
+        '95': fuel95,
+        name,
+        voucher
+      };
+    })
+    .filter(Boolean);
+}
+
+function collectCustomerRowsData() {
+  const tableBody = document.getElementById('customers-table-body');
+  if (!tableBody) return [];
+
+  const rows = Array.from(tableBody.querySelectorAll('tr[data-customer-row]'));
+  const rawRows = rows.map((row) => {
+    const getInputValue = (selector) => row.querySelector(selector)?.value || '';
+    const getCheckboxValue = (selector) => Boolean(row.querySelector(selector)?.checked);
+
+    return {
+      diesel: parseFloat(getInputValue('input[data-field="diesel"]')) || 0,
+      '80': parseFloat(getInputValue('input[data-field="80"]')) || 0,
+      '92': parseFloat(getInputValue('input[data-field="92"]')) || 0,
+      '95': parseFloat(getInputValue('input[data-field="95"]')) || 0,
+      name: String(getInputValue('input[data-field="name"]')).trim(),
+      voucher: getCheckboxValue('input[data-field="voucher"]')
+    };
+  });
+
+  return normalizeCustomerRowsData(rawRows);
+}
+
+function setCustomerRowsData(rowsData = []) {
+  const tableBody = document.getElementById('customers-table-body');
+  if (!tableBody) return;
+
+  const normalizedRows = normalizeCustomerRowsData(rowsData);
+  const rowsCount = Math.max(16, normalizedRows.length + 1);
+
+  tableBody.innerHTML = '';
+  for (let i = 0; i < rowsCount; i += 1) {
+    addCustomerRow(i);
+  }
+
+  normalizedRows.forEach((item, index) => {
+    const row = tableBody.querySelector(`tr[data-customer-row="${index}"]`);
+    if (!row) return;
+
+    const dieselInput = row.querySelector('input[data-field="diesel"]');
+    const fuel80Input = row.querySelector('input[data-field="80"]');
+    const fuel92Input = row.querySelector('input[data-field="92"]');
+    const fuel95Input = row.querySelector('input[data-field="95"]');
+    const nameInput = row.querySelector('input[data-field="name"]');
+    const voucherInput = row.querySelector('input[data-field="voucher"]');
+
+    if (dieselInput) dieselInput.value = item.diesel || '';
+    if (fuel80Input) fuel80Input.value = item['80'] || '';
+    if (fuel92Input) fuel92Input.value = item['92'] || '';
+    if (fuel95Input) fuel95Input.value = item['95'] || '';
+    if (nameInput) nameInput.value = item.name || '';
+    if (voucherInput) voucherInput.checked = Boolean(item.voucher);
+  });
+
+  updateCustomerColumnSums();
+}
+
 // Calculate sum of customer table columns and update fuel client fields
 function updateCustomerColumnSums() {
   const tableBody = document.getElementById('customers-table-body');
@@ -7213,6 +8048,8 @@ function handleCustomerInput(rowIndex) {
   // Mark as unsaved
   if (typeof currentShiftData !== 'undefined') {
     currentShiftData.hasUnsavedChanges = true;
+    setShiftDraftStatus('dirty');
+    scheduleShiftDraftAutoSave();
   }
 }
 
@@ -7632,14 +8469,14 @@ function validateShiftData() {
     if (fuelType === 'سولار') {
       // Validate all 4 diesel counters
       for (let i = 1; i <= 4; i++) {
-        const lastShiftInput = document.getElementById(`fuel-diesel-last-shift-${i}`);
-        const firstShiftInput = document.getElementById(`fuel-diesel-first-shift-${i}`);
+        const lastShiftInput = document.getElementById(`fuel-diesel-last-${i}`);
+        const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
 
         const lastShift = parseFloat(lastShiftInput?.value) || 0;
         const firstShift = parseFloat(firstShiftInput?.value) || 0;
 
-        if (firstShift > 0 && firstShift < lastShift) {
-          errors.push(`${fuelType} (${i}): أول الوردية يجب أن يكون أكبر من أو يساوي آخر الوردية`);
+        if (firstShift > 0 && lastShift < firstShift) {
+          errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
         }
       }
     } else {
@@ -7651,8 +8488,8 @@ function validateShiftData() {
         const lastShift = parseFloat(lastShiftInput?.value) || 0;
         const firstShift = parseFloat(firstShiftInput?.value) || 0;
 
-        if (firstShift > 0 && firstShift < lastShift) {
-          errors.push(`${fuelType} (${i}): أول الوردية يجب أن يكون أكبر من أو يساوي آخر الوردية`);
+        if (firstShift > 0 && lastShift < firstShift) {
+          errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
         }
       }
     }
@@ -7697,7 +8534,7 @@ async function saveShift() {
     const shiftNumber = parseInt(shiftNumberSelect.value);
 
     // Check if shift already exists (duplicate validation)
-    const existingShift = await ipcRenderer.invoke('get-shift', {
+    const existingShift = await ipcRenderer.invoke('get-saved-shift', {
       date: date,
       shift_number: shiftNumber
     });
@@ -7721,6 +8558,7 @@ async function saveShift() {
       fuel_total: calculateFuelTotal(),
       oil_data: JSON.stringify(collectOilData()),
       oil_total: calculateOilTotal(),
+      customer_rows: collectCustomerRowsData(),
       expense_items: collectExpenseItems(),
       wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
       total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
@@ -7734,6 +8572,7 @@ async function saveShift() {
     if (result.success) {
       currentShiftData.isSaved = true;
       currentShiftData.hasUnsavedChanges = false;
+      setShiftDraftStatus('idle');
 
       showToast('تم حفظ الوردية بنجاح', 'success');
 
@@ -7741,8 +8580,9 @@ async function saveShift() {
       const menu = document.getElementById('shift-menu');
       if (menu) menu.classList.remove('show');
 
-      // Save "آخر الوردية" values before clearing
+      // Save "آخر الوردية" and oils "المتبقي" values before clearing
       const lastShiftValues = saveLastShiftValues();
+      const oilRemainingValues = saveOilRemainingValues();
 
       // Move to next shift (changes shift number/date)
       moveToNextShift(date, shiftNumber);
@@ -7750,9 +8590,16 @@ async function saveShift() {
       // Copy saved "آخر الوردية" to "أول الوردية" of new shift
       copyLastShiftToFirst(lastShiftValues);
 
-      // Clear specific fields after save (آخر الوردية, عيارات, customers)
-      clearFieldsAfterSave();
+      // Clear specific fields after save and carry oil remaining -> next initial balance
+      clearFieldsAfterSave(oilRemainingValues);
+
+      // Recompute fuel rows for the new shift from fresh prices + cleared clients/customers.
+      await refreshFuelRowsAfterShiftSave();
     } else {
+      if (result.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
+        alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
+        return;
+      }
       showToast('خطأ في حفظ الوردية: ' + (result.error || 'خطأ غير معروف'), 'error');
     }
   } catch (error) {
@@ -7789,6 +8636,25 @@ function saveLastShiftValues() {
         values[`${type}-${i}`] = lastShiftInput.value;
       }
     }
+  });
+
+  return values;
+}
+
+// Save oils "المتبقي" values before moving to next shift
+function saveOilRemainingValues() {
+  const values = {};
+  const tableBody = document.getElementById('shift-oil-table-body');
+
+  if (!tableBody) return values;
+
+  const rows = tableBody.querySelectorAll('tr[data-oil-id]');
+  rows.forEach((row) => {
+    const oilId = row.getAttribute('data-oil-id');
+    if (!oilId) return;
+
+    const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+    values[oilId] = getShiftInputDisplayValue(remainingInput?.value);
   });
 
   return values;
@@ -7853,7 +8719,7 @@ function moveToNextShift(currentDate, currentShiftNumber) {
 }
 
 // Clear specific fields after saving shift
-function clearFieldsAfterSave() {
+function clearFieldsAfterSave(oilRemainingValues = {}) {
   // Clear "آخر الوردية" fields for all fuels
   const fuelTypes = ['diesel', '95', '92', '80', 'gas'];
 
@@ -7892,19 +8758,74 @@ function clearFieldsAfterSave() {
   const car80Input = document.getElementById('fuel-80-cars');
   if (car80Input) car80Input.value = '';
 
+  // For oils, carry "المتبقي" of saved shift to next shift "رصيد",
+  // and clear the rest of row inputs.
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (tableBody) {
+    const rows = tableBody.querySelectorAll('tr[data-oil-id]');
+    rows.forEach((row) => {
+      const oilId = row.getAttribute('data-oil-id');
+      if (!oilId) return;
+
+      const carriedInitial = getShiftInputDisplayValue(oilRemainingValues[oilId]);
+      const initialInput = document.getElementById(`oil-${oilId}-initial`);
+      const addedInput = document.getElementById(`oil-${oilId}-added`);
+      const totalInput = document.getElementById(`oil-${oilId}-total`);
+      const soldInput = document.getElementById(`oil-${oilId}-sold`);
+      const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+      const openInput = document.getElementById(`oil-${oilId}-open`);
+      const customersInput = document.getElementById(`oil-${oilId}-customers`);
+      const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+
+      if (initialInput) initialInput.value = carriedInitial;
+      if (addedInput) addedInput.value = '';
+      if (totalInput) totalInput.value = carriedInitial;
+      if (soldInput) soldInput.value = '';
+      if (remainingInput) remainingInput.value = '';
+      if (openInput) openInput.value = '';
+      if (customersInput) customersInput.value = '';
+      if (revenueInput) revenueInput.value = '';
+    });
+  }
+
   clearShiftExpenseInputs();
+  calculateOilTotal();
   calculateNetTotal();
 
   // Clear all customer table data
   clearCustomerTable();
 }
 
+async function refreshFuelRowsAfterShiftSave() {
+  const activeDate = document.getElementById('shift-date')?.value;
+
+  // Ensure client totals are reset to current (empty) customer table content.
+  updateCustomerColumnSums();
+
+  if (activeDate) {
+    await loadFuelPricesForDate(activeDate);
+    return;
+  }
+
+  recalculateFuelDerivedRows();
+}
+
 // Clear all rows in customer table
 function clearCustomerTable() {
-  const customerTableBody = document.getElementById('customer-table-body');
-  if (customerTableBody) {
-    customerTableBody.innerHTML = '';
-  }
+  setCustomerRowsData([]);
+}
+
+function setShiftEntryInputsDisabled(disabled) {
+  const shiftEntryScreen = document.getElementById('shift-entry-screen');
+  if (!shiftEntryScreen) return;
+
+  const fields = shiftEntryScreen.querySelectorAll('input, select, textarea');
+  fields.forEach((field) => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    field.disabled = disabled;
+  });
 }
 
 // Enable read-only mode
@@ -7914,10 +8835,8 @@ function enableReadOnlyMode() {
     shiftEntryScreen.classList.add('shift-readonly');
   }
 
-  // Disable all input fields
-  document.querySelectorAll('.shift-fuel-input, .shift-oil-input, .shift-expense-input').forEach(input => {
-    input.disabled = true;
-  });
+  // Disable every form field in shift-entry screen (view-only mode).
+  setShiftEntryInputsDisabled(true);
 
   // Hide save button
   const saveBtn = document.getElementById('save-shift-btn');
@@ -7933,10 +8852,8 @@ function disableReadOnlyMode() {
     shiftEntryScreen.classList.remove('shift-readonly');
   }
 
-  // Enable all input fields
-  document.querySelectorAll('.shift-fuel-input, .shift-oil-input, .shift-expense-input').forEach(input => {
-    input.disabled = false;
-  });
+  // Re-enable form fields when returning to edit mode.
+  setShiftEntryInputsDisabled(false);
 
   // Show save button only in edit mode
   const saveBtn = document.getElementById('save-shift-btn');
@@ -8057,16 +8974,18 @@ async function loadPreviousShiftEndValues(previousShift) {
           // Diesel has 4 counters
           for (let i = 1; i <= 4; i++) {
             const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
-            if (firstShiftInput && data[`lastShift${i}`]) {
-              firstShiftInput.value = data[`lastShift${i}`];
+            const lastShiftValue = data?.[`lastShift${i}`];
+            if (firstShiftInput && lastShiftValue !== undefined && lastShiftValue !== null) {
+              firstShiftInput.value = getShiftInputDisplayValue(lastShiftValue);
             }
           }
         } else {
           // Other fuels have 2 counters
           for (let i = 1; i <= 2; i++) {
             const firstShiftInput = document.getElementById(`fuel-${fuelId}-first-${i}`);
-            if (firstShiftInput && data[`lastShift${i}`]) {
-              firstShiftInput.value = data[`lastShift${i}`];
+            const lastShiftValue = data?.[`lastShift${i}`];
+            if (firstShiftInput && lastShiftValue !== undefined && lastShiftValue !== null) {
+              firstShiftInput.value = getShiftInputDisplayValue(lastShiftValue);
             }
           }
         }
@@ -8087,11 +9006,17 @@ async function loadPreviousShiftEndValues(previousShift) {
 // Load shift data
 async function loadShiftData(date, shiftNumber) {
   try {
+    lockResetInlineFields();
     const shift = await ipcRenderer.invoke('get-shift', { date, shift_number: shiftNumber });
+    const setInputValue = (input, value) => {
+      if (!input) return;
+      input.value = getShiftInputDisplayValue(value);
+    };
 
     if (!shift) {
       // No existing shift, clear form
       clearShiftForm();
+      setCustomerRowsData([]);
 
       // Load last shift data (by ID) to populate "first shift" fields
       const lastShift = await getLastShift();
@@ -8103,6 +9028,8 @@ async function loadShiftData(date, shiftNumber) {
       currentShiftData.shiftNumber = shiftNumber;
       currentShiftData.isSaved = false;
       currentShiftData.hasUnsavedChanges = false;
+      currentShiftData.draftCleanupQueue = [];
+      setShiftDraftStatus('idle');
       disableReadOnlyMode();
       return;
     }
@@ -8121,6 +9048,7 @@ async function loadShiftData(date, shiftNumber) {
     const legacyData = parseJsonObject(shift.data, {});
     const fuelData = parseJsonObject(shift.fuel_data || legacyData.fuel_data, {});
     const oilData = parseJsonObject(shift.oil_data || legacyData.oil_data, {});
+    const customerRows = normalizeCustomerRowsData(legacyData.customer_rows);
     const washLubeRevenue = parseFloat(
       shift.wash_lube_revenue ?? legacyData.wash_lube_revenue ?? 0
     ) || 0;
@@ -8142,9 +9070,9 @@ async function loadShiftData(date, shiftNumber) {
             const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
             const quantityInput = document.getElementById(`fuel-diesel-quantity-${i}`);
 
-            if (lastShiftInput) lastShiftInput.value = data[`lastShift${i}`] || '';
-            if (firstShiftInput) firstShiftInput.value = data[`firstShift${i}`] || '';
-            if (quantityInput) quantityInput.value = data[`quantity${i}`] || '';
+            setInputValue(lastShiftInput, data[`lastShift${i}`]);
+            setInputValue(firstShiftInput, data[`firstShift${i}`]);
+            setInputValue(quantityInput, data[`quantity${i}`]);
           }
 
           const totalQuantityInput = document.getElementById('fuel-diesel-total-qty');
@@ -8153,11 +9081,11 @@ async function loadShiftData(date, shiftNumber) {
           const priceInput = document.getElementById('fuel-diesel-price');
           const cashInput = document.getElementById('fuel-diesel-cash');
 
-          if (totalQuantityInput) totalQuantityInput.value = data.totalQuantity || '';
-          if (clientsInput) clientsInput.value = data.clients || '';
-          if (carsInput) carsInput.value = data.cars || '';
-          if (priceInput) priceInput.value = data.price || '';
-          if (cashInput) cashInput.value = data.cash || '';
+          setInputValue(totalQuantityInput, data.totalQuantity);
+          setInputValue(clientsInput, data.clients);
+          setInputValue(carsInput, data.cars);
+          setInputValue(priceInput, data.price);
+          setInputValue(cashInput, data.cash);
         } else {
           // Other fuels have 2 counters
           for (let i = 1; i <= 2; i++) {
@@ -8165,9 +9093,9 @@ async function loadShiftData(date, shiftNumber) {
             const firstShiftInput = document.getElementById(`fuel-${fuelId}-first-${i}`);
             const quantityInput = document.getElementById(`fuel-${fuelId}-quantity-${i}`);
 
-            if (lastShiftInput) lastShiftInput.value = data[`lastShift${i}`] || '';
-            if (firstShiftInput) firstShiftInput.value = data[`firstShift${i}`] || '';
-            if (quantityInput) quantityInput.value = data[`quantity${i}`] || '';
+            setInputValue(lastShiftInput, data[`lastShift${i}`]);
+            setInputValue(firstShiftInput, data[`firstShift${i}`]);
+            setInputValue(quantityInput, data[`quantity${i}`]);
           }
 
           const totalQuantityInput = document.getElementById(`fuel-${fuelId}-total-qty`);
@@ -8176,11 +9104,11 @@ async function loadShiftData(date, shiftNumber) {
           const priceInput = document.getElementById(`fuel-${fuelId}-price`);
           const cashInput = document.getElementById(`fuel-${fuelId}-cash`);
 
-          if (totalQuantityInput) totalQuantityInput.value = data.totalQuantity || '';
-          if (clientsInput) clientsInput.value = data.clients || '';
-          if (carsInput) carsInput.value = data.cars || '';
-          if (priceInput) priceInput.value = data.price || '';
-          if (cashInput) cashInput.value = data.cash || '';
+          setInputValue(totalQuantityInput, data.totalQuantity);
+          setInputValue(clientsInput, data.clients);
+          setInputValue(carsInput, data.cars);
+          setInputValue(priceInput, data.price);
+          setInputValue(cashInput, data.cash);
         }
       }
     });
@@ -8206,15 +9134,15 @@ async function loadShiftData(date, shiftNumber) {
             const priceInput = document.getElementById(`oil-${oilId}-price`);
             const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
 
-            if (initialInput) initialInput.value = data.initial || '';
-            if (addedInput) addedInput.value = data.added || '';
-            if (totalInput) totalInput.value = data.total || '';
-            if (soldInput) soldInput.value = data.sold || '';
-            if (remainingInput) remainingInput.value = data.remaining || '';
-            if (openInput) openInput.value = data.open || '';
-            if (customersInput) customersInput.value = data.customers || '';
-            if (priceInput) priceInput.value = data.price || '';
-            if (revenueInput) revenueInput.value = data.revenue || '';
+            setInputValue(initialInput, data.initial);
+            setInputValue(addedInput, data.added);
+            setInputValue(totalInput, data.total);
+            setInputValue(soldInput, data.sold);
+            setInputValue(remainingInput, data.remaining);
+            setInputValue(openInput, data.open);
+            setInputValue(customersInput, data.customers);
+            setInputValue(priceInput, data.price);
+            setInputValue(revenueInput, data.revenue);
           }
         });
       }
@@ -8243,6 +9171,8 @@ async function loadShiftData(date, shiftNumber) {
       }
     });
 
+    setCustomerRowsData(customerRows);
+
     // Recalculate totals
     calculateFuelTotal();
     calculateOilTotal();
@@ -8263,6 +9193,8 @@ async function loadShiftData(date, shiftNumber) {
     currentShiftData.shiftNumber = shiftNumber;
     currentShiftData.isSaved = shift.is_saved === 1;
     currentShiftData.hasUnsavedChanges = false;
+    currentShiftData.draftCleanupQueue = [];
+    setShiftDraftStatus('idle');
 
     // If saved, enable read-only mode
     if (shift.is_saved === 1) {
@@ -8283,21 +9215,21 @@ function clearShiftForm() {
     if (fuelType === 'سولار') {
       // Clear diesel 4 counters
       for (let i = 1; i <= 4; i++) {
-        const lastShiftInput = document.getElementById(`fuel-diesel-last-shift-${i}`);
-        const firstShiftInput = document.getElementById(`fuel-diesel-first-shift-${i}`);
+        const lastShiftInput = document.getElementById(`fuel-diesel-last-${i}`);
+        const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
+        const quantityInput = document.getElementById(`fuel-diesel-quantity-${i}`);
 
         if (lastShiftInput) lastShiftInput.value = '';
         if (firstShiftInput) firstShiftInput.value = '';
+        if (quantityInput) quantityInput.value = '';
       }
 
-      const quantityInput = document.getElementById('fuel-diesel-quantity');
-      const totalQuantityInput = document.getElementById('fuel-diesel-total-quantity');
+      const totalQuantityInput = document.getElementById('fuel-diesel-total-qty');
       const clientsInput = document.getElementById('fuel-diesel-clients');
       const carsInput = document.getElementById('fuel-diesel-cars');
       const priceInput = document.getElementById('fuel-diesel-price');
       const cashInput = document.getElementById('fuel-diesel-cash');
 
-      if (quantityInput) quantityInput.value = '';
       if (totalQuantityInput) totalQuantityInput.value = '';
       if (clientsInput) clientsInput.value = '';
       if (carsInput) carsInput.value = '';
@@ -8309,19 +9241,19 @@ function clearShiftForm() {
       for (let i = 1; i <= 2; i++) {
         const lastShiftInput = document.getElementById(`fuel-${fuelId}-last-${i}`);
         const firstShiftInput = document.getElementById(`fuel-${fuelId}-first-${i}`);
+        const quantityInput = document.getElementById(`fuel-${fuelId}-quantity-${i}`);
 
         if (lastShiftInput) lastShiftInput.value = '';
         if (firstShiftInput) firstShiftInput.value = '';
+        if (quantityInput) quantityInput.value = '';
       }
 
-      const quantityInput = document.getElementById(`fuel-${fuelId}-quantity`);
       const totalQuantityInput = document.getElementById(`fuel-${fuelId}-total-qty`);
       const clientsInput = document.getElementById(`fuel-${fuelId}-clients`);
       const carsInput = document.getElementById(`fuel-${fuelId}-cars`);
       const priceInput = document.getElementById(`fuel-${fuelId}-price`);
       const cashInput = document.getElementById(`fuel-${fuelId}-cash`);
 
-      if (quantityInput) quantityInput.value = '';
       if (totalQuantityInput) totalQuantityInput.value = '';
       if (clientsInput) clientsInput.value = '';
       if (carsInput) carsInput.value = '';
@@ -8386,6 +9318,29 @@ async function handleShiftIdentifierChange() {
 
   const date = dateInput.value;
   const shiftNumber = parseInt(shiftNumberSelect.value);
+  const isDraftMode = shiftViewMode !== 'history' && !currentShiftData.isSaved;
+
+  // In draft mode, changing date/shift should only re-associate the current form data,
+  // not reload another shift and wipe current inputs.
+  if (isDraftMode) {
+    const previousDate = currentShiftData.date;
+    const previousShift = currentShiftData.shiftNumber;
+
+    if (previousDate && Number.isFinite(parseInt(previousShift, 10))) {
+      const previousKey = getShiftIdentifierKey(previousDate, previousShift);
+      const nextKey = getShiftIdentifierKey(date, shiftNumber);
+      if (previousKey && nextKey && previousKey !== nextKey) {
+        queueDraftIdentifierForCleanup(previousDate, previousShift);
+      }
+    }
+
+    currentShiftData.date = date;
+    currentShiftData.shiftNumber = shiftNumber;
+    currentShiftData.hasUnsavedChanges = true;
+    setShiftDraftStatus('dirty');
+    scheduleShiftDraftAutoSave();
+    return;
+  }
 
   // Check for unsaved changes
   if (currentShiftData.hasUnsavedChanges) {
@@ -8412,7 +9367,7 @@ async function showShiftHistory() {
   // Prefill with last saved shift if available
   let last = null;
   try {
-    last = await ipcRenderer.invoke('get-last-shift');
+    last = await ipcRenderer.invoke('get-last-saved-shift');
   } catch (e) {
     console.warn('Unable to load last shift for history modal:', e);
   }
@@ -8456,10 +9411,10 @@ async function loadShiftFromHistory() {
 
 async function loadShiftHistory(date, shiftNumber, messageEl) {
   try {
-    const existingShift = await ipcRenderer.invoke('get-shift', { date, shift_number: shiftNumber });
+    const existingShift = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: shiftNumber });
 
     if (!existingShift) {
-      if (messageEl) messageEl.textContent = 'لا توجد بيانات لهذه الوردية';
+      if (messageEl) messageEl.textContent = 'لا توجد وردية محفوظة لهذه البيانات';
       return;
     }
 
@@ -8559,15 +9514,154 @@ document.addEventListener('click', () => {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
 });
 
+const INLINE_RESET_ACTIVE_CLASS = 'inline-reset-active';
+let fuelInlineResetMode = false;
+let oilInlineResetMode = false;
+
+function getFuelFirstShiftInputs() {
+  const inputs = [];
+
+  for (let i = 1; i <= 4; i += 1) {
+    const input = document.getElementById(`fuel-diesel-first-${i}`);
+    if (input) inputs.push(input);
+  }
+
+  ['gas', '95', '92', '80'].forEach((fuelKey) => {
+    for (let i = 1; i <= 2; i += 1) {
+      const input = document.getElementById(`fuel-${fuelKey}-first-${i}`);
+      if (input) inputs.push(input);
+    }
+  });
+
+  return inputs;
+}
+
+function getOilInitialInputs() {
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody) return [];
+
+  return Array.from(tableBody.querySelectorAll('tr[data-oil-id]'))
+    .map((row) => {
+      const oilId = row.getAttribute('data-oil-id');
+      return oilId ? document.getElementById(`oil-${oilId}-initial`) : null;
+    })
+    .filter(Boolean);
+}
+
+function lockFuelFirstShiftInputs() {
+  getFuelFirstShiftInputs().forEach((input) => {
+    input.readOnly = true;
+    input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+  });
+}
+
+function lockOilInitialInputs() {
+  getOilInitialInputs().forEach((input) => {
+    input.readOnly = true;
+    input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+  });
+}
+
+function lockResetInlineFields() {
+  fuelInlineResetMode = false;
+  oilInlineResetMode = false;
+  lockFuelFirstShiftInputs();
+  lockOilInitialInputs();
+}
+
+function getFuelTypeByFirstShiftInputId(inputId = '') {
+  if (inputId.includes('fuel-diesel-first-')) return 'سولار';
+  if (inputId.includes('fuel-gas-first-')) return 'غاز سيارات';
+  if (inputId.includes('fuel-95-first-')) return 'بنزين ٩٥';
+  if (inputId.includes('fuel-92-first-')) return 'بنزين ٩٢';
+  if (inputId.includes('fuel-80-first-')) return 'بنزين ٨٠';
+  return '';
+}
+
+function recalculateFuelAfterFirstShiftChange(inputId = '') {
+  const fuelType = getFuelTypeByFirstShiftInputId(inputId);
+  if (!fuelType) return;
+
+  if (fuelType === 'سولار') {
+    calculateDieselQuantity();
+    return;
+  }
+
+  calculateFuelQuantity(fuelType);
+}
+
+async function handleFuelInlineResetFieldChange(input) {
+  if (!input || !fuelInlineResetMode) return;
+
+  recalculateFuelAfterFirstShiftChange(input.id);
+  input.readOnly = true;
+  input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+  currentShiftData.hasUnsavedChanges = true;
+  setShiftDraftStatus('saving');
+
+  const saveResult = await persistCurrentShiftDraftToDatabase();
+  if (!saveResult.success) {
+    setShiftDraftStatus('error');
+    showToast('تعذر حفظ التغييرات في قاعدة البيانات', 'error');
+    return;
+  }
+
+  currentShiftData.hasUnsavedChanges = false;
+  setShiftDraftStatus('saved');
+}
+
+async function handleOilInlineResetFieldChange(input) {
+  if (!input || !oilInlineResetMode) return;
+
+  const match = input.id.match(/^oil-(.+)-initial$/);
+  const oilId = match ? match[1] : null;
+  if (!oilId) return;
+
+  await calculateOilRow(oilId);
+  input.readOnly = true;
+  input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+  currentShiftData.hasUnsavedChanges = true;
+  setShiftDraftStatus('saving');
+
+  const saveResult = await persistCurrentShiftDraftToDatabase();
+  if (!saveResult.success) {
+    setShiftDraftStatus('error');
+    showToast('تعذر حفظ التغييرات في قاعدة البيانات', 'error');
+    return;
+  }
+
+  currentShiftData.hasUnsavedChanges = false;
+  setShiftDraftStatus('saved');
+}
+
 function openResetCountersModal() {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
-  const modal = document.getElementById('reset-counters-modal');
-  const select = document.getElementById('reset-fuel-type');
-  const msg = document.getElementById('reset-counters-message');
-  if (select) select.value = '';
-  if (msg) msg.textContent = '';
-  renderResetCounterFields('');
-  if (modal) modal.classList.add('show');
+  if (shiftViewMode === 'history') return;
+
+  lockResetInlineFields();
+  switchShiftTab('fuel');
+  fuelInlineResetMode = true;
+
+  const inputs = getFuelFirstShiftInputs();
+  inputs.forEach((input) => {
+    input.readOnly = false;
+    input.classList.add(INLINE_RESET_ACTIVE_CLASS);
+
+    if (!input.dataset.inlineResetFuelBound) {
+      input.addEventListener('change', () => handleFuelInlineResetFieldChange(input));
+      input.addEventListener('blur', () => {
+        if (!input.readOnly && fuelInlineResetMode) {
+          input.readOnly = true;
+          input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+        }
+      });
+      input.dataset.inlineResetFuelBound = '1';
+    }
+  });
+
+  if (inputs[0]) {
+    inputs[0].focus();
+  }
 }
 
 function closeResetCountersModal() {
@@ -8577,11 +9671,32 @@ function closeResetCountersModal() {
 
 function openResetOilBalancesModal() {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
-  const modal = document.getElementById('reset-oil-balances-modal');
-  const msg = document.getElementById('reset-oil-balances-message');
-  if (msg) msg.textContent = '';
-  renderResetOilBalanceFields();
-  if (modal) modal.classList.add('show');
+  if (shiftViewMode === 'history') return;
+
+  lockResetInlineFields();
+  switchShiftTab('oil');
+  oilInlineResetMode = true;
+
+  const inputs = getOilInitialInputs();
+  inputs.forEach((input) => {
+    input.readOnly = false;
+    input.classList.add(INLINE_RESET_ACTIVE_CLASS);
+
+    if (!input.dataset.inlineResetOilBound) {
+      input.addEventListener('change', () => handleOilInlineResetFieldChange(input));
+      input.addEventListener('blur', () => {
+        if (!input.readOnly && oilInlineResetMode) {
+          input.readOnly = true;
+          input.classList.remove(INLINE_RESET_ACTIVE_CLASS);
+        }
+      });
+      input.dataset.inlineResetOilBound = '1';
+    }
+  });
+
+  if (inputs[0]) {
+    inputs[0].focus();
+  }
 }
 
 function closeResetOilBalancesModal() {
@@ -8797,6 +9912,9 @@ async function loadFuelPricesForDate(date) {
         }
       }
     }
+
+    // Always recompute derived fuel rows from current counters and prices.
+    recalculateFuelDerivedRows();
   } catch (error) {
     console.error('Error loading fuel prices for date:', error);
     alert('خطأ في تحميل أسعار الوقود');
@@ -8810,6 +9928,8 @@ let shiftListenersInitialized = false;
 async function initializeShiftEntry() {
   // Load active oils
   await loadActiveOils();
+  lockResetInlineFields();
+  setShiftDraftStatus('idle');
 
   // Set up event listeners for date and shift number
   const dateInput = document.getElementById('shift-date');
@@ -8821,6 +9941,7 @@ async function initializeShiftEntry() {
       // Load prices when date changes
       dateInput.addEventListener('change', async () => {
         await loadFuelPricesForDate(dateInput.value);
+        await loadAllOilPrices();
         await handleShiftIdentifierChange();
       });
     }
@@ -8832,14 +9953,97 @@ async function initializeShiftEntry() {
     document.querySelectorAll('.shift-expense-desc').forEach((input) => {
       input.addEventListener('input', () => {
         currentShiftData.hasUnsavedChanges = true;
+        scheduleShiftDraftAutoSave();
       });
     });
 
     document.querySelectorAll('.shift-expense-amount').forEach((input) => {
       input.addEventListener('input', () => {
         currentShiftData.hasUnsavedChanges = true;
+        scheduleShiftDraftAutoSave();
       });
     });
+
+    const shiftEntryScreen = document.getElementById('shift-entry-screen');
+    if (shiftEntryScreen) {
+      shiftEntryScreen.addEventListener('keydown', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) {
+          return;
+        }
+
+        if (target.type !== 'number') {
+          return;
+        }
+
+        if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          return;
+        }
+
+        event.preventDefault();
+
+        const fields = getShiftNavigableFields(shiftEntryScreen);
+        const nextField = findAdjacentShiftField(target, fields, event.key);
+        if (!nextField) return;
+
+        nextField.focus();
+        if (nextField instanceof HTMLInputElement && (nextField.type === 'number' || nextField.type === 'text')) {
+          nextField.select();
+        }
+      });
+
+      shiftEntryScreen.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+          return;
+        }
+
+        if (target.disabled || target.readOnly) {
+          return;
+        }
+
+        if (target.id === 'shift-date' || target.id === 'shift-number') {
+          return;
+        }
+
+        if (isShiftAutoFilledField(target)) {
+          return;
+        }
+
+        if (shiftViewMode === 'history') {
+          return;
+        }
+
+        currentShiftData.hasUnsavedChanges = true;
+        scheduleShiftDraftAutoSave();
+      });
+
+      shiftEntryScreen.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+          return;
+        }
+
+        if (target.id === 'shift-date' || target.id === 'shift-number') {
+          return;
+        }
+
+        if (target.disabled || target.readOnly) {
+          return;
+        }
+
+        if (isShiftAutoFilledField(target)) {
+          return;
+        }
+
+        if (shiftViewMode === 'history') {
+          return;
+        }
+
+        currentShiftData.hasUnsavedChanges = true;
+        scheduleShiftDraftAutoSave();
+      });
+    }
 
     // Set up unsaved data warning on page navigation
     window.addEventListener('beforeunload', (e) => {
@@ -8857,12 +10061,19 @@ async function initializeShiftEntry() {
     shiftListenersInitialized = true;
   }
 
+  // Keep history view fully separated from "new shift" flow:
+  // no auto-next-shift loading when opening a saved shift from history.
+  if (shiftViewMode === 'history') {
+    return;
+  }
+
   // Load next shift automatically (calculates and pre-populates)
   await loadNextShift();
 
   // Load prices for the calculated date
   if (dateInput?.value) {
     await loadFuelPricesForDate(dateInput.value);
+    await loadAllOilPrices();
   }
 }
 
