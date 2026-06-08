@@ -1,16 +1,48 @@
-name: Build Windows
+name: Build Release
 
 on:
-  workflow_dispatch:  # Permette esecuzione manuale da GitHub UI
+  workflow_dispatch:
   push:
+    branches:
+      - database
     tags:
-      - 'v*'  # Si attiva automaticamente quando crei un tag tipo v1.0.10
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
+  release-info:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      title: ${{ steps.release.outputs.title }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve release info
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+            TAG="v${VERSION}"
+          fi
+
+          VERSION="${TAG#v}"
+          TITLE="CO-OP ${VERSION}"
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
   build-windows:
+    needs: release-info
     runs-on: windows-latest
 
     steps:
@@ -24,49 +56,80 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Resolve release tag
-        id: release_tag
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            VERSION=$(node -p "require('./package.json').version")
-            TAG="v${VERSION}"
-          fi
-
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        run: npm ci
 
       - name: Build Windows app
-        run: npm run build:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build:win -- --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build-${{ github.run_number }}
+          name: windows-release-assets
           path: |
             dist/*.exe
             dist/*.exe.blockmap
             dist/latest.yml
+          if-no-files-found: error
           retention-days: 30
+
+  build-mac:
+    needs: release-info
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Mac app
+        run: npm run build:mac -- --arm64 --publish never
+
+      - name: Upload Mac artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-release-assets
+          path: |
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/*-mac.zip
+            dist/*-mac.zip.blockmap
+            dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    needs:
+      - release-info
+      - build-windows
+      - build-mac
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Ensure release exists
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-info.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.release-info.outputs.title }}
         run: |
-          TAG="${{ steps.release_tag.outputs.tag }}"
-          TITLE="CO-OP ${{ steps.release_tag.outputs.version }}"
-
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" \
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "$TITLE" \
+              --title "$RELEASE_TITLE" \
               --target "$GITHUB_SHA" \
               --notes ""
           fi
@@ -75,20 +138,16 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-info.outputs.tag }}
         run: |
-          TAG="${{ steps.release_tag.outputs.tag }}"
           shopt -s nullglob
-          files=(dist/*.exe dist/*.exe.blockmap)
-
-          if [[ -f dist/latest.yml ]]; then
-            files+=(dist/latest.yml)
-          fi
+          files=(release-assets/*)
 
           if [[ ${#files[@]} -eq 0 ]]; then
-            echo "No release assets found in dist/"
+            echo "No release assets found"
             exit 1
           fi
 
-          gh release upload "$TAG" "${files[@]}" \
+          gh release upload "$RELEASE_TAG" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
