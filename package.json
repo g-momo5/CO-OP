@@ -59,11 +59,15 @@
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
       "differentialPackage": true
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "linux": {
       "icon": "assets/logo_cpc.png",
