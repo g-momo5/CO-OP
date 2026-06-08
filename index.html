@@ -85,6 +85,13 @@
                     <p>تتبع مخزون الوقود والزيوت</p>
                   </div>
 
+                  <!-- Card 2b - Tank Management -->
+                  <div class="action-card" onclick="showScreen('tank-management', 'home')">
+                    <div class="card-icon">⛽</div>
+                    <h3>ادارة التنكات</h3>
+                    <p>متابعة دخول وخروج الوقود من التنكات</p>
+                  </div>
+
                   <!-- Card 5 - Sales Summary -->
                   <div class="action-card" onclick="showScreen('sales-summary', 'home')">
                     <div class="card-icon">📊</div>
@@ -127,7 +134,7 @@
                 <h3 class="home-card-group-title">إدارة المبيعات</h3>
                 <div class="action-cards-grid">
                   <!-- Card 3 - Shift Entry -->
-                  <div class="action-card" onclick="showScreen('shift-entry', 'home')">
+                  <div class="action-card" onclick="openNewShiftEntry()">
                     <div class="card-icon">🔄</div>
                     <h3>إدخال وردية جديدة</h3>
                     <p>تسجيل مبيعات الوردية</p>
@@ -287,7 +294,6 @@
                     <select id="profit-end-year"></select>
                   </div>
                 </div>
-                <button type="button" class="btn btn-secondary" id="profit-filter-btn">تطبيق</button>
                 <button type="button" class="btn btn-secondary profit-clear-filter-btn" id="profit-clear-filter-btn" title="إعادة الفترة الافتراضية">
                   ↺
                 </button>
@@ -495,11 +501,6 @@
       <div id="shift-entry-screen" class="screen">
         <div class="shift-header-row">
           <h2 id="shift-entry-title">إدخال وردية جديدة</h2>
-          <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
-            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
-            <div class="history-chip" id="history-chip">-</div>
-            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('next')">الوردية التالية</button>
-          </div>
         </div>
 
         <!-- Shift Info Section -->
@@ -517,6 +518,11 @@
               </select>
             </div>
             <div class="form-group">
+              <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
+                <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
+                <div class="history-chip" id="history-chip">-</div>
+                <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('next')">الوردية التالية</button>
+              </div>
               <button class="btn-primary" id="save-shift-btn" onclick="saveShift()">
                 حفظ الوردية
               </button>
@@ -534,21 +540,20 @@
           </div>
         </div>
 
-        <!-- Shift Tabs -->
-        <div class="price-type-tabs">
-          <div class="price-type-tab active" data-shift-tab="fuel" onclick="switchShiftTab('fuel')">
-            الوقود
-          </div>
-          <div class="price-type-tab" data-shift-tab="oil" onclick="switchShiftTab('oil')">
-            الزيوت
-          </div>
-          <div class="price-type-tab" data-shift-tab="total" onclick="switchShiftTab('total')">
-            الإجمالي
-          </div>
-        </div>
+        <div class="shift-workspace">
+          <div class="shift-main-panel">
+            <!-- Shift Tabs -->
+            <div class="price-type-tabs">
+              <div class="price-type-tab active" data-shift-tab="fuel" onclick="switchShiftTab('fuel')">
+                الوقود
+              </div>
+              <div class="price-type-tab" data-shift-tab="oil" onclick="switchShiftTab('oil')">
+                الزيوت
+              </div>
+            </div>
 
-        <!-- Shift Content Sections -->
-        <div id="shift-fuel-section" class="shift-tab-section active">
+            <!-- Shift Content Sections -->
+            <div id="shift-fuel-section" class="shift-tab-section active">
           <div class="shift-content">
             <div class="fuel-tables-wrapper">
               <!-- Left side: Fuel tables -->
@@ -736,184 +741,115 @@
           </div>
         </div>
 
-        <div id="shift-oil-section" class="shift-tab-section">
-          <div class="shift-content">
-            <!-- Oil Table -->
-            <div class="shift-oil-table-container">
-              <table class="shift-oil-table">
-                <thead>
-                  <tr>
-                    <th>نوع الزيت</th>
-                    <th>رصيد</th>
-                    <th>وارد</th>
-                    <th>الاجمالى</th>
-                    <th>المباع</th>
-                    <th>المتبقي</th>
-                    <th class="spacer-column"></th>
-                    <th>مفتوح</th>
-                    <th>عملاء</th>
-                    <th>السعر</th>
-                    <th>اجمالى النقدى</th>
-                  </tr>
-                </thead>
-                <tbody id="shift-oil-table-body">
-                  <!-- Oil rows will be loaded dynamically -->
-                  <tr>
-                    <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
-                      جاري تحميل الزيوت النشطة...
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div id="shift-oil-section" class="shift-tab-section">
+              <div class="shift-content">
+                <!-- Oil Table -->
+                <div class="shift-oil-table-container">
+                  <table class="shift-oil-table">
+                    <thead>
+                      <tr>
+                        <th>نوع الزيت</th>
+                        <th>رصيد</th>
+                        <th>وارد</th>
+                        <th>الاجمالى</th>
+                        <th>المباع</th>
+                        <th>المتبقي</th>
+                        <th class="spacer-column"></th>
+                        <th>مفتوح</th>
+                        <th>عملاء</th>
+                        <th>السعر</th>
+                        <th>اجمالى النقدى</th>
+                      </tr>
+                    </thead>
+                    <tbody id="shift-oil-table-body">
+                      <!-- Oil rows will be loaded dynamically -->
+                      <tr>
+                        <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+                          جاري تحميل الزيوت النشطة...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
             </div>
-
           </div>
-        </div>
 
-        <div id="shift-total-section" class="shift-tab-section">
-          <div class="shift-content">
-            <!-- Two Column Layout -->
-            <div class="shift-total-layout">
+          <aside class="shift-summary-sidebar">
+            <details id="shift-summary-details" class="shift-summary-details" open>
+              <summary class="shift-summary-toggle">ملخص الوردية</summary>
+              <div class="shift-summary-content">
+                <section class="shift-final-total">
+                  <div class="final-total-row">
+                    <label>صافى الوردية</label>
+                    <input type="text" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
+                  </div>
+                </section>
+
+                <div class="shift-total-layout">
 
               <!-- Right Column: Revenue -->
-              <div class="shift-total-column">
+              <div class="shift-total-column revenue-column">
                 <h3 class="column-title">الإيرادات</h3>
 
                 <div class="total-section">
                   <div class="total-row">
                     <label>سولار:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-diesel-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-diesel-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٨٠:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-80-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-80-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٩٢:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-92-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-92-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٩٥:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-95-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-95-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>الزيوت:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-oil-revenue" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-oil-revenue" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>غسيل و تشحيم:</label>
-                    <input type="number" step="0.01" class="total-input" id="total-wash-lube-revenue" oninput="calculateGrandTotal()">
+                    <input type="text" inputmode="decimal" class="total-input summary-numeric-input" id="total-wash-lube-revenue" oninput="handleSummaryFixedRevenueInput(this)">
                   </div>
 
-                  <!-- Free fields for other revenue -->
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-1" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-1" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-2" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-2" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-3" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-3" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-4" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-4" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-5" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-5" oninput="calculateGrandTotal()">
-                  </div>
+                  <div id="shift-revenue-extra-rows" class="summary-dynamic-rows"></div>
 
                   <div class="total-row total-divider grand-total">
                     <label>إجمالي الإيرادات:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
                   </div>
                 </div>
               </div>
 
               <!-- Left Column: Expenses -->
-              <div class="shift-total-column">
+              <div class="shift-total-column expenses-column">
                 <h3 class="column-title">المصاريف</h3>
 
                 <div class="total-section">
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-1" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-1" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-2" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-2" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-3" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-3" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-4" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-4" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-5" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-5" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-6" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-6" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-7" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-7" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-8" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-8" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-9" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-9" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-10" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-10" oninput="calculateTotalExpenses()">
-                  </div>
+                  <div id="shift-expense-rows" class="summary-dynamic-rows"></div>
 
                   <div class="total-row total-divider grand-total">
                     <label>إجمالي المصاريف:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-expenses" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated highlighted" id="total-expenses" readonly>
                   </div>
                 </div>
               </div>
             </div>
-
-            <!-- Final Net Total -->
-            <div class="shift-final-total">
-              <div class="final-total-row">
-                <label>صافى الوردية:</label>
-                <input type="text" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
               </div>
-            </div>
-          </div>
+            </details>
+          </aside>
         </div>
       </div>
 
@@ -1267,7 +1203,7 @@
               <div class="update-info-card">
                 <div class="update-info-row">
                   <span class="update-label">الإصدار الحالي:</span>
-                  <span class="update-value" id="current-version">1.0.0</span>
+                  <span class="update-value" id="current-version">1.0.1</span>
                 </div>
                 <div class="update-info-row">
                   <span class="update-label">آخر فحص:</span>
@@ -1369,6 +1305,7 @@
               </div>
               <div class="form-actions">
                 <button class="btn btn-primary" onclick="exportBackup()">تصدير نسخة احتياطية</button>
+                <button class="btn btn-primary" onclick="openChatGptExportModal()">تصدير إلى ChatGPT</button>
                 <button class="btn btn-secondary" onclick="importBackup()">استيراد نسخة احتياطية</button>
               </div>
               <input type="file" id="backup-file-input" style="display: none;" accept=".json" onchange="handleBackupFile(event)">
@@ -1466,6 +1403,24 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tank Management Screen -->
+      <div id="tank-management-screen" class="screen">
+        <div class="depot-container tank-container">
+          <div class="tank-summary-page">
+            <div class="depot-topbar">
+              <div>
+                <h3>ادارة التنكات</h3>
+                <p class="depot-subtitle">كل نوع وقود يعتبر تنك واحد: الداخل من الفواتير والخارج من الورديات</p>
+              </div>
+            </div>
+
+            <div id="tank-ledgers-container" class="tank-ledgers-container">
+              <div class="tank-ledger-loading">جاري تحميل بيانات التنكات...</div>
             </div>
           </div>
         </div>
@@ -1571,6 +1526,33 @@
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeProductsModal()">إغلاق</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ChatGPT Export Modal -->
+      <div id="chatgpt-export-modal" class="modal">
+        <div class="modal-content modal-compact modal-medium">
+          <div class="modal-header">
+            <h3>تصدير إلى ChatGPT</h3>
+            <button class="close-modal" onclick="closeChatGptExportModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="form-group">
+                <label for="chatgpt-export-start-date">من تاريخ:</label>
+                <input type="date" id="chatgpt-export-start-date">
+              </div>
+              <div class="form-group">
+                <label for="chatgpt-export-end-date">إلى تاريخ:</label>
+                <input type="date" id="chatgpt-export-end-date">
+              </div>
+              <div id="chatgpt-export-message" class="modal-message-error"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" id="chatgpt-export-confirm-btn" onclick="exportToChatGPT()">تصدير CSV</button>
+            <button class="btn btn-secondary" onclick="closeChatGptExportModal()">إلغاء</button>
           </div>
         </div>
       </div>

@@ -132,6 +132,98 @@ function getMonthRangeBounds(fromMonth, toMonth) {
   };
 }
 
+const CHATGPT_CSV_COLUMNS = [
+  'source',
+  'date',
+  'month',
+  'record_type',
+  'product',
+  'quantity',
+  'unit_price',
+  'total_amount',
+  'payment_method',
+  'direction',
+  'invoice_number',
+  'shift_number',
+  'description',
+  'notes',
+  'raw_details'
+];
+
+function normalizeIsoDate(value) {
+  const normalized = String(value || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : '';
+}
+
+function normalizeChatGptDateRange(payload = {}) {
+  const startDate = normalizeIsoDate(payload.startDate);
+  const endDate = normalizeIsoDate(payload.endDate);
+
+  if (!startDate || !endDate || startDate > endDate) {
+    return null;
+  }
+
+  return {
+    startDate,
+    endDate,
+    startMonth: startDate.slice(0, 7),
+    endMonth: endDate.slice(0, 7)
+  };
+}
+
+function getRowMonth(dateValue) {
+  const date = normalizeIsoDate(dateValue);
+  return date ? date.slice(0, 7) : '';
+}
+
+function stringifyRawDetails(value) {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch (_error) {
+    return '{}';
+  }
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  const text = String(value);
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function buildCsv(rows) {
+  const header = CHATGPT_CSV_COLUMNS.join(',');
+  const body = rows.map((row) => (
+    CHATGPT_CSV_COLUMNS.map((column) => csvEscape(row[column])).join(',')
+  ));
+  return `\uFEFF${[header, ...body].join('\n')}`;
+}
+
+function createChatGptCsvRow(overrides = {}) {
+  const row = {};
+  CHATGPT_CSV_COLUMNS.forEach((column) => {
+    row[column] = '';
+  });
+
+  Object.entries(overrides).forEach(([key, value]) => {
+    if (CHATGPT_CSV_COLUMNS.includes(key)) {
+      row[key] = value ?? '';
+    }
+  });
+
+  if (!row.month && row.date) {
+    row.month = getRowMonth(row.date);
+  }
+
+  return row;
+}
+
 function normalizeExpenseItems(items) {
   if (!Array.isArray(items)) {
     return [];
@@ -157,6 +249,50 @@ function normalizeExpenseItems(items) {
     })
     .filter(Boolean)
     .sort((a, b) => a.index - b.index);
+}
+
+function normalizeRevenueItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const amount = parseOptionalNumber(item.amount);
+      if (amount === null || amount <= 0) {
+        return null;
+      }
+
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function getShiftFuelSoldQuantity(fuelType, data) {
+  if (!data || typeof data !== 'object') {
+    return 0;
+  }
+
+  let totalQuantity = toFiniteNumber(data.totalQuantity);
+  if (totalQuantity <= 0) {
+    const counterCount = fuelType === 'سولار' ? 4 : 2;
+    for (let i = 1; i <= counterCount; i += 1) {
+      totalQuantity += toFiniteNumber(data[`quantity${i}`]);
+    }
+  }
+
+  const cars = toFiniteNumber(data.cars);
+  return Math.max(totalQuantity - cars, 0);
 }
 
 function parseShiftJsonObject(value) {
@@ -692,7 +828,8 @@ function setupIPCHandlers() {
     const month = parseInt(monthText, 10);
     if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
     const startDate = `${normalized}-01`;
-    const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${normalized}-${String(lastDay).padStart(2, '0')}`;
     return { startDate, endDate };
   };
 
@@ -1157,21 +1294,7 @@ ipcMain.handle('get-sales-summary', async () => {
         Object.entries(fuelData).forEach(([fuelType, data]) => {
           if (!data || typeof data !== 'object') return;
 
-          let quantity = toFiniteNumber(data.totalQuantity);
-          if (quantity <= 0) {
-            if (fuelType === 'سولار') {
-              quantity =
-                toFiniteNumber(data.quantity1) +
-                toFiniteNumber(data.quantity2) +
-                toFiniteNumber(data.quantity3) +
-                toFiniteNumber(data.quantity4);
-            } else {
-              quantity =
-                toFiniteNumber(data.quantity1) +
-                toFiniteNumber(data.quantity2);
-            }
-          }
-
+          const quantity = getShiftFuelSoldQuantity(fuelType, data);
           if (quantity <= 0) return;
 
           entries.push({
@@ -1185,6 +1308,231 @@ ipcMain.handle('get-sales-summary', async () => {
       return entries;
     } catch (error) {
       console.error('Error getting shift fuel sales:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-tank-fuel-movements', async (_event, fuelType) => {
+    try {
+      const selectedFuelType = String(fuelType || '').trim();
+      if (!selectedFuelType) {
+        return [];
+      }
+
+      const invoiceRows = await executeQuery(
+        'SELECT date, invoice_number, fuel_type, quantity, net_quantity FROM fuel_invoices WHERE fuel_type = $1 ORDER BY date ASC, id ASC',
+        [selectedFuelType]
+      ).catch((error) => {
+        console.warn('Unable to read fuel invoices for tank movements:', error.message);
+        return [];
+      });
+
+      const shiftRows = await executeQuery(
+        'SELECT date, shift_number, fuel_data, data FROM shifts WHERE is_saved = 1 ORDER BY date ASC, shift_number ASC, id ASC'
+      ).catch((error) => {
+        console.warn('Unable to read shifts for tank movements:', error.message);
+        return [];
+      });
+
+      const movements = [];
+
+      invoiceRows.forEach((row) => {
+        const quantity = toFiniteNumber(row.net_quantity) > 0
+          ? toFiniteNumber(row.net_quantity)
+          : toFiniteNumber(row.quantity);
+        if (quantity <= 0) return;
+
+        movements.push({
+          date: String(row.date || '').slice(0, 10),
+          type: 'in',
+          quantity,
+          source: row.invoice_number ? `فاتورة ${row.invoice_number}` : 'فاتورة وقود'
+        });
+      });
+
+      shiftRows.forEach((row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
+        const data = fuelData?.[selectedFuelType];
+        const quantity = getShiftFuelSoldQuantity(selectedFuelType, data);
+        if (quantity <= 0) return;
+
+        const shiftNumber = parseInt(row.shift_number, 10) === 2 ? 2 : 1;
+        movements.push({
+          date: String(row.date || '').slice(0, 10),
+          type: 'out',
+          quantity,
+          source: shiftNumber === 1 ? 'وردية صباح' : 'وردية ليل'
+        });
+      });
+
+      movements.sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        if (a.type !== b.type) return a.type === 'out' ? 1 : -1;
+        return String(b.source || '').localeCompare(String(a.source || ''), 'ar');
+      });
+
+      return movements;
+    } catch (error) {
+      console.error('Error getting tank fuel movements:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-tank-fuel-types', async () => {
+    try {
+      const preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
+      const types = new Set(preferredOrder);
+
+      const productRows = await executeQuery(
+        "SELECT product_name FROM products WHERE product_type = 'fuel' ORDER BY product_name"
+      ).catch(() => []);
+      productRows.forEach((row) => {
+        const name = String(row.product_name || '').trim();
+        if (name) types.add(name);
+      });
+
+      const invoiceRows = await executeQuery(
+        'SELECT DISTINCT fuel_type FROM fuel_invoices WHERE fuel_type IS NOT NULL'
+      ).catch(() => []);
+      invoiceRows.forEach((row) => {
+        const name = String(row.fuel_type || '').trim();
+        if (name) types.add(name);
+      });
+
+      const shiftRows = await executeQuery(
+        'SELECT fuel_data, data FROM shifts WHERE is_saved = 1'
+      ).catch(() => []);
+      shiftRows.forEach((row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
+        Object.keys(fuelData || {}).forEach((name) => {
+          const cleanName = String(name || '').trim();
+          if (cleanName) types.add(cleanName);
+        });
+      });
+
+      return Array.from(types).sort((a, b) => {
+        const indexA = preferredOrder.indexOf(a);
+        const indexB = preferredOrder.indexOf(b);
+        if (indexA !== -1 || indexB !== -1) {
+          if (indexA === -1) return 1;
+          if (indexB === -1) return -1;
+          return indexA - indexB;
+        }
+        return a.localeCompare(b, 'ar');
+      });
+    } catch (error) {
+      console.error('Error getting tank fuel types:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-tank-summary', async () => {
+    try {
+      const preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
+      const totals = new Map();
+
+      const ensureFuel = (fuelType) => {
+        const name = String(fuelType || '').trim();
+        if (!name) return null;
+        if (!totals.has(name)) {
+          totals.set(name, { fuel_type: name, incoming: 0, outgoing: 0, balance: 0 });
+        }
+        return totals.get(name);
+      };
+
+      preferredOrder.forEach(ensureFuel);
+
+      const productRows = await executeQuery(
+        "SELECT product_name FROM products WHERE product_type = 'fuel' ORDER BY product_name"
+      ).catch(() => []);
+      productRows.forEach((row) => ensureFuel(row.product_name));
+
+      const invoiceRows = await executeQuery(
+        'SELECT fuel_type, quantity, net_quantity FROM fuel_invoices WHERE fuel_type IS NOT NULL'
+      ).catch((error) => {
+        console.warn('Unable to read fuel invoices for tank summary:', error.message);
+        return [];
+      });
+      invoiceRows.forEach((row) => {
+        const target = ensureFuel(row.fuel_type);
+        if (!target) return;
+        const quantity = toFiniteNumber(row.net_quantity) > 0
+          ? toFiniteNumber(row.net_quantity)
+          : toFiniteNumber(row.quantity);
+        target.incoming += Math.max(quantity, 0);
+      });
+
+      const shiftRows = await executeQuery(
+        'SELECT fuel_data, data FROM shifts WHERE is_saved = 1'
+      ).catch((error) => {
+        console.warn('Unable to read shifts for tank summary:', error.message);
+        return [];
+      });
+      shiftRows.forEach((row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
+        Object.entries(fuelData || {}).forEach(([fuelType, data]) => {
+          const target = ensureFuel(fuelType);
+          if (!target) return;
+          target.outgoing += getShiftFuelSoldQuantity(fuelType, data);
+        });
+      });
+
+      return Array.from(totals.values())
+        .map((row) => ({
+          ...row,
+          balance: row.incoming - row.outgoing
+        }))
+        .sort((a, b) => {
+          const indexA = preferredOrder.indexOf(a.fuel_type);
+          const indexB = preferredOrder.indexOf(b.fuel_type);
+          if (indexA !== -1 || indexB !== -1) {
+            if (indexA === -1) return 1;
+            if (indexB === -1) return -1;
+            return indexA - indexB;
+          }
+          return a.fuel_type.localeCompare(b.fuel_type, 'ar');
+        });
+    } catch (error) {
+      console.error('Error getting tank summary:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-current-tank-stock', async (_event, fuelType) => {
+    try {
+      const selectedFuelType = String(fuelType || '').trim();
+      if (!selectedFuelType) {
+        return 0;
+      }
+
+      const rows = await executeQuery(
+        'SELECT date, invoice_number, fuel_type, quantity, net_quantity FROM fuel_invoices WHERE fuel_type = $1',
+        [selectedFuelType]
+      ).catch(() => []);
+
+      const shiftRows = await executeQuery(
+        'SELECT date, shift_number, fuel_data, data FROM shifts WHERE is_saved = 1'
+      ).catch(() => []);
+
+      const incoming = rows.reduce((sum, row) => {
+        const quantity = toFiniteNumber(row.net_quantity) > 0
+          ? toFiniteNumber(row.net_quantity)
+          : toFiniteNumber(row.quantity);
+        return sum + Math.max(quantity, 0);
+      }, 0);
+
+      const outgoing = shiftRows.reduce((sum, row) => {
+        const legacyData = parseStoredObject(row?.data, {});
+        const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
+        return sum + getShiftFuelSoldQuantity(selectedFuelType, fuelData?.[selectedFuelType]);
+      }, 0);
+
+      return incoming - outgoing;
+    } catch (error) {
+      console.error('Error getting current tank stock:', error);
       throw error;
     }
   });
@@ -2200,6 +2548,291 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  ipcMain.handle('export-chatgpt-csv', async (_event, payload = {}) => {
+    try {
+      const fs = require('fs');
+      const range = normalizeChatGptDateRange(payload);
+      if (!range) {
+        return { success: false, error: 'Invalid date range' };
+      }
+
+      const [
+        sales,
+        shifts,
+        fuelInvoices,
+        oilInvoices,
+        fuelMovements,
+        oilMovements,
+        safeBookMovements,
+        monthlyProfitInputs,
+        monthlyProfitCustomValues
+      ] = await Promise.all([
+        executeQuery(
+          'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM shifts WHERE date BETWEEN $1 AND $2 AND is_saved = 1 ORDER BY date ASC, shift_number ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM fuel_invoices WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM oil_invoices WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM fuel_movements WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM oil_movements WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM safe_book_movements WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+          [range.startDate, range.endDate]
+        ),
+        executeQuery(
+          'SELECT * FROM monthly_profit_inputs WHERE month_key BETWEEN $1 AND $2 ORDER BY month_key ASC',
+          [range.startMonth, range.endMonth]
+        ),
+        executeQuery(
+          `SELECT v.*, r.row_label, r.row_type
+           FROM monthly_profit_custom_values v
+           LEFT JOIN monthly_profit_custom_rows r ON r.row_key = v.row_key
+           WHERE v.month_key BETWEEN $1 AND $2
+           ORDER BY v.month_key ASC, r.display_order ASC, v.row_key ASC`,
+          [range.startMonth, range.endMonth]
+        )
+      ]);
+
+      const rows = [];
+
+      sales.forEach((sale) => {
+        rows.push(createChatGptCsvRow({
+          source: 'sales',
+          date: normalizeIsoDate(sale.date),
+          record_type: 'sale',
+          product: sale.fuel_type,
+          quantity: sale.quantity,
+          unit_price: sale.price_per_liter,
+          total_amount: sale.total_amount,
+          payment_method: sale.payment_method,
+          description: sale.customer_name,
+          notes: sale.notes,
+          raw_details: stringifyRawDetails(sale)
+        }));
+      });
+
+      shifts.forEach((shift) => {
+        const legacyData = parseStoredObject(shift.data, {});
+        const fuelData = parseStoredObject(shift.fuel_data || legacyData.fuel_data, {});
+        const oilData = parseStoredObject(shift.oil_data || legacyData.oil_data, {});
+        const shiftDate = normalizeIsoDate(shift.date);
+
+        rows.push(createChatGptCsvRow({
+          source: 'shifts',
+          date: shiftDate,
+          record_type: 'shift_summary',
+          total_amount: shift.grand_total,
+          shift_number: shift.shift_number,
+          description: 'Saved shift totals',
+          notes: `fuel_total=${toFiniteNumber(shift.fuel_total)}, oil_total=${toFiniteNumber(shift.oil_total)}, expenses=${toFiniteNumber(shift.total_expenses)}`,
+          raw_details: stringifyRawDetails(shift)
+        }));
+
+        Object.entries(fuelData || {}).forEach(([fuelType, data]) => {
+          if (!data || typeof data !== 'object') return;
+          const quantity = getShiftFuelSoldQuantity(fuelType, data);
+          const unitPrice = toFiniteNumber(data.price || data.price_per_liter);
+          const totalAmount = toFiniteNumber(data.total || data.totalAmount || data.amount) || (quantity * unitPrice);
+          if (quantity <= 0 && totalAmount <= 0) return;
+
+          rows.push(createChatGptCsvRow({
+            source: 'shifts',
+            date: shiftDate,
+            record_type: 'shift_fuel_sale',
+            product: fuelType,
+            quantity,
+            unit_price: unitPrice,
+            total_amount: totalAmount,
+            shift_number: shift.shift_number,
+            description: 'Fuel sold during shift',
+            raw_details: stringifyRawDetails(data)
+          }));
+        });
+
+        Object.entries(oilData || {}).forEach(([oilType, data]) => {
+          if (!data || typeof data !== 'object') return;
+          const quantity = toFiniteNumber(data.sold || data.quantity || data.totalQuantity);
+          const unitPrice = toFiniteNumber(data.price || data.unit_price);
+          const totalAmount = toFiniteNumber(data.total || data.totalAmount || data.amount) || (quantity * unitPrice);
+          if (quantity <= 0 && totalAmount <= 0) return;
+
+          rows.push(createChatGptCsvRow({
+            source: 'shifts',
+            date: shiftDate,
+            record_type: 'shift_oil_sale',
+            product: oilType,
+            quantity,
+            unit_price: unitPrice,
+            total_amount: totalAmount,
+            shift_number: shift.shift_number,
+            description: 'Oil sold during shift',
+            raw_details: stringifyRawDetails(data)
+          }));
+        });
+      });
+
+      fuelInvoices.forEach((invoice) => {
+        rows.push(createChatGptCsvRow({
+          source: 'fuel_invoices',
+          date: normalizeIsoDate(invoice.date),
+          record_type: 'fuel_purchase_invoice',
+          product: invoice.fuel_type,
+          quantity: invoice.net_quantity || invoice.quantity,
+          unit_price: invoice.purchase_price,
+          total_amount: invoice.invoice_total || invoice.total,
+          direction: 'in',
+          invoice_number: invoice.invoice_number,
+          description: 'Fuel purchase invoice',
+          raw_details: stringifyRawDetails(invoice)
+        }));
+      });
+
+      oilInvoices.forEach((invoice) => {
+        rows.push(createChatGptCsvRow({
+          source: 'oil_invoices',
+          date: normalizeIsoDate(invoice.date),
+          record_type: 'oil_purchase_invoice',
+          product: invoice.oil_type,
+          quantity: invoice.quantity,
+          unit_price: invoice.purchase_price,
+          total_amount: invoice.total_purchase,
+          direction: 'in',
+          invoice_number: invoice.invoice_number,
+          description: 'Oil purchase invoice',
+          notes: `iva=${toFiniteNumber(invoice.iva)}, immediate_discount=${toFiniteNumber(invoice.immediate_discount)}, martyrs_tax=${toFiniteNumber(invoice.martyrs_tax)}`,
+          raw_details: stringifyRawDetails(invoice)
+        }));
+      });
+
+      fuelMovements.forEach((movement) => {
+        rows.push(createChatGptCsvRow({
+          source: 'fuel_movements',
+          date: normalizeIsoDate(movement.date),
+          record_type: 'fuel_stock_movement',
+          product: movement.fuel_type,
+          quantity: movement.quantity,
+          direction: movement.type,
+          invoice_number: movement.invoice_number,
+          description: 'Fuel inventory movement',
+          notes: movement.notes,
+          raw_details: stringifyRawDetails(movement)
+        }));
+      });
+
+      oilMovements.forEach((movement) => {
+        rows.push(createChatGptCsvRow({
+          source: 'oil_movements',
+          date: normalizeIsoDate(movement.date),
+          record_type: 'oil_stock_movement',
+          product: movement.oil_type,
+          quantity: movement.quantity,
+          direction: movement.type,
+          invoice_number: movement.invoice_number,
+          description: 'Oil inventory movement',
+          raw_details: stringifyRawDetails(movement)
+        }));
+      });
+
+      safeBookMovements.forEach((movement) => {
+        rows.push(createChatGptCsvRow({
+          source: 'safe_book_movements',
+          date: normalizeIsoDate(movement.date),
+          record_type: 'safe_book_movement',
+          total_amount: movement.amount,
+          direction: movement.direction,
+          description: movement.movement_type,
+          raw_details: stringifyRawDetails(movement)
+        }));
+      });
+
+      const profitFieldLabels = {
+        fuel_diesel: 'Fuel diesel profit',
+        fuel_80: 'Fuel 80 profit',
+        fuel_92: 'Fuel 92 profit',
+        fuel_95: 'Fuel 95 profit',
+        oil_total: 'Oil profit',
+        bonuses: 'Bonuses',
+        commission_diff: 'Commission difference',
+        deposit_tax: 'Deposit tax',
+        bonus_tax: 'Bonus tax'
+      };
+
+      monthlyProfitInputs.forEach((profitRow) => {
+        Object.entries(profitFieldLabels).forEach(([field, label]) => {
+          const amount = toFiniteNumber(profitRow[field]);
+          if (amount === 0) return;
+          rows.push(createChatGptCsvRow({
+            source: 'monthly_profit_inputs',
+            date: `${profitRow.month_key}-01`,
+            month: profitRow.month_key,
+            record_type: 'monthly_profit_input',
+            total_amount: amount,
+            description: label,
+            raw_details: stringifyRawDetails({ month_key: profitRow.month_key, field, amount })
+          }));
+        });
+      });
+
+      monthlyProfitCustomValues.forEach((customValue) => {
+        const amount = toFiniteNumber(customValue.amount);
+        if (amount === 0) return;
+        rows.push(createChatGptCsvRow({
+          source: 'monthly_profit_custom_values',
+          date: `${customValue.month_key}-01`,
+          month: customValue.month_key,
+          record_type: customValue.row_type || 'monthly_profit_custom_value',
+          total_amount: amount,
+          description: customValue.row_label || customValue.row_key,
+          raw_details: stringifyRawDetails(customValue)
+        }));
+      });
+
+      rows.sort((a, b) => {
+        if (a.date !== b.date) return String(a.date).localeCompare(String(b.date));
+        if (a.source !== b.source) return String(a.source).localeCompare(String(b.source));
+        return String(a.record_type).localeCompare(String(b.record_type));
+      });
+
+      const saveResult = await dialog.showSaveDialog({
+        title: 'حفظ ملف ChatGPT CSV',
+        defaultPath: `chatgpt-export-${range.startDate}_to_${range.endDate}.csv`,
+        filters: [
+          { name: 'CSV Files', extensions: ['csv'] }
+        ]
+      });
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, canceled: true };
+      }
+
+      fs.writeFileSync(saveResult.filePath, buildCsv(rows), 'utf8');
+      return {
+        success: true,
+        filePath: saveResult.filePath,
+        rowCount: rows.length
+      };
+    } catch (error) {
+      console.error('Error exporting ChatGPT CSV:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Backup Handlers
   ipcMain.handle('export-backup', async () => {
     try {
@@ -2835,11 +3468,6 @@ ipcMain.handle('update-customer', async (event, { id, name }) => {
 // Shift management handlers
 ipcMain.handle('save-shift', async (event, shiftData) => {
   try {
-    const validationErrors = validateShiftPayload(shiftData);
-    if (validationErrors.length > 0) {
-      return { success: false, error: 'validation_failed', validationErrors };
-    }
-
     const {
       date,
       shift_number,
@@ -2848,6 +3476,7 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       oil_data,
       oil_total,
       customer_rows,
+      revenue_items,
       expense_items,
       wash_lube_revenue,
       total_expenses,
@@ -2855,12 +3484,21 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       is_saved
     } = shiftData;
 
+    const isSavedShift = is_saved ? 1 : 0;
+    if (isSavedShift) {
+      const validationErrors = validateShiftPayload(shiftData);
+      if (validationErrors.length > 0) {
+        return { success: false, error: 'validation_failed', validationErrors };
+      }
+    }
+
     // Ensure numeric values are valid (convert NaN/undefined/null to 0)
     const safeFuelTotal = parseFloat(fuel_total) || 0;
     const safeOilTotal = parseFloat(oil_total) || 0;
     const safeWashLubeRevenue = parseFloat(wash_lube_revenue) || 0;
     const safeTotalExpenses = parseFloat(total_expenses) || 0;
     const safeGrandTotal = parseFloat(grand_total) || 0;
+    const normalizedRevenueItems = normalizeRevenueItems(revenue_items);
     const normalizedExpenseItems = normalizeExpenseItems(expense_items);
     const normalizedCustomerRows = Array.isArray(customer_rows)
       ? customer_rows
@@ -2885,11 +3523,12 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       oil_data: oil_data || '{}',
       oil_total: safeOilTotal,
       customer_rows: normalizedCustomerRows,
+      revenue_items: normalizedRevenueItems,
       expense_items: normalizedExpenseItems,
       wash_lube_revenue: safeWashLubeRevenue,
       total_expenses: safeTotalExpenses,
       grand_total: safeGrandTotal,
-      is_saved: is_saved ? 1 : 0
+      is_saved: isSavedShift
     });
 
     // PostgreSQL uses $1, $2, etc. and CURRENT_TIMESTAMP
@@ -2921,7 +3560,7 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       safeWashLubeRevenue,
       safeTotalExpenses,
       safeGrandTotal,
-      is_saved
+      isSavedShift
     ]);
 
     const idRows = await executeQuery(
@@ -2990,6 +3629,40 @@ ipcMain.handle('get-saved-shift', async (_event, { date, shift_number }) => {
   }
 });
 
+ipcMain.handle('get-adjacent-saved-shift', async (_event, { date, shift_number, direction }) => {
+  try {
+    const shiftNumber = parseInt(shift_number, 10);
+    if (!date || !Number.isFinite(shiftNumber)) {
+      return null;
+    }
+
+    const isNext = direction === 'next';
+    const query = isNext
+      ? `SELECT * FROM shifts
+         WHERE is_saved = 1
+           AND (date > $1 OR (date = $1 AND shift_number > $2))
+         ORDER BY date ASC, shift_number ASC, id ASC
+         LIMIT 1`
+      : `SELECT * FROM shifts
+         WHERE is_saved = 1
+           AND (date < $1 OR (date = $1 AND shift_number < $2))
+         ORDER BY date DESC, shift_number DESC, id DESC
+         LIMIT 1`;
+
+    const result = await executeQuery(query, [date, shiftNumber]);
+    if (result.length > 0) {
+      return {
+        ...result[0],
+        data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting adjacent saved shift:', error);
+    throw error;
+  }
+});
+
 // Get last shift (highest ID)
 ipcMain.handle('get-last-shift', async (event) => {
   try {
@@ -3005,6 +3678,23 @@ ipcMain.handle('get-last-shift', async (event) => {
     return null;
   } catch (error) {
     console.error('Error getting last shift:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-last-draft-shift', async () => {
+  try {
+    const query = 'SELECT * FROM shifts WHERE is_saved = 0 ORDER BY updated_at DESC, id DESC LIMIT 1';
+    const result = await executeQuery(query, []);
+    if (result.length > 0) {
+      return {
+        ...result[0],
+        data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting last draft shift:', error);
     throw error;
   }
 });

@@ -46,6 +46,7 @@ const screenTitles = {
   'report': 'التقارير',
   'settings': 'الإعدادات',
   'depot': 'المخزن',
+  'tank-management': 'ادارة التنكات',
   'annual-inventory': 'جرد سنوي',
   'sales-summary': 'ملخص المبيعات',
   'profit': 'المكسب',
@@ -663,15 +664,18 @@ function showScreenWithoutHistory(screenName) {
       initializeExpensesDashboard();
       break;
     case 'shift-entry':
-      // Initialize customers table IMMEDIATELY to avoid visible delay
-      initializeCustomersTable();
-      loadCustomerNameOptions();
-
-      // Initialize shift entry functionality async (don't wait)
-      initializeShiftEntry();
+      if (shiftViewMode !== 'history') {
+        // Initialize entry-only helpers. History view renders from saved shift data only.
+        initializeCustomersTable();
+        loadCustomerNameOptions();
+        initializeShiftEntry();
+      }
       break;
     case 'depot':
       resetDepotView();
+      break;
+    case 'tank-management':
+      initializeTankManagement();
       break;
     case 'annual-inventory':
       refreshAnnualInventoryView();
@@ -709,6 +713,23 @@ function showScreen(screenName, parentScreen = null) {
     updateShiftTitle();
     toggleHistoryBar(false);
   }
+}
+
+function openNewShiftEntry() {
+  shiftViewMode = 'edit';
+  disableReadOnlyMode();
+  updateShiftTitle();
+  toggleHistoryBar(false);
+  setShiftDraftStatus('idle');
+  clearShiftForm();
+  setCustomerRowsData([]);
+  currentShiftData.date = null;
+  currentShiftData.shiftNumber = null;
+  currentShiftData.isSaved = false;
+  currentShiftData.hasUnsavedChanges = false;
+  currentShiftData.draftCleanupQueue = [];
+
+  showScreen('shift-entry', 'home');
 }
 
 function syncSafeBookScrollMode() {
@@ -3225,6 +3246,209 @@ function showDepotScreen() {
   showScreen('depot', 'home');
 }
 
+async function initializeTankManagement() {
+  const container = document.getElementById('tank-ledgers-container');
+  if (!container) return;
+
+  try {
+    container.innerHTML = '<div class="tank-ledger-loading">جاري تحميل بيانات التنكات...</div>';
+    const ledgers = await loadTankLedgerData();
+    renderTankLedgers(ledgers);
+  } catch (error) {
+    console.error('Error initializing tank management:', error);
+    container.innerHTML = '<div class="tank-ledger-error">حدث خطأ أثناء تحميل بيانات التنكات</div>';
+    showMessage('حدث خطأ أثناء تحميل إدارة التنكات', 'error');
+  }
+}
+
+async function loadTankLedgerData() {
+  const fuelTypes = await loadTankFuelTypes();
+  const tankFuelTypes = fuelTypes.filter((fuelType) => String(fuelType || '').trim() !== 'غاز سيارات');
+  const ledgers = await Promise.all(tankFuelTypes.map(async (fuelType) => {
+    const movements = await loadTankFuelMovements(fuelType);
+    const balance = movements.reduce((sum, movement) => {
+      const quantity = Math.abs(parseFloat(movement.quantity) || 0);
+      return sum + (movement.type === 'out' ? -quantity : quantity);
+    }, 0);
+
+    return {
+      fuel_type: fuelType,
+      balance,
+      movements: sortTankMovementsNewestFirst(movements)
+    };
+  }));
+
+  return ledgers;
+}
+
+async function loadTankFuelTypes() {
+  try {
+    const fuelTypes = await ipcRenderer.invoke('get-tank-fuel-types');
+    if (Array.isArray(fuelTypes) && fuelTypes.length > 0) {
+      return fuelTypes.map((type) => String(type || '').trim()).filter(Boolean);
+    }
+  } catch (error) {
+    if (!String(error?.message || error).includes('No handler registered')) {
+      throw error;
+    }
+
+    console.warn('get-tank-fuel-types IPC is not available, using renderer fallback:', error);
+  }
+
+  return loadTankFuelTypesFallback();
+}
+
+async function loadTankFuelTypesFallback() {
+  const preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥'];
+  const types = new Set(preferredOrder);
+
+  const addFuel = (fuelType) => {
+    const name = String(fuelType || '').trim();
+    if (name) types.add(name);
+  };
+
+  const fuelProducts = await ipcRenderer.invoke('get-fuel-prices').catch(() => []);
+  fuelProducts.forEach((row) => addFuel(row.fuel_type || row.product_name));
+
+  const invoices = await ipcRenderer.invoke('get-fuel-invoices').catch(() => []);
+  invoices.forEach((row) => addFuel(row.fuel_type));
+
+  const shiftFuelSales = await ipcRenderer.invoke('get-shift-fuel-sales').catch(() => []);
+  shiftFuelSales.forEach((row) => addFuel(row.fuel_type));
+
+  return Array.from(types).sort((a, b) => sortTankFuelTypes(a, b, preferredOrder));
+}
+
+async function loadTankFuelMovements(fuelType) {
+  try {
+    const movements = await ipcRenderer.invoke('get-tank-fuel-movements', fuelType);
+    return Array.isArray(movements) ? movements : [];
+  } catch (error) {
+    if (!String(error?.message || error).includes('No handler registered')) {
+      throw error;
+    }
+
+    console.warn('get-tank-fuel-movements IPC is not available, using renderer fallback:', error);
+    return loadTankFuelMovementsFallback(fuelType);
+  }
+}
+
+async function loadTankFuelMovementsFallback(fuelType) {
+  const selectedFuelType = String(fuelType || '').trim();
+  if (!selectedFuelType) return [];
+
+  const invoiceRows = await ipcRenderer.invoke('get-fuel-invoices').catch(() => []);
+  const invoiceMovements = invoiceRows
+    .filter((row) => String(row.fuel_type || '').trim() === selectedFuelType)
+    .map((row) => {
+      const netQuantity = parseFloat(row.net_quantity) || 0;
+      const quantity = netQuantity > 0 ? netQuantity : (parseFloat(row.quantity) || 0);
+      return {
+        date: String(row.date || '').slice(0, 10),
+        type: 'in',
+        quantity,
+        source: row.invoice_number ? `فاتورة ${row.invoice_number}` : 'فاتورة وقود'
+      };
+    })
+    .filter((movement) => movement.date && movement.quantity > 0);
+
+  const shiftRows = await ipcRenderer.invoke('get-shift-fuel-sales').catch(() => []);
+  const shiftMovements = shiftRows
+    .filter((row) => String(row.fuel_type || '').trim() === selectedFuelType)
+    .map((row) => ({
+      date: String(row.date || '').slice(0, 10),
+      type: 'out',
+      quantity: Math.max(parseFloat(row.quantity) || 0, 0),
+      source: 'وردية'
+    }))
+    .filter((movement) => movement.date && movement.quantity > 0);
+
+  return [...invoiceMovements, ...shiftMovements];
+}
+
+function sortTankFuelTypes(a, b, preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥']) {
+  const indexA = preferredOrder.indexOf(a);
+  const indexB = preferredOrder.indexOf(b);
+  if (indexA !== -1 || indexB !== -1) {
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  }
+  return String(a || '').localeCompare(String(b || ''), 'ar');
+}
+
+function sortTankMovementsNewestFirst(movements) {
+  return [...movements].sort((a, b) => {
+    const dateCompare = String(b.date || '').localeCompare(String(a.date || ''));
+    if (dateCompare !== 0) return dateCompare;
+    if (a.type !== b.type) return a.type === 'out' ? -1 : 1;
+    return String(b.source || '').localeCompare(String(a.source || ''), 'ar');
+  });
+}
+
+function renderTankLedgers(ledgers) {
+  const container = document.getElementById('tank-ledgers-container');
+  if (!container) return;
+
+  if (!Array.isArray(ledgers) || ledgers.length === 0) {
+    container.innerHTML = '<div class="tank-ledger-empty">لا توجد بيانات للتنكات</div>';
+    return;
+  }
+
+  container.innerHTML = ledgers.map((ledger) => {
+    const fuelType = ledger.fuel_type || '-';
+    const balance = parseFloat(ledger.balance) || 0;
+    const movements = Array.isArray(ledger.movements) ? ledger.movements : [];
+    const rowsHtml = movements.length > 0
+      ? movements.map((movement) => renderTankLedgerMovementRow(movement)).join('')
+      : '<tr><td colspan="2" class="tank-ledger-empty-row">لا توجد حركات لهذا الوقود</td></tr>';
+
+    return `
+      <section class="tank-ledger-section">
+        <div class="tank-ledger-header">
+          <h4>${escapeHtml(fuelType)}</h4>
+          <div class="tank-current-balance ${balance < 0 ? 'negative' : ''}">
+            <span>الرصيد الحالي</span>
+            <strong>${formatArabicNumber(balance)}</strong>
+          </div>
+        </div>
+        <div class="tank-ledger-table-wrap">
+          <table class="base-table tank-ledger-table">
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>الحركة</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }).join('');
+}
+
+function renderTankLedgerMovementRow(movement) {
+  const type = movement.type === 'out' ? 'out' : 'in';
+  const quantity = Math.abs(parseFloat(movement.quantity) || 0);
+  const sign = type === 'out' ? '-' : '+';
+  const label = type === 'out' ? '' : 'دخول';
+  const source = String(movement.source || '').trim();
+  const showSource = type !== 'out' && source;
+  const sourceHtml = showSource ? `<span class="tank-ledger-source">- ${escapeHtml(source)}</span>` : '';
+
+  return `
+    <tr class="tank-ledger-row ${type === 'out' ? 'row-out' : 'row-in'}">
+      <td class="tank-ledger-date">${formatDateDDMMYYYY(movement.date)}</td>
+      <td class="tank-ledger-movement">
+        ${label ? `<span class="tank-ledger-type ${type === 'out' ? 'out' : 'in'}">${label}</span>` : ''}
+        <span class="tank-ledger-quantity ${type === 'out' ? 'out' : 'in'}">${sign}${formatArabicNumber(quantity)}</span>
+        ${sourceHtml}
+      </td>
+    </tr>
+  `;
+}
+
 function selectOilType(oilType) {
   // Remove selected class from all items (sidebar e modal)
   document.querySelectorAll('.oil-item, .oil-item-modal').forEach(item => {
@@ -3878,23 +4102,19 @@ function switchShiftTab(tab) {
   // Update sections
   const fuelSection = document.getElementById('shift-fuel-section');
   const oilSection = document.getElementById('shift-oil-section');
-  const totalSection = document.getElementById('shift-total-section');
 
   // Remove active from all
   if (fuelSection) fuelSection.classList.remove('active');
   if (oilSection) oilSection.classList.remove('active');
-  if (totalSection) totalSection.classList.remove('active');
 
   // Add active to selected
   if (tab === 'fuel' && fuelSection) {
     fuelSection.classList.add('active');
   } else if (tab === 'oil' && oilSection) {
     oilSection.classList.add('active');
-  } else if (tab === 'total' && totalSection) {
-    totalSection.classList.add('active');
-    // Update totals when switching to totals tab
-    updateTotalsPage();
   }
+
+  updateShiftHorizontalScrollControls();
 }
 
 // Show settings section without adding to history
@@ -4599,6 +4819,75 @@ async function exportBackup() {
   }
 }
 
+function openChatGptExportModal() {
+  const modal = document.getElementById('chatgpt-export-modal');
+  const startInput = document.getElementById('chatgpt-export-start-date');
+  const endInput = document.getElementById('chatgpt-export-end-date');
+  const message = document.getElementById('chatgpt-export-message');
+
+  if (!modal || !startInput || !endInput) return;
+
+  const today = getTodayDate();
+  const currentDate = new Date();
+  const firstDay = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
+  startInput.value = startInput.value || firstDay;
+  endInput.value = endInput.value || today;
+  if (message) message.textContent = '';
+
+  modal.classList.add('show');
+}
+
+function closeChatGptExportModal() {
+  const modal = document.getElementById('chatgpt-export-modal');
+  const message = document.getElementById('chatgpt-export-message');
+  if (modal) modal.classList.remove('show');
+  if (message) message.textContent = '';
+}
+
+async function exportToChatGPT() {
+  const startInput = document.getElementById('chatgpt-export-start-date');
+  const endInput = document.getElementById('chatgpt-export-end-date');
+  const message = document.getElementById('chatgpt-export-message');
+  const button = document.getElementById('chatgpt-export-confirm-btn');
+  const startDate = String(startInput?.value || '').trim();
+  const endDate = String(endInput?.value || '').trim();
+
+  const setModalMessage = (text) => {
+    if (message) message.textContent = text;
+  };
+
+  if (!startDate || !endDate) {
+    setModalMessage('يرجى تحديد تاريخ البداية والنهاية');
+    return;
+  }
+
+  if (startDate > endDate) {
+    setModalMessage('فترة زمنية غير صحيحة');
+    return;
+  }
+
+  try {
+    setModalMessage('');
+    if (button) button.disabled = true;
+    const result = await ipcRenderer.invoke('export-chatgpt-csv', { startDate, endDate });
+
+    if (result?.success) {
+      closeChatGptExportModal();
+      const rowsText = Number(result.rowCount) === 1 ? 'صف واحد' : `${result.rowCount || 0} صف`;
+      showMessage(`تم تصدير ملف ChatGPT CSV بنجاح (${rowsText})`, 'success');
+    } else if (!result?.canceled) {
+      showMessage('حدث خطأ أثناء تصدير ملف ChatGPT', 'error');
+      setModalMessage(result?.error || 'حدث خطأ أثناء التصدير');
+    }
+  } catch (error) {
+    showMessage('حدث خطأ أثناء تصدير ملف ChatGPT', 'error');
+    setModalMessage('حدث خطأ أثناء التصدير');
+    console.error('Error exporting ChatGPT CSV:', error);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function importBackup() {
   const fileInput = document.getElementById('backup-file-input');
   fileInput.click();
@@ -4686,15 +4975,22 @@ async function loadInvoicesList() {
           type: 'fuel',
           date: inv.date,
           invoice_number: inv.invoice_number,
+          invoice_total: 0,
+          items_subtotal: 0,
           items: []
         };
+      }
+      const invoiceTotal = parseFloat(inv.invoice_total);
+      if (Number.isFinite(invoiceTotal) && invoiceTotal > fuelInvoicesMap[inv.invoice_number].invoice_total) {
+        fuelInvoicesMap[inv.invoice_number].invoice_total = invoiceTotal;
       }
       fuelInvoicesMap[inv.invoice_number].items.push(inv);
     });
 
-    // Calculate totals for fuel invoices (sum of all items)
+    // Calculate totals for fuel invoices. The invoice total includes cash deposit.
     Object.values(fuelInvoicesMap).forEach(invoice => {
-      invoice.total = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
+      invoice.items_subtotal = invoice.items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+      invoice.total = invoice.invoice_total > 0 ? invoice.invoice_total : invoice.items_subtotal;
     });
 
     // Process oil invoices - group by invoice number and calculate total
@@ -4877,8 +5173,11 @@ async function showInvoiceDetails(type, invoiceNumber) {
     `;
   } else {
     // Fuel invoice summary
-    const itemsSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
-    const invoiceTotal = invoice.total || 0;
+    const itemsSubtotal = invoice.items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+    const invoiceTotalValue = parseFloat(invoice.invoice_total);
+    const invoiceTotal = Number.isFinite(invoiceTotalValue) && invoiceTotalValue > 0
+      ? invoiceTotalValue
+      : (parseFloat(invoice.total) || 0);
     const cashDeposit = invoiceTotal - itemsSubtotal;
 
     html += `
@@ -5294,6 +5593,9 @@ const SHIFT_DRAFT_AUTOSAVE_DELAY_MS = 900;
 let shiftDraftAutoSaveTimer = null;
 let shiftDraftAutoSaveInFlight = false;
 let shiftDraftAutoSaveQueued = false;
+let shiftDraftAutoSavePromise = null;
+let summaryRevenueRowCounter = 0;
+let summaryExpenseRowCounter = 0;
 const SHIFT_DRAFT_STATUS_MESSAGES = {
   idle: 'جاهز',
   dirty: 'تغييرات غير محفوظة',
@@ -5314,6 +5616,7 @@ let profitRowsCache = [];
 let profitDefaultRange = null;
 let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
+let profitLoadRequestId = 0;
 let expenseEntriesCache = [];
 let expenseDefaultRange = null;
 let expenseFilterDebounceTimer = null;
@@ -5422,9 +5725,10 @@ async function persistCurrentShiftDraftToDatabase() {
     oil_data: JSON.stringify(collectOilData()),
     oil_total: calculateOilTotal(),
     customer_rows: collectCustomerRowsData(),
+    revenue_items: collectRevenueItems(),
     expense_items: collectExpenseItems(),
-    wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
-    total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
+    wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
+    total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
     grand_total: calculateGrandTotal(),
     is_saved: 0
   };
@@ -5451,13 +5755,6 @@ function canAutoSaveShiftDraft() {
 
 async function runShiftDraftAutoSave() {
   if (!canAutoSaveShiftDraft() || !currentShiftData.hasUnsavedChanges) {
-    return;
-  }
-
-  const validationErrors = validateShiftData();
-  if (validationErrors.length > 0) {
-    // Never persist invalid shifts as drafts.
-    setShiftDraftStatus('dirty');
     return;
   }
 
@@ -5491,6 +5788,17 @@ async function runShiftDraftAutoSave() {
   }
 }
 
+function startShiftDraftAutoSave() {
+  const promise = runShiftDraftAutoSave();
+  shiftDraftAutoSavePromise = promise;
+  promise.finally(() => {
+    if (shiftDraftAutoSavePromise === promise) {
+      shiftDraftAutoSavePromise = null;
+    }
+  });
+  return promise;
+}
+
 function scheduleShiftDraftAutoSave() {
   if (!canAutoSaveShiftDraft()) return;
 
@@ -5502,8 +5810,15 @@ function scheduleShiftDraftAutoSave() {
 
   shiftDraftAutoSaveTimer = setTimeout(() => {
     shiftDraftAutoSaveTimer = null;
-    runShiftDraftAutoSave();
+    startShiftDraftAutoSave();
   }, SHIFT_DRAFT_AUTOSAVE_DELAY_MS);
+}
+
+function markShiftDraftDirty() {
+  if (shiftViewMode === 'history') return;
+
+  currentShiftData.hasUnsavedChanges = true;
+  scheduleShiftDraftAutoSave();
 }
 
 function isShiftAutoFilledField(target) {
@@ -5523,7 +5838,6 @@ function isShiftAutoFilledField(target) {
     /-cash$/.test(id) ||
     /-quantity-\d+$/.test(id) ||
     /-total-qty$/.test(id) ||
-    /^total-/.test(id) ||
     id === 'final-net-total' ||
     // Oil derived fields (الإجمالى بعد وارد + المباع + اجمالى النقدى)
     /^oil-.+-total$/.test(id) ||
@@ -5609,8 +5923,9 @@ function flushShiftDraftAutoSave() {
     shiftDraftAutoSaveTimer = null;
   }
   if (currentShiftData.hasUnsavedChanges) {
-    runShiftDraftAutoSave();
+    return startShiftDraftAutoSave();
   }
+  return shiftDraftAutoSavePromise || Promise.resolve();
 }
 const PROFIT_TABLE_ROWS = [
   { key: 'fuel_diesel', label: 'سولار', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
@@ -5739,48 +6054,53 @@ async function loadSalesSummary() {
       ipcRenderer.invoke('get-oil-prices')
     ]);
 
-    let sales = [];
+    let salesReportRows = [];
     try {
       const salesReport = await ipcRenderer.invoke('get-sales-report', { startDate: startDateStr, endDate: endDateStr });
-      sales = Array.isArray(salesReport) ? salesReport : [];
+      salesReportRows = Array.isArray(salesReport) ? salesReport : [];
     } catch (error) {
-      console.warn('Sales report unavailable, trying shift sales fallback:', error);
-      sales = [];
+      console.warn('Sales report unavailable, using shift sales:', error);
     }
 
-    if (sales.length === 0) {
-      try {
-        const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
-          ipcRenderer.invoke('get-shift-fuel-sales'),
-          ipcRenderer.invoke('get-shift-oil-sales')
-        ]);
+    let shiftFuelRows = [];
+    let shiftOilRows = [];
+    try {
+      const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
+        ipcRenderer.invoke('get-shift-fuel-sales'),
+        ipcRenderer.invoke('get-shift-oil-sales')
+      ]);
 
-        const shiftFuelSales = Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [];
-        const shiftOilSales = Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [];
+      shiftFuelRows = (Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [])
+        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+        .map((entry) => ({
+          date: entry.date,
+          fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
+          quantity: parseFloat(entry.quantity) || 0,
+          total_amount: 0
+        }));
 
-        const fallbackFuelRows = shiftFuelSales
-          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-          .map((entry) => ({
-            date: entry.date,
-            fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
-            quantity: parseFloat(entry.quantity) || 0,
-            total_amount: 0
-          }));
-
-        const fallbackOilRows = shiftOilSales
-          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-          .map((entry) => ({
-            date: entry.date,
-            fuel_type: String(entry.product_name || '').trim(),
-            quantity: parseFloat(entry.quantity) || 0,
-            total_amount: 0
-          }));
-
-        sales = [...fallbackFuelRows, ...fallbackOilRows];
-      } catch (error) {
-        console.warn('Shift sales fallback unavailable:', error);
-      }
+      shiftOilRows = (Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [])
+        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+        .map((entry) => ({
+          date: entry.date,
+          fuel_type: String(entry.product_name || '').trim(),
+          quantity: parseFloat(entry.quantity) || 0,
+          total_amount: 0
+        }));
+    } catch (error) {
+      console.warn('Shift sales unavailable:', error);
     }
+
+    const configuredFuelNames = new Set((fuelProducts || []).map((product) => (
+      normalizeFuelTypeForHomeChart(product.fuel_type)
+    )).filter(Boolean));
+    const nonFuelReportRows = salesReportRows.filter((row) => {
+      const productName = normalizeFuelTypeForHomeChart(row.fuel_type);
+      return productName && !configuredFuelNames.has(productName);
+    });
+    const sales = shiftFuelRows.length > 0 || shiftOilRows.length > 0
+      ? [...shiftFuelRows, ...shiftOilRows, ...nonFuelReportRows]
+      : salesReportRows;
 
     // Build list of months in range (YYYY-MM)
     const months = [];
@@ -6308,13 +6628,13 @@ function populateProfitFilterOptions(availableMonths, defaultRange) {
   fillSelect(startYearSel, yearOptions, safeDefault.fromMonth.slice(0, 4));
   fillSelect(endYearSel, yearOptions, safeDefault.toMonth.slice(0, 4));
 
-  const filterBtn = document.getElementById('profit-filter-btn');
-  if (filterBtn && !filterBtn.dataset.bound) {
-    filterBtn.addEventListener('click', () => {
+  [startMonthSel, startYearSel, endMonthSel, endYearSel].forEach((select) => {
+    if (select.dataset.profitAutoBound === 'true') return;
+    select.addEventListener('change', () => {
       loadProfitMonthlyData();
     });
-    filterBtn.dataset.bound = 'true';
-  }
+    select.dataset.profitAutoBound = 'true';
+  });
 
   const clearBtn = document.getElementById('profit-clear-filter-btn');
   if (clearBtn && !clearBtn.dataset.bound) {
@@ -6328,7 +6648,7 @@ function populateProfitFilterOptions(availableMonths, defaultRange) {
         endMonthSel.value = profitDefaultRange.toMonth.slice(5, 7);
         endYearSel.value = profitDefaultRange.toMonth.slice(0, 4);
       }
-      loadProfitMonthlyData();
+      loadProfitMonthlyData(profitDefaultRange);
     });
     clearBtn.dataset.bound = 'true';
   }
@@ -6366,7 +6686,7 @@ async function initializeProfitDashboard() {
     populateProfitFilterOptions(availableMonths, profitDefaultRange);
     bindProfitRowActionButtons();
     setProfitSaveStatus('idle');
-    await loadProfitMonthlyData();
+    await loadProfitMonthlyData(profitDefaultRange);
   } catch (error) {
     console.error('Error initializing profit dashboard:', error);
     setProfitSaveStatus('error');
@@ -6823,8 +7143,18 @@ async function deleteProfitCustomRowByKey(rowKey) {
   }
 }
 
-async function loadProfitMonthlyData() {
-  const range = getProfitFiltersRange();
+async function loadProfitMonthlyData(explicitRange = null) {
+  const explicitFromMonth = normalizeMonthKey(explicitRange?.fromMonth);
+  const explicitToMonth = normalizeMonthKey(explicitRange?.toMonth);
+  const range = explicitFromMonth && explicitToMonth
+    ? {
+        valid: explicitFromMonth <= explicitToMonth,
+        fromMonth: explicitFromMonth,
+        toMonth: explicitToMonth,
+        message: explicitFromMonth <= explicitToMonth ? '' : 'فترة زمنية غير صحيحة'
+      }
+    : getProfitFiltersRange();
+  const requestId = ++profitLoadRequestId;
   const tbody = document.getElementById('profit-monthly-body');
   const emptyState = document.getElementById('profit-empty');
   if (!tbody) return;
@@ -6849,6 +7179,10 @@ async function loadProfitMonthlyData() {
       })
     ]);
 
+    if (requestId !== profitLoadRequestId) {
+      return;
+    }
+
     profitCustomRowsCache = (Array.isArray(customRows) ? customRows : [])
       .map((row) => normalizeProfitCustomRow(row))
       .filter(Boolean);
@@ -6870,6 +7204,9 @@ async function loadProfitMonthlyData() {
       setProfitSaveStatus('idle');
     }
   } catch (error) {
+    if (requestId !== profitLoadRequestId) {
+      return;
+    }
     console.error('Error loading monthly profit data:', error);
     profitRowsCache = [];
     profitCustomRowsCache = [];
@@ -7422,6 +7759,106 @@ function roundOilQuantity(value) {
 
 function isOilInitialEditable(oilName) {
   return normalizeOilName(oilName) === EDITABLE_OIL_INITIAL_NAME;
+}
+
+function parseShiftJsonObject(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function renderSavedShiftOilRows(oilData = {}) {
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody) return;
+
+  const entries = Object.entries(oilData || {});
+  tableBody.innerHTML = '';
+
+  if (entries.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="11" style="text-align: center; padding: 2rem; color: #999;">
+          لا توجد بيانات زيوت محفوظة لهذه الوردية
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  entries.forEach(([oilName], index) => {
+    const oilId = `saved-${index}`;
+    const row = document.createElement('tr');
+    row.setAttribute('data-oil-id', oilId);
+    row.setAttribute('data-oil-name', oilName);
+    row.innerHTML = `
+      <td class="oil-name-cell">
+        <div class="oil-cell-center oil-name-content">
+          <strong>${escapeHtml(oilName)}</strong>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-initial" data-oil="${escapeHtml(oilName)}" data-field="initial" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-added" data-oil="${escapeHtml(oilName)}" data-field="added">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-total" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-sold" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-remaining" data-oil="${escapeHtml(oilName)}" data-field="remaining">
+        </div>
+      </td>
+      <td class="spacer-cell"></td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-open" data-oil="${escapeHtml(oilName)}" data-field="open">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-customers" data-oil="${escapeHtml(oilName)}" data-field="customers">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-price" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-revenue" readonly>
+        </div>
+      </td>
+    `;
+    tableBody.appendChild(row);
+  });
 }
 
 // Load active oils and populate oil table
@@ -8205,6 +8642,176 @@ function calculateGrandTotal() {
 
 // ============= TOTALS PAGE FUNCTIONS =============
 
+function sanitizeSummaryNumericInput(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.classList.contains('summary-numeric-input')) return;
+
+  let value = String(input.value || '').replace(/,/g, '.');
+  value = value.replace(/[^\d.]/g, '');
+
+  const firstDotIndex = value.indexOf('.');
+  if (firstDotIndex !== -1) {
+    value = value.slice(0, firstDotIndex + 1) + value.slice(firstDotIndex + 1).replace(/\./g, '');
+  }
+
+  input.value = value;
+}
+
+function parseSummaryNumber(value) {
+  const amount = parseFloat(String(value || '').replace(/,/g, '.'));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function getSummaryRowItems(containerId, descSelector, amountSelector) {
+  const container = document.getElementById(containerId);
+  if (!container) return [];
+
+  return Array.from(container.querySelectorAll('.summary-dynamic-row'))
+    .map((row, fallbackIndex) => {
+      const description = String(row.querySelector(descSelector)?.value || '').trim();
+      const amount = parseSummaryNumber(row.querySelector(amountSelector)?.value);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+
+      const index = parseInt(row.getAttribute('data-index'), 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description,
+        amount
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeRevenueItems(items) {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') return null;
+      const amount = parseFloat(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function createSummaryDynamicRow(type, index, item = {}) {
+  const isRevenue = type === 'revenue';
+  const row = document.createElement('div');
+  row.className = `total-row summary-dynamic-row ${isRevenue ? 'summary-revenue-row' : 'summary-expense-row'}`;
+  row.setAttribute('data-index', index);
+
+  const descId = isRevenue ? `revenue-desc-${index}` : `expense-desc-${index}`;
+  const amountId = isRevenue ? `revenue-amount-${index}` : `expense-amount-${index}`;
+  const descClass = isRevenue
+    ? 'total-description-input shift-revenue-desc'
+    : 'total-description-input shift-expense-input shift-expense-desc';
+  const amountClass = isRevenue
+    ? 'total-input shift-revenue-amount'
+    : 'total-input shift-expense-input shift-expense-amount';
+  const placeholder = isRevenue ? 'وصف الإيراد' : 'وصف المصروف';
+  const handler = isRevenue ? 'handleSummaryRevenueInput' : 'handleSummaryExpenseInput';
+
+  row.innerHTML = `
+    <input type="text" class="${descClass}" id="${descId}" placeholder="${placeholder}" value="${escapeHtml(item.description || '')}" oninput="${handler}(this)">
+    <input type="text" inputmode="decimal" autocomplete="off" class="${amountClass} summary-numeric-input" id="${amountId}" value="${Number.isFinite(parseFloat(item.amount)) ? formatPrice(item.amount) : ''}" oninput="${handler}(this)">
+  `;
+
+  return row;
+}
+
+function renderRevenueItems(items = []) {
+  const container = document.getElementById('shift-revenue-extra-rows');
+  if (!container) return;
+
+  const normalized = normalizeRevenueItems(items);
+  container.innerHTML = '';
+  summaryRevenueRowCounter = 0;
+
+  normalized.forEach((item) => {
+    const index = item.index || (summaryRevenueRowCounter + 1);
+    summaryRevenueRowCounter = Math.max(summaryRevenueRowCounter, index);
+    container.appendChild(createSummaryDynamicRow('revenue', index, item));
+  });
+
+  summaryRevenueRowCounter += 1;
+  container.appendChild(createSummaryDynamicRow('revenue', summaryRevenueRowCounter));
+}
+
+function renderExpenseItems(items = []) {
+  const container = document.getElementById('shift-expense-rows');
+  if (!container) return;
+
+  const normalized = normalizeExpenseItems(items);
+  container.innerHTML = '';
+  summaryExpenseRowCounter = 0;
+
+  normalized.forEach((item) => {
+    const index = item.index || (summaryExpenseRowCounter + 1);
+    summaryExpenseRowCounter = Math.max(summaryExpenseRowCounter, index);
+    container.appendChild(createSummaryDynamicRow('expense', index, item));
+  });
+
+  summaryExpenseRowCounter += 1;
+  container.appendChild(createSummaryDynamicRow('expense', summaryExpenseRowCounter));
+}
+
+function ensureBlankSummaryRow(type) {
+  const isRevenue = type === 'revenue';
+  const container = document.getElementById(isRevenue ? 'shift-revenue-extra-rows' : 'shift-expense-rows');
+  if (!container) return;
+
+  const rows = Array.from(container.querySelectorAll('.summary-dynamic-row'));
+  const hasBlank = rows.some((row) => {
+    const descSelector = isRevenue ? '.shift-revenue-desc' : '.shift-expense-desc';
+    const amountSelector = isRevenue ? '.shift-revenue-amount' : '.shift-expense-amount';
+    const description = String(row.querySelector(descSelector)?.value || '').trim();
+    const amount = String(row.querySelector(amountSelector)?.value || '').trim();
+    return !description && !amount;
+  });
+
+  if (hasBlank) return;
+
+  if (isRevenue) {
+    summaryRevenueRowCounter += 1;
+    container.appendChild(createSummaryDynamicRow('revenue', summaryRevenueRowCounter));
+  } else {
+    summaryExpenseRowCounter += 1;
+    container.appendChild(createSummaryDynamicRow('expense', summaryExpenseRowCounter));
+  }
+}
+
+function handleSummaryFixedRevenueInput(input) {
+  sanitizeSummaryNumericInput(input);
+  calculateGrandTotal();
+  markShiftDraftDirty();
+}
+
+function handleSummaryRevenueInput(input) {
+  sanitizeSummaryNumericInput(input);
+  ensureBlankSummaryRow('revenue');
+  calculateGrandTotal();
+  markShiftDraftDirty();
+}
+
+function handleSummaryExpenseInput(input) {
+  sanitizeSummaryNumericInput(input);
+  ensureBlankSummaryRow('expense');
+  calculateTotalExpenses();
+  markShiftDraftDirty();
+}
+
+function initializeShiftSummaryRows() {
+  renderRevenueItems([]);
+  renderExpenseItems([]);
+}
+
 // Populate totals page with cash values from fuel and oil tabs
 function updateTotalsPage() {
   // Populate individual fuel cash values
@@ -8244,21 +8851,20 @@ function updateTotalsPage() {
 // Calculate total revenue (fuel + oil + extra fields)
 function calculateTotalRevenue() {
   // Calculate total fuel cash from individual fuel values
-  const dieselCash = parseFloat(document.getElementById('total-diesel-cash')?.value) || 0;
-  const cash80 = parseFloat(document.getElementById('total-80-cash')?.value) || 0;
-  const cash92 = parseFloat(document.getElementById('total-92-cash')?.value) || 0;
-  const cash95 = parseFloat(document.getElementById('total-95-cash')?.value) || 0;
+  const dieselCash = parseSummaryNumber(document.getElementById('total-diesel-cash')?.value);
+  const cash80 = parseSummaryNumber(document.getElementById('total-80-cash')?.value);
+  const cash92 = parseSummaryNumber(document.getElementById('total-92-cash')?.value);
+  const cash95 = parseSummaryNumber(document.getElementById('total-95-cash')?.value);
   const totalFuelCash = dieselCash + cash80 + cash92 + cash95;
 
-  const totalOilRevenue = parseFloat(document.getElementById('total-oil-revenue')?.value) || 0;
-  const washLubeRevenue = parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0;
+  const totalOilRevenue = parseSummaryNumber(document.getElementById('total-oil-revenue')?.value);
+  const washLubeRevenue = parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value);
 
   // Add extra revenue fields
   let extraRevenue = 0;
-  for (let i = 1; i <= 5; i++) {
-    const amount = parseFloat(document.getElementById(`revenue-amount-${i}`)?.value) || 0;
-    extraRevenue += amount;
-  }
+  collectRevenueItems().forEach((item) => {
+    extraRevenue += item.amount;
+  });
 
   const totalRevenue = totalFuelCash + totalOilRevenue + washLubeRevenue + extraRevenue;
   document.getElementById('total-revenue').value = formatPrice(totalRevenue);
@@ -8271,10 +8877,9 @@ function calculateTotalRevenue() {
 function calculateTotalExpenses() {
   let totalExpenses = 0;
 
-  for (let i = 1; i <= 10; i++) {
-    const amount = parseFloat(document.getElementById(`expense-amount-${i}`)?.value) || 0;
-    totalExpenses += amount;
-  }
+  collectExpenseItems().forEach((item) => {
+    totalExpenses += item.amount;
+  });
 
   document.getElementById('total-expenses').value = formatPrice(totalExpenses);
 
@@ -8284,8 +8889,8 @@ function calculateTotalExpenses() {
 
 // Calculate net total (revenue - expenses)
 function calculateNetTotal() {
-  const totalRevenue = parseFloat(document.getElementById('total-revenue')?.value) || 0;
-  const totalExpenses = parseFloat(document.getElementById('total-expenses')?.value) || 0;
+  const totalRevenue = parseSummaryNumber(document.getElementById('total-revenue')?.value);
+  const totalExpenses = parseSummaryNumber(document.getElementById('total-expenses')?.value);
 
   const netTotal = totalRevenue - totalExpenses;
   document.getElementById('final-net-total').value = formatPrice(netTotal);
@@ -8380,24 +8985,11 @@ function collectOilData() {
 }
 
 function collectExpenseItems() {
-  const items = [];
+  return getSummaryRowItems('shift-expense-rows', '.shift-expense-desc', '.shift-expense-amount');
+}
 
-  for (let i = 1; i <= 10; i += 1) {
-    const description = String(document.getElementById(`expense-desc-${i}`)?.value || '').trim();
-    const amount = parseFloat(document.getElementById(`expense-amount-${i}`)?.value);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      continue;
-    }
-
-    items.push({
-      index: i,
-      description,
-      amount
-    });
-  }
-
-  return items;
+function collectRevenueItems() {
+  return getSummaryRowItems('shift-revenue-extra-rows', '.shift-revenue-desc', '.shift-revenue-amount');
 }
 
 function normalizeExpenseItems(items) {
@@ -8424,27 +9016,24 @@ function normalizeExpenseItems(items) {
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.index - b.index)
-    .slice(0, 10);
+    .sort((a, b) => a.index - b.index);
 }
 
 function clearShiftExpenseInputs() {
-  for (let i = 1; i <= 10; i += 1) {
-    const descriptionInput = document.getElementById(`expense-desc-${i}`);
-    const amountInput = document.getElementById(`expense-amount-${i}`);
-
-    if (descriptionInput) {
-      descriptionInput.value = '';
-    }
-
-    if (amountInput) {
-      amountInput.value = '';
-    }
-  }
+  renderExpenseItems([]);
 
   const totalExpensesInput = document.getElementById('total-expenses');
   if (totalExpensesInput) {
     totalExpensesInput.value = '';
+  }
+}
+
+function clearShiftRevenueInputs() {
+  renderRevenueItems([]);
+
+  const washLubeInput = document.getElementById('total-wash-lube-revenue');
+  if (washLubeInput) {
+    washLubeInput.value = '';
   }
 }
 
@@ -8559,9 +9148,10 @@ async function saveShift() {
       oil_data: JSON.stringify(collectOilData()),
       oil_total: calculateOilTotal(),
       customer_rows: collectCustomerRowsData(),
+      revenue_items: collectRevenueItems(),
       expense_items: collectExpenseItems(),
-      wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
-      total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
+      wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
+      total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
       grand_total: calculateGrandTotal(),
       is_saved: 1
     };
@@ -8788,6 +9378,7 @@ function clearFieldsAfterSave(oilRemainingValues = {}) {
     });
   }
 
+  clearShiftRevenueInputs();
   clearShiftExpenseInputs();
   calculateOilTotal();
   calculateNetTotal();
@@ -8822,6 +9413,10 @@ function setShiftEntryInputsDisabled(disabled) {
   const fields = shiftEntryScreen.querySelectorAll('input, select, textarea');
   fields.forEach((field) => {
     if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    if (disabled && (field.id === 'shift-date' || field.id === 'shift-number')) {
+      field.disabled = false;
       return;
     }
     field.disabled = disabled;
@@ -8876,6 +9471,24 @@ async function getLastShift() {
   }
 }
 
+async function getLastDraftShift() {
+  try {
+    return await ipcRenderer.invoke('get-last-draft-shift');
+  } catch (error) {
+    console.error('Error getting last draft shift:', error);
+    return null;
+  }
+}
+
+async function getLastSavedShift() {
+  try {
+    return await ipcRenderer.invoke('get-last-saved-shift');
+  } catch (error) {
+    console.error('Error getting last saved shift:', error);
+    return null;
+  }
+}
+
 // Calculate next shift date and number based on last shift
 function calculateNextShift(lastShift) {
   if (!lastShift) {
@@ -8906,22 +9519,68 @@ function calculateNextShift(lastShift) {
   }
 }
 
+function loadPreviousShiftOilBalances(previousShift) {
+  const legacyData = parseShiftJsonObject(previousShift?.data, {});
+  const oilData = parseShiftJsonObject(previousShift?.oil_data || legacyData.oil_data, {});
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody || Object.keys(oilData).length === 0) return;
+
+  const oilDataByName = new Map(
+    Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(oilName), data])
+  );
+
+  tableBody.querySelectorAll('tr[data-oil-id]').forEach((row) => {
+    const oilId = row.getAttribute('data-oil-id');
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+    const previousOilData = oilDataByName.get(normalizeOilName(oilName));
+    if (!oilId || !previousOilData) return;
+
+    const carriedInitial = getShiftInputDisplayValue(previousOilData.remaining);
+    const initialInput = document.getElementById(`oil-${oilId}-initial`);
+    const addedInput = document.getElementById(`oil-${oilId}-added`);
+    const totalInput = document.getElementById(`oil-${oilId}-total`);
+    const soldInput = document.getElementById(`oil-${oilId}-sold`);
+    const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+    const openInput = document.getElementById(`oil-${oilId}-open`);
+    const customersInput = document.getElementById(`oil-${oilId}-customers`);
+    const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+
+    if (initialInput) initialInput.value = carriedInitial;
+    if (addedInput) addedInput.value = '';
+    if (totalInput) totalInput.value = carriedInitial;
+    if (soldInput) soldInput.value = '';
+    if (remainingInput) remainingInput.value = '';
+    if (openInput) openInput.value = '';
+    if (customersInput) customersInput.value = '';
+    if (revenueInput) revenueInput.value = '';
+  });
+
+  calculateOilTotal();
+  calculateNetTotal();
+}
+
 // Load next shift automatically with pre-populated initial values
 async function loadNextShift() {
   try {
-    // Get last shift
-    const lastShift = await getLastShift();
+    if (shiftDraftAutoSavePromise) {
+      await shiftDraftAutoSavePromise;
+    }
 
-    // If there is a draft shift (not saved), resume it directly
-    if (lastShift && parseInt(lastShift.is_saved, 10) !== 1) {
+    const lastDraftShift = await getLastDraftShift();
+
+    // If there is a draft shift (not saved), resume it directly.
+    if (lastDraftShift) {
       const dateInput = document.getElementById('shift-date');
       const shiftNumberSelect = document.getElementById('shift-number');
-      if (dateInput) dateInput.value = lastShift.date;
-      if (shiftNumberSelect) shiftNumberSelect.value = lastShift.shift_number;
-      await loadShiftData(lastShift.date, lastShift.shift_number);
+      if (dateInput) dateInput.value = lastDraftShift.date;
+      if (shiftNumberSelect) shiftNumberSelect.value = lastDraftShift.shift_number;
+      await loadShiftData(lastDraftShift.date, lastDraftShift.shift_number);
       disableReadOnlyMode();
       return;
     }
+
+    // Get last saved shift for next-shift calculation.
+    const lastShift = await getLastSavedShift();
 
     // Calculate next shift
     const nextShift = calculateNextShift(lastShift);
@@ -8998,6 +9657,7 @@ async function loadPreviousShiftEndValues(previousShift) {
     calculateFuelQuantity('بنزين ٩٢');
     calculateFuelQuantity('بنزين ٨٠');
     calculateFuelQuantity('غاز سيارات');
+    loadPreviousShiftOilBalances(previousShift);
   } catch (error) {
     console.error('Error loading previous shift end values:', error);
   }
@@ -9019,7 +9679,7 @@ async function loadShiftData(date, shiftNumber) {
       setCustomerRowsData([]);
 
       // Load last shift data (by ID) to populate "first shift" fields
-      const lastShift = await getLastShift();
+      const lastShift = await getLastSavedShift();
       if (lastShift) {
         await loadPreviousShiftEndValues(lastShift);
       }
@@ -9049,6 +9709,7 @@ async function loadShiftData(date, shiftNumber) {
     const fuelData = parseJsonObject(shift.fuel_data || legacyData.fuel_data, {});
     const oilData = parseJsonObject(shift.oil_data || legacyData.oil_data, {});
     const customerRows = normalizeCustomerRowsData(legacyData.customer_rows);
+    const revenueItems = normalizeRevenueItems(legacyData.revenue_items);
     const washLubeRevenue = parseFloat(
       shift.wash_lube_revenue ?? legacyData.wash_lube_revenue ?? 0
     ) || 0;
@@ -9057,7 +9718,8 @@ async function loadShiftData(date, shiftNumber) {
     ) || 0;
     const expenseItems = normalizeExpenseItems(legacyData.expense_items);
 
-    clearShiftExpenseInputs();
+    renderRevenueItems(revenueItems);
+    renderExpenseItems(expenseItems);
 
     // Populate fuel data
     Object.entries(fuelData).forEach(([fuelType, data]) => {
@@ -9152,24 +9814,6 @@ async function loadShiftData(date, shiftNumber) {
     if (washLubeInput) {
       washLubeInput.value = Math.abs(washLubeRevenue) > 0.0001 ? formatPrice(washLubeRevenue) : '';
     }
-
-    expenseItems.forEach((item) => {
-      const rowIndex = item.index;
-      if (!Number.isFinite(rowIndex) || rowIndex < 1 || rowIndex > 10) {
-        return;
-      }
-
-      const descriptionInput = document.getElementById(`expense-desc-${rowIndex}`);
-      const amountInput = document.getElementById(`expense-amount-${rowIndex}`);
-
-      if (descriptionInput) {
-        descriptionInput.value = item.description;
-      }
-
-      if (amountInput) {
-        amountInput.value = formatPrice(item.amount);
-      }
-    });
 
     setCustomerRowsData(customerRows);
 
@@ -9292,11 +9936,7 @@ function clearShiftForm() {
     });
   }
 
-  const washLubeInput = document.getElementById('total-wash-lube-revenue');
-  if (washLubeInput) {
-    washLubeInput.value = '';
-  }
-
+  clearShiftRevenueInputs();
   clearShiftExpenseInputs();
 
   // Reset totals
@@ -9319,6 +9959,28 @@ async function handleShiftIdentifierChange() {
   const date = dateInput.value;
   const shiftNumber = parseInt(shiftNumberSelect.value);
   const isDraftMode = shiftViewMode !== 'history' && !currentShiftData.isSaved;
+
+  if (shiftViewMode === 'history') {
+    const previousDate = currentShiftData.date;
+    const previousShift = currentShiftData.shiftNumber;
+    const previousKey = getShiftIdentifierKey(previousDate, previousShift);
+    const nextKey = getShiftIdentifierKey(date, shiftNumber);
+
+    if (previousKey === nextKey) {
+      return;
+    }
+
+    const loaded = await loadShiftHistory(date, shiftNumber, null);
+    if (!loaded) {
+      showMessage('لا توجد وردية محفوظة لهذه البيانات', 'info');
+      if (previousDate) dateInput.value = previousDate;
+      if (previousShift) shiftNumberSelect.value = previousShift.toString();
+      if (previousDate && previousShift) {
+        updateHistoryChip(previousDate, previousShift);
+      }
+    }
+    return;
+  }
 
   // In draft mode, changing date/shift should only re-associate the current form data,
   // not reload another shift and wipe current inputs.
@@ -9415,17 +10077,22 @@ async function loadShiftHistory(date, shiftNumber, messageEl) {
 
     if (!existingShift) {
       if (messageEl) messageEl.textContent = 'لا توجد وردية محفوظة لهذه البيانات';
-      return;
+      return false;
     }
 
     shiftViewMode = 'history';
     const dateField = document.getElementById('shift-date');
-  const shiftField = document.getElementById('shift-number');
-  if (dateField) dateField.value = date;
-  if (shiftField) shiftField.value = shiftNumber.toString();
+    const shiftField = document.getElementById('shift-number');
+    if (dateField) dateField.value = date;
+    if (shiftField) shiftField.value = shiftNumber.toString();
 
+    bindShiftIdentifierListeners();
     showScreen('shift-entry', 'home');
+    const legacyData = parseShiftJsonObject(existingShift.data, {});
+    const oilData = parseShiftJsonObject(existingShift.oil_data || legacyData.oil_data, {});
+    renderSavedShiftOilRows(oilData);
     await loadShiftData(date, shiftNumber);
+    initializeShiftHorizontalScrollControls();
     enableReadOnlyMode();
     updateShiftTitle();
     toggleHistoryBar(true);
@@ -9433,9 +10100,11 @@ async function loadShiftHistory(date, shiftNumber, messageEl) {
 
     if (messageEl) messageEl.textContent = '';
     closeShiftHistoryModal();
+    return true;
   } catch (error) {
     console.error('Error loading shift from history:', error);
     if (messageEl) messageEl.textContent = 'حدث خطأ أثناء تحميل الوردية';
+    return false;
   }
 }
 
@@ -9488,14 +10157,69 @@ function getAdjacentShift(dateStr, shiftNumber, direction) {
   }
 }
 
+function isMissingIpcHandlerError(error) {
+  return String(error?.message || error || '').includes('No handler registered');
+}
+
+async function findAdjacentSavedShiftFallback(date, shiftNumber, direction) {
+  let cursor = getAdjacentShift(date, shiftNumber, direction);
+  const maxAttempts = 1460;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const savedShift = await ipcRenderer.invoke('get-saved-shift', {
+      date: cursor.date,
+      shift_number: cursor.shiftNumber
+    });
+
+    if (savedShift) {
+      return savedShift;
+    }
+
+    cursor = getAdjacentShift(cursor.date, cursor.shiftNumber, direction);
+  }
+
+  return null;
+}
+
 async function navigateShiftHistory(direction) {
   if (shiftViewMode !== 'history') return;
-  const currentDate = currentShiftData.date;
-  const currentShiftNumber = currentShiftData.shiftNumber;
+  const currentDate = currentShiftData.date || document.getElementById('shift-date')?.value;
+  const currentShiftNumber = parseInt(
+    currentShiftData.shiftNumber || document.getElementById('shift-number')?.value || '0',
+    10
+  );
   if (!currentDate || !currentShiftNumber) return;
 
-  const { date, shiftNumber } = getAdjacentShift(currentDate, currentShiftNumber, direction);
-  await loadShiftHistory(date, shiftNumber, null);
+  try {
+    let adjacentShift = null;
+
+    try {
+      adjacentShift = await ipcRenderer.invoke('get-adjacent-saved-shift', {
+        date: currentDate,
+        shift_number: currentShiftNumber,
+        direction
+      });
+    } catch (error) {
+      if (!isMissingIpcHandlerError(error)) {
+        throw error;
+      }
+
+      adjacentShift = await findAdjacentSavedShiftFallback(currentDate, currentShiftNumber, direction);
+    }
+
+    if (!adjacentShift) {
+      showMessage(
+        direction === 'next' ? 'لا توجد وردية محفوظة تالية' : 'لا توجد وردية محفوظة سابقة',
+        'info'
+      );
+      return;
+    }
+
+    await loadShiftHistory(adjacentShift.date, parseInt(adjacentShift.shift_number, 10), null);
+  } catch (error) {
+    console.error('Error navigating shift history:', error);
+    showMessage('حدث خطأ أثناء التنقل بين الورديات', 'error');
+  }
 }
 
 // Shift quick menu and reset counters
@@ -9923,6 +10647,149 @@ async function loadFuelPricesForDate(date) {
 
 // Track if shift listeners are already set up
 let shiftListenersInitialized = false;
+let shiftIdentifierListenersInitialized = false;
+let shiftScrollControlsResizeObserver = null;
+let shiftScrollControlsResizeListenerBound = false;
+
+function getShiftScrollContainers() {
+  return Array.from(document.querySelectorAll(
+    '#shift-entry-screen .fuel-tables-wrapper, #shift-entry-screen .shift-oil-table-container'
+  ));
+}
+
+function getShiftScrollState(scroller) {
+  const maxScroll = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const rawScrollLeft = scroller.scrollLeft;
+  const isRtl = getComputedStyle(scroller).direction === 'rtl';
+  const tolerance = 2;
+
+  if (maxScroll <= tolerance) {
+    return { canScrollLeft: false, canScrollRight: false };
+  }
+
+  if (isRtl) {
+    return {
+      canScrollLeft: rawScrollLeft > -maxScroll + tolerance,
+      canScrollRight: rawScrollLeft < -tolerance
+    };
+  }
+
+  return {
+    canScrollLeft: rawScrollLeft > tolerance,
+    canScrollRight: rawScrollLeft < maxScroll - tolerance
+  };
+}
+
+function updateShiftScrollButtons(scroller) {
+  const shell = scroller.closest('.shift-scroll-control-shell');
+  if (!shell) return;
+
+  const leftButton = shell.querySelector('.shift-scroll-button.scroll-left');
+  const rightButton = shell.querySelector('.shift-scroll-button.scroll-right');
+  if (!leftButton || !rightButton) return;
+
+  const isVisible = !!(scroller.offsetWidth || scroller.offsetHeight || scroller.getClientRects().length);
+  const state = isVisible
+    ? getShiftScrollState(scroller)
+    : { canScrollLeft: false, canScrollRight: false };
+
+  leftButton.classList.toggle('is-hidden', !state.canScrollLeft);
+  leftButton.disabled = !state.canScrollLeft;
+  leftButton.setAttribute('aria-hidden', state.canScrollLeft ? 'false' : 'true');
+
+  rightButton.classList.toggle('is-hidden', !state.canScrollRight);
+  rightButton.disabled = !state.canScrollRight;
+  rightButton.setAttribute('aria-hidden', state.canScrollRight ? 'false' : 'true');
+}
+
+function updateShiftHorizontalScrollControls() {
+  requestAnimationFrame(() => {
+    getShiftScrollContainers().forEach(updateShiftScrollButtons);
+  });
+}
+
+function scrollShiftContainer(scroller, direction) {
+  const distance = Math.max(180, Math.floor(scroller.clientWidth * 0.72));
+  const left = direction === 'left' ? -distance : distance;
+
+  scroller.scrollBy({ left, behavior: 'smooth' });
+  setTimeout(() => updateShiftScrollButtons(scroller), 260);
+}
+
+function createShiftScrollButton(scroller, direction) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `shift-scroll-button scroll-${direction} is-hidden`;
+  button.dir = 'ltr';
+  button.setAttribute('aria-label', direction === 'left' ? 'Scroll left' : 'Scroll right');
+  button.addEventListener('click', () => scrollShiftContainer(scroller, direction));
+  return button;
+}
+
+function setupShiftScrollContainer(scroller) {
+  if (scroller.dataset.shiftScrollControls === '1') {
+    updateShiftScrollButtons(scroller);
+    return;
+  }
+
+  const parent = scroller.parentElement;
+  if (!parent) return;
+
+  const shell = document.createElement('div');
+  shell.className = 'shift-scroll-control-shell';
+  parent.insertBefore(shell, scroller);
+  shell.appendChild(scroller);
+  shell.appendChild(createShiftScrollButton(scroller, 'left'));
+  shell.appendChild(createShiftScrollButton(scroller, 'right'));
+
+  scroller.dataset.shiftScrollControls = '1';
+  scroller.addEventListener('scroll', () => updateShiftScrollButtons(scroller), { passive: true });
+
+  if (window.ResizeObserver) {
+    if (!shiftScrollControlsResizeObserver) {
+      shiftScrollControlsResizeObserver = new ResizeObserver(updateShiftHorizontalScrollControls);
+    }
+    shiftScrollControlsResizeObserver.observe(scroller);
+  }
+
+  updateShiftScrollButtons(scroller);
+}
+
+function initializeShiftHorizontalScrollControls() {
+  getShiftScrollContainers().forEach(setupShiftScrollContainer);
+
+  if (!shiftScrollControlsResizeListenerBound) {
+    window.addEventListener('resize', updateShiftHorizontalScrollControls);
+    shiftScrollControlsResizeListenerBound = true;
+  }
+
+  updateShiftHorizontalScrollControls();
+}
+
+function bindShiftIdentifierListeners() {
+  if (shiftIdentifierListenersInitialized) return;
+
+  const dateInput = document.getElementById('shift-date');
+  const shiftNumberSelect = document.getElementById('shift-number');
+
+  if (dateInput) {
+    dateInput.addEventListener('change', async () => {
+      if (shiftViewMode === 'history') {
+        await handleShiftIdentifierChange();
+        return;
+      }
+      await loadFuelPricesForDate(dateInput.value);
+      await loadAllOilPrices();
+      await handleShiftIdentifierChange();
+    });
+  }
+
+  if (shiftNumberSelect) {
+    shiftNumberSelect.addEventListener('change', handleShiftIdentifierChange);
+  }
+
+  shiftIdentifierListenersInitialized = true;
+}
 
 // Initialize shift entry when screen is shown
 async function initializeShiftEntry() {
@@ -9933,22 +10800,11 @@ async function initializeShiftEntry() {
 
   // Set up event listeners for date and shift number
   const dateInput = document.getElementById('shift-date');
-  const shiftNumberSelect = document.getElementById('shift-number');
 
   // Only set up event listeners once
   if (!shiftListenersInitialized) {
-    if (dateInput) {
-      // Load prices when date changes
-      dateInput.addEventListener('change', async () => {
-        await loadFuelPricesForDate(dateInput.value);
-        await loadAllOilPrices();
-        await handleShiftIdentifierChange();
-      });
-    }
-
-    if (shiftNumberSelect) {
-      shiftNumberSelect.addEventListener('change', handleShiftIdentifierChange);
-    }
+    bindShiftIdentifierListeners();
+    initializeShiftHorizontalScrollControls();
 
     document.querySelectorAll('.shift-expense-desc').forEach((input) => {
       input.addEventListener('input', () => {
@@ -10060,6 +10916,8 @@ async function initializeShiftEntry() {
 
     shiftListenersInitialized = true;
   }
+
+  initializeShiftHorizontalScrollControls();
 
   // Keep history view fully separated from "new shift" flow:
   // no auto-next-shift loading when opening a saved shift from history.
@@ -10293,6 +11151,9 @@ ipcRenderer.on('sync-completed', (event, result) => {
       showMessage(`تمت المزامنة بنجاح: ${result.synced} عملية`, 'success');
     }
     updateConnectionStatus();
+    if (currentScreen === 'profit') {
+      loadProfitMonthlyData();
+    }
   } else {
     showMessage('فشلت المزامنة', 'error');
   }
