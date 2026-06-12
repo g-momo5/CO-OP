@@ -7251,6 +7251,125 @@ select option {
   margin: 2.5rem 0;
 }
 
+.excel-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+
+.excel-import-status {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  color: #34495e;
+  line-height: 1.7;
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+}
+
+.excel-import-status.error {
+  background: #fff5f5;
+  border-color: #f5c2c7;
+  color: #842029;
+}
+
+.excel-import-status.success {
+  background: #f0fff4;
+  border-color: #badbcc;
+  color: #0f5132;
+}
+
+.excel-import-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.excel-import-summary-item {
+  background: #ffffff;
+  border: 1px solid #e6e9ee;
+  border-radius: 8px;
+  padding: 0.85rem;
+}
+
+.excel-import-summary-item strong {
+  color: #2c3e50;
+  display: block;
+  font-size: 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.excel-import-block {
+  margin-top: 1.5rem;
+}
+
+.excel-import-block h4 {
+  color: #2c3e50;
+  margin: 0 0 0.75rem;
+}
+
+.excel-import-block p {
+  color: #666;
+  margin: 0 0 1rem;
+}
+
+.excel-import-unknown-row {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  padding: 1rem;
+}
+
+.excel-import-unknown-row.resolved {
+  background: #f0fff4;
+  border-color: #badbcc;
+}
+
+.excel-import-unknown-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(180px, 1.4fr) minmax(160px, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.excel-import-unknown-grid label {
+  color: #34495e;
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.excel-import-unknown-grid input,
+.excel-import-unknown-grid select {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  padding: 0.65rem;
+  width: 100%;
+}
+
+.excel-import-table-wrapper {
+  overflow-x: auto;
+}
+
+.excel-import-preview-table th,
+.excel-import-preview-table td {
+  white-space: nowrap;
+}
+
+.excel-import-preview-table .excel-import-row-error {
+  background: #fff5f5;
+}
+
+@media (max-width: 900px) {
+  .excel-import-unknown-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .update-info-card {
   background: #f8f9fa;
   border-radius: 8px;

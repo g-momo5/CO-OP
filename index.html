@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
     rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="node_modules/chart.js/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="rtl-config.js"></script>
@@ -1072,6 +1072,7 @@
             <ul class="settings-menu">
               <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
               <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
+              <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
@@ -1175,6 +1176,52 @@
                     <!-- Customers will be added here dynamically -->
                   </tbody>
                 </table>
+              </div>
+            </section>
+
+            <!-- Excel Sales Import Section -->
+            <section id="settings-section-excel-sales-import" class="settings-section">
+              <h3>استيراد مبيعات Excel</h3>
+
+              <div class="excel-import-actions">
+                <input type="file" id="excel-sales-file-input" accept=".xlsx,.xls" style="display: none;" onchange="handleExcelSalesFile(event)">
+                <button class="btn btn-primary" onclick="openExcelSalesFilePicker()">اختيار ملف Excel</button>
+                <button class="btn btn-secondary" onclick="resetExcelSalesImport()">مسح البيانات</button>
+                <button class="btn btn-success" id="excel-sales-import-btn" onclick="importExcelSales()" disabled>استيراد المبيعات</button>
+              </div>
+
+              <div id="excel-sales-import-status" class="excel-import-status">
+                اختر ملف Excel يحتوي على الأعمدة: اليوم، الصنف، الكمية، سايب، عيارات، عملاء، السعر.
+              </div>
+
+              <div id="excel-sales-summary" class="excel-import-summary" style="display: none;"></div>
+
+              <div id="excel-sales-unknown-products" class="excel-import-block" style="display: none;">
+                <h4>منتجات غير موجودة</h4>
+                <p>راجع الاسم المقروء من الملف. يمكنك ربطه بمنتج موجود أو تصحيح الاسم وإضافته كمنتج جديد.</p>
+                <div id="excel-sales-unknown-products-list"></div>
+              </div>
+
+              <div id="excel-sales-preview" class="excel-import-block" style="display: none;">
+                <h4>معاينة البيانات</h4>
+                <div class="excel-import-table-wrapper">
+                  <table class="base-table excel-import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>التاريخ</th>
+                        <th>المنتج</th>
+                        <th>النوع</th>
+                        <th>الكمية</th>
+                        <th>سايب</th>
+                        <th>عيارات</th>
+                        <th>عملاء</th>
+                        <th>السعر</th>
+                        <th>الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody id="excel-sales-preview-body"></tbody>
+                  </table>
+                </div>
               </div>
             </section>
 

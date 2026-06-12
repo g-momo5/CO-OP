@@ -1040,6 +1040,62 @@ function setupIPCHandlers() {
     }
   });
 
+  ipcMain.handle('add-excel-import-product', async (_event, productData) => {
+    try {
+      const productType = String(productData?.product_type || '').trim();
+      const productName = String(productData?.product_name || '').trim();
+      const price = parseFloat(productData?.price);
+      const startDate = String(productData?.start_date || '').trim();
+
+      if (!['fuel', 'oil'].includes(productType)) {
+        throw new Error('نوع المنتج غير صالح');
+      }
+
+      if (!productName) {
+        throw new Error('يرجى إدخال اسم المنتج');
+      }
+
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new Error('يرجى إدخال سعر صحيح');
+      }
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+        throw new Error('تاريخ السعر غير صالح');
+      }
+
+      const existing = await executeQuery(
+        'SELECT * FROM products WHERE product_name = $1',
+        [productName]
+      );
+      if (existing.length > 0) {
+        throw new Error('يوجد منتج بهذا الاسم بالفعل');
+      }
+
+      await executeInsert(
+        'INSERT INTO products (product_type, product_name, current_price, vat, effective_date) VALUES ($1, $2, $3, $4, $5)',
+        [productType, productName, price, 0, startDate],
+        'products'
+      );
+
+      const rows = await executeQuery(
+        'SELECT id FROM products WHERE product_name = $1 ORDER BY id DESC LIMIT 1',
+        [productName]
+      );
+      const productId = rows[0]?.id || null;
+
+      await executeInsert(
+        'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)',
+        [productType, productName, price, startDate, productId],
+        'price_history'
+      );
+
+      return { success: true, id: productId };
+    } catch (error) {
+      console.error('Error adding Excel import product:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Update product name
   ipcMain.handle('update-product-name', async (event, { type, oldName, newName, id }) => {
     try {
@@ -1253,7 +1309,9 @@ function setupIPCHandlers() {
       const reportQuery = 'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
-      console.error('Error getting sales report:', error);
+      if (error.code !== 'OFFLINE_RESTRICTED') {
+        console.error('Error getting sales report:', error);
+      }
       throw error;
     }
   });
@@ -3391,6 +3449,17 @@ ipcMain.on('install-update', () => {
 
 // Manual update check from settings
 ipcMain.on('check-for-updates-manual', () => {
+  if (!dbManager?.isOnline) {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-check-result', {
+        available: false,
+        offline: true,
+        error: 'لا يوجد اتصال بالإنترنت'
+      });
+    }
+    return;
+  }
+
   if (autoUpdater) {
     autoUpdater.checkForUpdates().then(result => {
       if (mainWindow && result && result.updateInfo) {

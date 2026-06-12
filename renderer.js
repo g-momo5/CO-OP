@@ -1,5 +1,12 @@
 const { ipcRenderer } = require('electron');
 
+let XLSX = null;
+try {
+  XLSX = require('xlsx');
+} catch (error) {
+  console.warn('Excel import library is unavailable:', error.message);
+}
+
 // Global variables
 let charts = {};
 let currentScreen = 'home';
@@ -7,7 +14,7 @@ window.__currentScreen = currentScreen;
 let currentParentScreen = null;
 let oilItemCounter = 0;
 let navigationHistory = [];
-let isOnline = true;
+let isOnline = navigator.onLine !== false;
 let offlineRestricted = {
   screens: ['report', 'charts'],
   settingsSections: ['invoices-list', 'backup']
@@ -22,6 +29,15 @@ const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
 let currentHomeChartMode = HOME_CHART_MODE.PURCHASES;
 window.__skipBeforeUnloadWarning = false;
+let excelSalesImportState = {
+  fileName: '',
+  rawRows: [],
+  parsedRows: [],
+  products: [],
+  resolutions: {},
+  validationErrors: [],
+  conflicts: []
+};
 const ANNUAL_INVENTORY_FIELDS = [
   { key: 'prev_balance', id: 'annual-prev-balance' },
   { key: 'station_profit', id: 'annual-station-profit' },
@@ -56,6 +72,7 @@ const screenTitles = {
 const settingsSectionTitles = {
   'manage-products': 'إدارة المنتجات',
   'manage-customers': 'إدارة العملاء',
+  'excel-sales-import': 'استيراد مبيعات Excel',
   'invoices-list': 'عرض الفواتير',
   'general': 'إعدادات عامة',
   'backup': 'النسخ الاحتياطي'
@@ -171,6 +188,7 @@ async function bootstrapApp() {
     initSalesSummaryFilters();
     initSafeBookFilters();
     initializeConnectionMonitoring();
+    await updateConnectionStatus();
 
     await Promise.allSettled([
       loadHomeChart(),
@@ -187,7 +205,7 @@ async function bootstrapApp() {
     // Check for updates on startup if enabled
     setTimeout(() => {
       const autoCheck = localStorage.getItem('auto-check-updates');
-      if (autoCheck === null || autoCheck === 'true') {
+      if ((autoCheck === null || autoCheck === 'true') && isOnline) {
         ipcRenderer.send('check-for-updates-manual');
       }
     }, 3000);
@@ -774,14 +792,23 @@ function resetDepotView() {
   }
 }
 
+function setTodayStatsUnavailable() {
+  const todaySalesEl = document.getElementById('today-sales');
+  const todayRevenueEl = document.getElementById('today-revenue');
+  const todayTransactionsEl = document.getElementById('today-transactions');
+  if (todaySalesEl) todaySalesEl.textContent = '-';
+  if (todayRevenueEl) todayRevenueEl.textContent = '-';
+  if (todayTransactionsEl) todayTransactionsEl.textContent = '-';
+}
+
+function isOfflineRequiredError(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('تتطلب اتصالاً بالإنترنت') || message.includes('requires an internet connection');
+}
+
 async function loadTodayStats() {
   if (!isOnline) {
-    const todaySalesEl = document.getElementById('today-sales');
-    const todayRevenueEl = document.getElementById('today-revenue');
-    const todayTransactionsEl = document.getElementById('today-transactions');
-    if (todaySalesEl) todaySalesEl.textContent = '-';
-    if (todayRevenueEl) todayRevenueEl.textContent = '-';
-    if (todayTransactionsEl) todayTransactionsEl.textContent = '-';
+    setTodayStatsUnavailable();
     return;
   }
   try {
@@ -800,6 +827,10 @@ async function loadTodayStats() {
     if (todayRevenueEl) todayRevenueEl.textContent = formatArabicCurrency(totalRevenue);
     if (todayTransactionsEl) todayTransactionsEl.textContent = convertToArabicNumerals(totalTransactions);
   } catch (error) {
+    if (isOfflineRequiredError(error)) {
+      setTodayStatsUnavailable();
+      return;
+    }
     console.error('Error loading today stats:', error);
   }
 }
@@ -1506,6 +1537,17 @@ function setupHomeChartToggle() {
   updateHomeChartToggleUI();
 }
 
+function getChartConstructor() {
+  return window.Chart || (typeof Chart !== 'undefined' ? Chart : null);
+}
+
+function clearChartCanvas(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas?.getContext('2d');
+  if (!canvas || !ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
 function syncHomeChartHeightToCardRows() {
   const homeScreen = document.getElementById('home-screen');
   if (!homeScreen || !homeScreen.classList.contains('active')) return;
@@ -2094,14 +2136,19 @@ async function loadHomeChart() {
     let chartData = [];
 
     if (isSalesMode) {
-      const sales = await ipcRenderer.invoke('get-sales');
-      if (!sales || !Array.isArray(sales)) {
-        console.error('Invalid sales data');
-        return;
-      }
-      chartData = sales.length > 0
-        ? sales
-        : await ipcRenderer.invoke('get-shift-fuel-sales');
+      const [salesResult, shiftFuelSalesResult] = await Promise.allSettled([
+        ipcRenderer.invoke('get-sales'),
+        ipcRenderer.invoke('get-shift-fuel-sales')
+      ]);
+
+      const sales = salesResult.status === 'fulfilled' && Array.isArray(salesResult.value)
+        ? salesResult.value
+        : [];
+      const shiftFuelSales = shiftFuelSalesResult.status === 'fulfilled' && Array.isArray(shiftFuelSalesResult.value)
+        ? shiftFuelSalesResult.value
+        : [];
+
+      chartData = [...sales, ...shiftFuelSales];
     } else {
       const movements = await ipcRenderer.invoke('get-fuel-movements');
       if (!movements || !Array.isArray(movements)) {
@@ -2127,11 +2174,19 @@ function normalizeFuelTypeForHomeChart(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
 
-  if (text === 'سولار' || text === 'ديزل' || text.toLowerCase() === 'diesel') return 'سولار';
-  if (text === 'غاز سيارات' || text.toLowerCase() === 'gas') return 'غاز سيارات';
-  if (text.includes('٩٥') || text.includes('95')) return 'بنزين ٩٥';
-  if (text.includes('٩٢') || text.includes('92')) return 'بنزين ٩٢';
-  if (text === 'بنزين ٨' || text.includes('٨٠') || text.includes('80')) return 'بنزين ٨٠';
+  const normalized = text
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .toLowerCase();
+
+  if (normalized === 'سولار' || normalized === 'ديزل' || normalized === 'diesel') return 'سولار';
+  if (normalized === 'غاز سيارات' || normalized === 'gas') return 'غاز سيارات';
+
+  const isFuelName = /بنزين|benz|gasoline|petrol/.test(normalized);
+  const hasOctane = (octane) => new RegExp(`(^|[^0-9])${octane}([^0-9]|$)`).test(normalized);
+  if (isFuelName && hasOctane('95')) return 'بنزين ٩٥';
+  if (isFuelName && hasOctane('92')) return 'بنزين ٩٢';
+  if (isFuelName && (hasOctane('80') || normalized === 'بنزين 8')) return 'بنزين ٨٠';
 
   return text;
 }
@@ -2359,12 +2414,17 @@ async function loadCharts() {
 
 function createFuelSalesChart(summary) {
   const ctx = document.getElementById('fuel-sales-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('fuel-sales-chart');
+    return;
+  }
 
   if (charts.fuelSales) {
     charts.fuelSales.destroy();
   }
 
-  charts.fuelSales = new Chart(ctx, {
+  charts.fuelSales = new ChartCtor(ctx, {
     type: 'doughnut',
     data: {
       labels: summary.map(item => item.fuel_type),
@@ -2396,6 +2456,11 @@ function createFuelSalesChart(summary) {
 
 function createMonthlyRevenueChart(sales) {
   const ctx = document.getElementById('monthly-revenue-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('monthly-revenue-chart');
+    return;
+  }
 
   if (charts.monthlyRevenue) {
     charts.monthlyRevenue.destroy();
@@ -2414,7 +2479,7 @@ function createMonthlyRevenueChart(sales) {
   const months = Object.keys(monthlyData).sort();
   const revenues = months.map(month => monthlyData[month]);
 
-  charts.monthlyRevenue = new Chart(ctx, {
+  charts.monthlyRevenue = new ChartCtor(ctx, {
     type: 'line',
     data: {
       labels: months.map(month => {
@@ -2468,6 +2533,11 @@ function createMonthlyRevenueChart(sales) {
 
 function createPaymentMethodsChart(sales) {
   const ctx = document.getElementById('payment-methods-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('payment-methods-chart');
+    return;
+  }
 
   if (charts.paymentMethods) {
     charts.paymentMethods.destroy();
@@ -2479,7 +2549,7 @@ function createPaymentMethodsChart(sales) {
     paymentCounts[sale.payment_method] = (paymentCounts[sale.payment_method] || 0) + 1;
   });
 
-  charts.paymentMethods = new Chart(ctx, {
+  charts.paymentMethods = new ChartCtor(ctx, {
     type: 'bar',
     data: {
       labels: Object.keys(paymentCounts),
@@ -2528,6 +2598,11 @@ function createPaymentMethodsChart(sales) {
 
 function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) {
   const ctx = document.getElementById('monthly-fuel-sales-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('monthly-fuel-sales-chart');
+    return;
+  }
 
   if (charts.monthlyFuelSales) {
     charts.monthlyFuelSales.destroy();
@@ -2540,7 +2615,18 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   // Group entries by month and fuel type
   const monthlyData = {};
   const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
-  const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+  const colors = [
+    '#FF6384',
+    '#36A2EB',
+    '#FFCE56',
+    '#4BC0C0',
+    '#9966FF',
+    '#2E7D32',
+    '#C2185B',
+    '#6D4C41',
+    '#00838F',
+    '#EF6C00'
+  ];
 
   // Initialize data structure
   entries.forEach(entry => {
@@ -2548,6 +2634,8 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
 
     const month = entry.date.substring(0, 7); // YYYY-MM
     const normalizedFuelType = normalizeFuelTypeForHomeChart(entry.fuel_type);
+    if (!normalizedFuelType) return;
+
     if (!monthlyData[month]) {
       monthlyData[month] = {};
       fuelTypes.forEach(type => {
@@ -2566,14 +2654,14 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   // Create datasets for each fuel type
   const datasets = fuelTypes.map((fuelType, index) => ({
     label: fuelType,
-    data: months.map(month => monthlyData[month][fuelType]),
-    backgroundColor: colors[index],
-    borderColor: colors[index],
+    data: months.map(month => monthlyData[month][fuelType] || 0),
+    backgroundColor: colors[index % colors.length],
+    borderColor: colors[index % colors.length],
     borderWidth: 2,
     fill: false
   }));
 
-  charts.monthlyFuelSales = new Chart(ctx, {
+  charts.monthlyFuelSales = new ChartCtor(ctx, {
     type: 'line',
     data: {
       labels: months.map(month => {
@@ -4150,6 +4238,8 @@ function showSettingsSectionWithoutHistory(sectionName) {
       updateUpdatesPageUI(); // Show install button if update is ready
     } else if (sectionName === 'invoices-list') {
       loadInvoicesList();
+    } else if (sectionName === 'excel-sales-import') {
+      loadExcelSalesImportProducts();
     }
   }
 }
@@ -4924,6 +5014,766 @@ async function handleBackupFile(event) {
   }
 }
 
+function normalizeExcelText(value) {
+  return String(value ?? '')
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\u0640/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeExcelProductKey(value) {
+  return normalizeExcelText(value).toLowerCase().replace(/\s+/g, '');
+}
+
+function isExcelWashLubeProduct(value) {
+  const key = normalizeExcelProductKey(value).replace(/[^\p{L}\p{N}]/gu, '');
+  return key === 'غسيلوتشحيم' || key === 'غسيلتشحيم';
+}
+
+function normalizeExcelHeader(value) {
+  return normalizeExcelText(value).replace(/\s+/g, '');
+}
+
+function parseExcelNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = normalizeExcelText(value)
+    .replace(/,/g, '.')
+    .replace(/[^\d.-]/g, '');
+
+  if (!text || text === '-' || text === '.') {
+    return null;
+  }
+
+  const parsed = parseFloat(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toIsoDateFromParts(year, month, day) {
+  const fullYear = year < 100 ? (year >= 70 ? 1900 + year : 2000 + year) : year;
+  const parsed = new Date(Date.UTC(fullYear, month - 1, day));
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== fullYear ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${fullYear.toString().padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function parseExcelSalesDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toIsoDateFromParts(value.getFullYear(), value.getMonth() + 1, value.getDate());
+  }
+
+  if (typeof value === 'number' && XLSX?.SSF?.parse_date_code) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return toIsoDateFromParts(parsed.y, parsed.m, parsed.d);
+    }
+  }
+
+  const text = normalizeExcelText(value);
+  const isoMatch = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (isoMatch) {
+    return toIsoDateFromParts(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10), parseInt(isoMatch[3], 10));
+  }
+
+  const dayMonthYearMatch = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if (dayMonthYearMatch) {
+    return toIsoDateFromParts(
+      parseInt(dayMonthYearMatch[3], 10),
+      parseInt(dayMonthYearMatch[2], 10),
+      parseInt(dayMonthYearMatch[1], 10)
+    );
+  }
+
+  return null;
+}
+
+function getExcelHeaderIndex(headers, acceptedNames) {
+  const accepted = acceptedNames.map(normalizeExcelHeader);
+  return headers.findIndex((header) => accepted.includes(normalizeExcelHeader(header)));
+}
+
+function getExcelProductOptionsHtml(selectedValue = '') {
+  const options = ['<option value="">اختر منتج موجود</option>'];
+  excelSalesImportState.products.forEach((product) => {
+    const value = `${product.type}\u001f${product.name}`;
+    options.push(
+      `<option value="${escapeHtml(value)}"${value === selectedValue ? ' selected' : ''}>${escapeHtml(product.name)} - ${product.type === 'fuel' ? 'وقود' : 'زيت'}</option>`
+    );
+  });
+  return options.join('');
+}
+
+function findExcelProductMatch(name) {
+  if (isExcelWashLubeProduct(name)) {
+    return { type: 'wash_lube', name: 'غسيل و تشحيم', key: 'wash_lube' };
+  }
+
+  const key = normalizeExcelProductKey(name);
+  if (!key) return null;
+
+  const exact = excelSalesImportState.products.find((product) => product.name === String(name || '').trim());
+  if (exact) return exact;
+
+  return excelSalesImportState.products.find((product) => product.key === key) || null;
+}
+
+async function loadExcelSalesImportProducts() {
+  try {
+    const [fuelRows, oilRows] = await Promise.all([
+      ipcRenderer.invoke('get-fuel-prices'),
+      ipcRenderer.invoke('get-oil-prices')
+    ]);
+
+    const fuelProducts = Array.isArray(fuelRows)
+      ? fuelRows.map((row) => ({
+          type: 'fuel',
+          name: String(row.fuel_type || '').trim(),
+          price: parseFloat(row.price) || 0
+        }))
+      : [];
+    const oilProducts = Array.isArray(oilRows)
+      ? oilRows.map((row) => ({
+          type: 'oil',
+          name: String(row.oil_type || '').trim(),
+          price: parseFloat(row.price) || 0
+        }))
+      : [];
+
+    excelSalesImportState.products = [...fuelProducts, ...oilProducts]
+      .filter((product) => product.name)
+      .map((product) => ({
+        ...product,
+        key: normalizeExcelProductKey(product.name)
+      }));
+
+    renderExcelSalesUnknownProducts();
+  } catch (error) {
+    console.error('Error loading products for Excel import:', error);
+    setExcelSalesImportStatus('حدث خطأ أثناء تحميل المنتجات', 'error');
+  }
+}
+
+function setExcelSalesImportStatus(message, type = '') {
+  const status = document.getElementById('excel-sales-import-status');
+  if (!status) return;
+
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function openExcelSalesFilePicker() {
+  const input = document.getElementById('excel-sales-file-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function resetExcelSalesImport() {
+  excelSalesImportState = {
+    fileName: '',
+    rawRows: [],
+    parsedRows: [],
+    products: excelSalesImportState.products || [],
+    resolutions: {},
+    validationErrors: [],
+    conflicts: []
+  };
+
+  const fileInput = document.getElementById('excel-sales-file-input');
+  if (fileInput) fileInput.value = '';
+
+  setExcelSalesImportStatus('اختر ملف Excel يحتوي على الأعمدة: اليوم، الصنف، الكمية، سايب، عيارات، عملاء، السعر.');
+  renderExcelSalesSummary();
+  renderExcelSalesUnknownProducts();
+  renderExcelSalesPreview();
+}
+
+async function handleExcelSalesFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!XLSX) {
+    setExcelSalesImportStatus('مكتبة قراءة Excel غير متاحة. تأكد من تثبيت xlsx.', 'error');
+    return;
+  }
+
+  try {
+    await loadExcelSalesImportProducts();
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new Error('empty_workbook');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+      header: 1,
+      raw: true,
+      defval: ''
+    });
+
+    const parsedRows = parseExcelSalesRows(rows);
+    excelSalesImportState.fileName = file.name;
+    excelSalesImportState.rawRows = parsedRows;
+    excelSalesImportState.resolutions = {};
+    await refreshExcelSalesImportPreview();
+  } catch (error) {
+    console.error('Error reading Excel sales file:', error);
+    setExcelSalesImportStatus('تعذر قراءة ملف Excel. تأكد من أن الأعمدة موجودة وأن الملف غير تالف.', 'error');
+    excelSalesImportState.rawRows = [];
+    excelSalesImportState.parsedRows = [];
+    renderExcelSalesSummary();
+    renderExcelSalesUnknownProducts();
+    renderExcelSalesPreview();
+  }
+}
+
+function parseExcelSalesRows(rows) {
+  const headerRowIndex = rows.findIndex((row) => {
+    const headers = Array.isArray(row) ? row : [];
+    return getExcelHeaderIndex(headers, ['اليوم']) !== -1 && getExcelHeaderIndex(headers, ['الصنف']) !== -1;
+  });
+
+  if (headerRowIndex === -1) {
+    throw new Error('missing_headers');
+  }
+
+  const headers = rows[headerRowIndex];
+  const indexes = {
+    date: getExcelHeaderIndex(headers, ['اليوم']),
+    product: getExcelHeaderIndex(headers, ['الصنف']),
+    quantity: getExcelHeaderIndex(headers, ['الكمية']),
+    open: getExcelHeaderIndex(headers, ['سايب']),
+    cars: getExcelHeaderIndex(headers, ['عيارات']),
+    clients: getExcelHeaderIndex(headers, ['عملاء']),
+    price: getExcelHeaderIndex(headers, ['السعر'])
+  };
+
+  const missingRequired = ['date', 'product', 'quantity', 'price'].filter((key) => indexes[key] === -1);
+  if (missingRequired.length > 0) {
+    throw new Error(`missing_required_headers:${missingRequired.join(',')}`);
+  }
+
+  return rows.slice(headerRowIndex + 1).map((row, offset) => {
+    const sourceRowNumber = headerRowIndex + offset + 2;
+    const rawProductName = String(row[indexes.product] || '').trim();
+    const date = parseExcelSalesDate(row[indexes.date]);
+    const quantity = parseExcelNumber(row[indexes.quantity]);
+    const open = indexes.open === -1 ? 0 : parseExcelNumber(row[indexes.open]) ?? 0;
+    const cars = indexes.cars === -1 ? 0 : parseExcelNumber(row[indexes.cars]) ?? 0;
+    const clients = indexes.clients === -1 ? 0 : parseExcelNumber(row[indexes.clients]) ?? 0;
+    const price = parseExcelNumber(row[indexes.price]);
+    const empty = !rawProductName && !date && quantity === null && price === null;
+
+    return {
+      sourceRowNumber,
+      rawProductName,
+      date,
+      quantity,
+      open,
+      cars,
+      clients,
+      price,
+      empty,
+      errors: []
+    };
+  }).filter((row) => !row.empty);
+}
+
+function getExcelSalesUnknownKeys() {
+  const unknownMap = new Map();
+  excelSalesImportState.rawRows.forEach((row) => {
+    const key = normalizeExcelProductKey(row.rawProductName);
+    if (!key || isExcelWashLubeProduct(row.rawProductName) || findExcelProductMatch(row.rawProductName) || excelSalesImportState.resolutions[key]) {
+      return;
+    }
+
+    if (!unknownMap.has(key)) {
+      unknownMap.set(key, {
+        key,
+        name: row.rawProductName,
+        price: row.price,
+        date: row.date
+      });
+    }
+  });
+
+  return Array.from(unknownMap.values());
+}
+
+function validateExcelSalesRows(rows) {
+  const errors = [];
+  const priceByGroup = new Map();
+
+  rows.forEach((row) => {
+    row.errors = [];
+    if (!row.date) row.errors.push('تاريخ غير صالح');
+    if (!row.rawProductName) row.errors.push('اسم المنتج مفقود');
+    if (!Number.isFinite(row.quantity) && row.product?.type !== 'wash_lube') {
+      row.errors.push('كمية غير صالحة');
+    }
+    if (
+      row.product?.type !== 'wash_lube' &&
+      row.product?.name !== 'غاز سيارات' &&
+      (!Number.isFinite(row.price) || row.price <= 0)
+    ) {
+      row.errors.push('سعر غير صالح');
+    }
+    if (row.product && row.date && row.product.type !== 'wash_lube' && row.product.name !== 'غاز سيارات') {
+      const groupKey = `${row.date}\u001f${row.product.type}\u001f${normalizeExcelProductKey(row.product.name)}`;
+      const previousPrice = priceByGroup.get(groupKey);
+      if (previousPrice !== undefined && Math.abs(previousPrice - row.price) > 0.0001) {
+        row.errors.push('نفس المنتج في نفس التاريخ له أكثر من سعر');
+      } else {
+        priceByGroup.set(groupKey, row.price);
+      }
+    }
+
+    if (row.errors.length > 0) {
+      errors.push(`صف ${row.sourceRowNumber}: ${row.errors.join('، ')}`);
+    }
+  });
+
+  return errors;
+}
+
+async function refreshExcelSalesImportPreview() {
+  const parsedRows = excelSalesImportState.rawRows.map((row) => {
+    const unknownKey = normalizeExcelProductKey(row.rawProductName);
+    const resolution = excelSalesImportState.resolutions[unknownKey];
+    const product = resolution || findExcelProductMatch(row.rawProductName);
+    return {
+      ...row,
+      product,
+      productName: product?.name || row.rawProductName,
+      productType: product?.type || ''
+    };
+  });
+
+  excelSalesImportState.parsedRows = parsedRows;
+  excelSalesImportState.validationErrors = validateExcelSalesRows(parsedRows);
+  await refreshExcelSalesConflicts();
+  renderExcelSalesSummary();
+  renderExcelSalesUnknownProducts();
+  renderExcelSalesPreview();
+  updateExcelSalesImportButton();
+}
+
+async function refreshExcelSalesConflicts() {
+  const dates = Array.from(new Set(
+    excelSalesImportState.parsedRows
+      .map((row) => row.date)
+      .filter(Boolean)
+  ));
+  const conflicts = [];
+
+  for (const date of dates) {
+    try {
+      const existing = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: 1 });
+      if (existing) {
+        conflicts.push(date);
+      }
+    } catch (error) {
+      console.warn('Unable to check existing shift for Excel import:', date, error);
+    }
+  }
+
+  excelSalesImportState.conflicts = conflicts;
+}
+
+function renderExcelSalesSummary() {
+  const container = document.getElementById('excel-sales-summary');
+  if (!container) return;
+
+  if (excelSalesImportState.rawRows.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const unresolvedCount = getExcelSalesUnknownKeys().length;
+  const datesCount = new Set(excelSalesImportState.parsedRows.map((row) => row.date).filter(Boolean)).size;
+  const conflictsCount = excelSalesImportState.conflicts.length;
+
+  container.style.display = 'grid';
+  container.innerHTML = `
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(excelSalesImportState.rawRows.length)}</strong>صفوف مقروءة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(datesCount)}</strong>تواريخ</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(unresolvedCount)}</strong>منتجات تحتاج مراجعة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(conflictsCount)}</strong>ورديات موجودة</div>
+  `;
+
+  if (excelSalesImportState.validationErrors.length > 0) {
+    setExcelSalesImportStatus(excelSalesImportState.validationErrors.slice(0, 4).join(' | '), 'error');
+  } else if (unresolvedCount > 0) {
+    setExcelSalesImportStatus('راجع المنتجات غير الموجودة قبل الاستيراد.', 'error');
+  } else if (conflictsCount > 0) {
+    setExcelSalesImportStatus('تم تجهيز الملف، لكن توجد ورديات محفوظة لنفس التاريخ وسيطلب البرنامج تأكيد قبل الكتابة فوقها.');
+  } else {
+    setExcelSalesImportStatus(`تم تجهيز الملف: ${excelSalesImportState.fileName}`, 'success');
+  }
+}
+
+function renderExcelSalesUnknownProducts() {
+  const wrapper = document.getElementById('excel-sales-unknown-products');
+  const list = document.getElementById('excel-sales-unknown-products-list');
+  if (!wrapper || !list) return;
+
+  const unknownProducts = getExcelSalesUnknownKeys();
+  if (unknownProducts.length === 0) {
+    wrapper.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  list.innerHTML = unknownProducts.map((item) => `
+    <div class="excel-import-unknown-row" data-key="${escapeHtml(item.key)}">
+      <div class="excel-import-unknown-grid">
+        <div>
+          <label>الاسم المقروء</label>
+          <div>${escapeHtml(item.name)}</div>
+        </div>
+        <div>
+          <label>ربط بمنتج موجود</label>
+          <select data-action="existing-product">${getExcelProductOptionsHtml()}</select>
+        </div>
+        <div>
+          <label>تصحيح الاسم</label>
+          <input type="text" data-action="corrected-name" value="${escapeHtml(item.name)}">
+        </div>
+        <button type="button" class="btn btn-secondary" data-action="match-corrected">تطبيق</button>
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" class="btn btn-primary" data-action="add-fuel">إضافة كوقود</button>
+          <button type="button" class="btn btn-primary" data-action="add-oil">إضافة كزيت</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('select[data-action="existing-product"]').forEach((select) => {
+    select.addEventListener('change', async (event) => {
+      const row = event.target.closest('.excel-import-unknown-row');
+      const key = row?.dataset.key;
+      const value = event.target.value;
+      if (!key || !value) return;
+
+      const [type, name] = value.split('\u001f');
+      excelSalesImportState.resolutions[key] = { type, name, key: normalizeExcelProductKey(name) };
+      await refreshExcelSalesImportPreview();
+    });
+  });
+
+  list.querySelectorAll('button[data-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.dataset.action;
+      const row = button.closest('.excel-import-unknown-row');
+      const key = row?.dataset.key;
+      const correctedName = row?.querySelector('input[data-action="corrected-name"]')?.value?.trim() || '';
+      if (!key) return;
+
+      if (action === 'match-corrected') {
+        const match = findExcelProductMatch(correctedName);
+        if (!match) {
+          showMessage('لم يتم العثور على منتج بهذا الاسم المصحح', 'error');
+          return;
+        }
+        excelSalesImportState.resolutions[key] = match;
+        await refreshExcelSalesImportPreview();
+        return;
+      }
+
+      if (action === 'add-fuel' || action === 'add-oil') {
+        await addExcelImportProduct(key, correctedName, action === 'add-fuel' ? 'fuel' : 'oil', button);
+      }
+    });
+  });
+}
+
+async function addExcelImportProduct(key, productName, productType, button) {
+  if (!productName) {
+    showMessage('يرجى إدخال اسم المنتج', 'error');
+    return;
+  }
+
+  const sourceRow = excelSalesImportState.rawRows.find((row) => normalizeExcelProductKey(row.rawProductName) === key);
+  const price = sourceRow?.price;
+  const startDate = sourceRow?.date;
+  if (!Number.isFinite(price) || price <= 0 || !startDate) {
+    showMessage('لا يمكن إضافة المنتج بدون سعر وتاريخ صحيح من Excel', 'error');
+    return;
+  }
+
+  try {
+    if (button) button.disabled = true;
+    const result = await ipcRenderer.invoke('add-excel-import-product', {
+      product_type: productType,
+      product_name: productName,
+      price,
+      start_date: startDate
+    });
+
+    if (!result?.success) {
+      throw new Error(result?.error || 'add_failed');
+    }
+
+    await loadExcelSalesImportProducts();
+    const match = findExcelProductMatch(productName) || { type: productType, name: productName, key: normalizeExcelProductKey(productName) };
+    excelSalesImportState.resolutions[key] = match;
+    showMessage('تم إضافة المنتج بنجاح', 'success');
+    await refreshExcelSalesImportPreview();
+  } catch (error) {
+    console.error('Error adding Excel import product:', error);
+    showMessage(error.message || 'حدث خطأ أثناء إضافة المنتج', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderExcelSalesPreview() {
+  const wrapper = document.getElementById('excel-sales-preview');
+  const body = document.getElementById('excel-sales-preview-body');
+  if (!wrapper || !body) return;
+
+  if (excelSalesImportState.parsedRows.length === 0) {
+    wrapper.style.display = 'none';
+    body.innerHTML = '';
+    updateExcelSalesImportButton();
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  body.innerHTML = excelSalesImportState.parsedRows.map((row) => {
+    const typeLabel = row.productType === 'fuel'
+      ? 'وقود'
+      : row.productType === 'oil'
+        ? 'زيت'
+        : row.productType === 'wash_lube'
+          ? 'غسيل و تشحيم'
+          : 'غير معروف';
+    const lineTotal = row.productType === 'fuel'
+      ? row.productName === 'غاز سيارات'
+        ? 0
+        : ((row.quantity || 0) - ((row.clients || 0) + (row.cars || 0))) * (row.price || 0)
+      : row.productType === 'oil'
+        ? ((row.quantity || 0) - ((row.clients || 0) + (row.open || 0))) * (row.price || 0)
+        : (row.quantity || 0);
+    return `
+      <tr class="${row.errors?.length ? 'excel-import-row-error' : ''}">
+        <td>${escapeHtml(row.date || '')}</td>
+        <td>${escapeHtml(row.productName || row.rawProductName || '')}</td>
+        <td>${typeLabel}</td>
+        <td>${formatPrice(row.quantity || 0)}</td>
+        <td>${formatPrice(row.open || 0)}</td>
+        <td>${formatPrice(row.cars || 0)}</td>
+        <td>${formatPrice(row.clients || 0)}</td>
+        <td>${formatPrice(row.price || 0)}</td>
+        <td>${formatPrice(lineTotal)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  updateExcelSalesImportButton();
+}
+
+function updateExcelSalesImportButton() {
+  const button = document.getElementById('excel-sales-import-btn');
+  if (!button) return;
+
+  button.disabled =
+    excelSalesImportState.parsedRows.length === 0 ||
+    getExcelSalesUnknownKeys().length > 0 ||
+    excelSalesImportState.validationErrors.length > 0;
+}
+
+function buildExcelSalesShiftPayloads() {
+  const shiftsByDate = new Map();
+
+  excelSalesImportState.parsedRows.forEach((row) => {
+    if (!row.product || !row.date) return;
+
+    if (!shiftsByDate.has(row.date)) {
+      shiftsByDate.set(row.date, {
+        date: row.date,
+        shift_number: 1,
+        fuelRows: new Map(),
+        oilRows: new Map(),
+        washLubeRevenue: 0
+      });
+    }
+
+    const shift = shiftsByDate.get(row.date);
+    if (row.product.type === 'wash_lube') {
+      shift.washLubeRevenue += Number.isFinite(row.quantity) ? row.quantity : 0;
+      return;
+    }
+
+    const targetMap = row.product.type === 'fuel' ? shift.fuelRows : shift.oilRows;
+    const key = normalizeExcelProductKey(row.product.name);
+    if (!targetMap.has(key)) {
+      targetMap.set(key, {
+        name: row.product.name,
+        quantity: 0,
+        open: 0,
+        cars: 0,
+        clients: 0,
+        price: row.price
+      });
+    }
+
+    const item = targetMap.get(key);
+    item.quantity += row.quantity || 0;
+    item.open += row.open || 0;
+    item.cars += row.cars || 0;
+    item.clients += row.clients || 0;
+  });
+
+  return Array.from(shiftsByDate.values()).map((shift) => {
+    const fuelData = {};
+    let fuelTotal = 0;
+    shift.fuelRows.forEach((item) => {
+      const isGasCars = item.name === 'غاز سيارات';
+      const cash = isGasCars ? 0 : (item.quantity - (item.clients + item.cars)) * item.price;
+      fuelTotal += cash;
+      const base = {
+        lastShift1: 0,
+        firstShift1: 0,
+        lastShift2: 0,
+        firstShift2: 0,
+        quantity1: 0,
+        quantity2: 0,
+        totalQuantity: item.quantity,
+        clients: item.clients,
+        cars: item.cars,
+        price: isGasCars ? 0 : item.price,
+        cash
+      };
+
+      if (item.name === 'سولار') {
+        base.lastShift3 = 0;
+        base.firstShift3 = 0;
+        base.lastShift4 = 0;
+        base.firstShift4 = 0;
+        base.quantity3 = 0;
+        base.quantity4 = 0;
+      }
+
+      fuelData[item.name] = base;
+    });
+
+    const oilData = {};
+    let oilTotal = 0;
+    shift.oilRows.forEach((item) => {
+      const revenue = (item.quantity - (item.clients + item.open)) * item.price;
+      oilTotal += revenue;
+      oilData[item.name] = {
+        initial: item.quantity,
+        added: 0,
+        total: item.quantity,
+        sold: item.quantity,
+        remaining: 0,
+        open: item.open,
+        customers: item.clients,
+        price: item.price,
+        revenue
+      };
+    });
+
+    const washLubeRevenue = shift.washLubeRevenue || 0;
+    const grandTotal = fuelTotal + oilTotal + washLubeRevenue;
+    return {
+      date: shift.date,
+      shift_number: 1,
+      fuel_data: JSON.stringify(fuelData),
+      fuel_total: fuelTotal,
+      oil_data: JSON.stringify(oilData),
+      oil_total: oilTotal,
+      customer_rows: [],
+      revenue_items: [],
+      expense_items: [],
+      wash_lube_revenue: washLubeRevenue,
+      total_expenses: 0,
+      grand_total: grandTotal,
+      is_saved: 1
+    };
+  });
+}
+
+async function refreshViewsAfterExcelSalesImport() {
+  await Promise.allSettled([
+    loadHomeChart(),
+    loadTodayStats(),
+    loadSafeBookMovements()
+  ]);
+
+  if (currentScreen === 'sales-summary') {
+    await loadSalesSummary().catch((error) => {
+      console.warn('Unable to refresh sales summary after Excel import:', error);
+    });
+  }
+}
+
+async function importExcelSales() {
+  try {
+    await refreshExcelSalesImportPreview();
+    if (getExcelSalesUnknownKeys().length > 0) {
+      showMessage('راجع المنتجات غير الموجودة قبل الاستيراد', 'error');
+      return;
+    }
+
+    if (excelSalesImportState.validationErrors.length > 0) {
+      showMessage('يوجد أخطاء في بيانات Excel', 'error');
+      return;
+    }
+
+    const payloads = buildExcelSalesShiftPayloads();
+    if (payloads.length === 0) {
+      showMessage('لا توجد بيانات صالحة للاستيراد', 'error');
+      return;
+    }
+
+    if (excelSalesImportState.conflicts.length > 0) {
+      const dates = excelSalesImportState.conflicts.join(', ');
+      const confirmed = confirm(`توجد وردية رقم 1 محفوظة بالفعل لهذه التواريخ:\n${dates}\n\nهل تريد الكتابة فوقها؟`);
+      if (!confirmed) return;
+    }
+
+    const button = document.getElementById('excel-sales-import-btn');
+    if (button) button.disabled = true;
+
+    let saved = 0;
+    for (const payload of payloads) {
+      const result = await ipcRenderer.invoke('save-shift', payload);
+      if (!result?.success) {
+        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+      }
+      saved += 1;
+    }
+
+    showMessage('تم استيراد مبيعات Excel بنجاح', 'success');
+    await refreshViewsAfterExcelSalesImport();
+    resetExcelSalesImport();
+    setExcelSalesImportStatus(`تم استيراد ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
+  } catch (error) {
+    console.error('Error importing Excel sales:', error);
+    showMessage(error.message || 'حدث خطأ أثناء استيراد مبيعات Excel', 'error');
+    updateExcelSalesImportButton();
+  }
+}
+
 // Add CSS for report summary grid
 const style = document.createElement('style');
 style.textContent = `
@@ -5203,6 +6053,30 @@ function closeInvoiceDetailsModal() {
 // Auto-update functionality
 let updateInfo = null;
 
+function isNetworkDisconnectedError(errorInfo) {
+  const message = String(errorInfo?.message || errorInfo || '');
+  return message.includes('ERR_INTERNET_DISCONNECTED') ||
+    message.includes('ENOTFOUND') ||
+    message.includes('EAI_AGAIN') ||
+    message.includes('ECONNREFUSED');
+}
+
+function setUpdateOfflineStatus() {
+  const statusEl = document.getElementById('update-status');
+  const downloadBtn = document.getElementById('download-update-btn');
+  const installBtn = document.getElementById('install-update-btn');
+  const changelogBtn = document.getElementById('view-changelog-btn');
+
+  if (statusEl) {
+    statusEl.textContent = 'لا يوجد اتصال بالإنترنت';
+    statusEl.style.color = '#c4291d';
+    statusEl.style.fontWeight = 'bold';
+  }
+  if (downloadBtn) downloadBtn.style.display = 'none';
+  if (installBtn) installBtn.style.display = 'none';
+  if (changelogBtn) changelogBtn.style.display = 'none';
+}
+
 ipcRenderer.on('update-available', (event, info) => {
   updateInfo = info;
   showUpdateNotification('يوجد تحديث جديد', `الإصدار ${info.version} متاح الآن. هل تريد تنزيله؟`, true);
@@ -5231,6 +6105,11 @@ ipcRenderer.on('update-downloaded', (event, info) => {
 });
 
 ipcRenderer.on('update-error', (event, errorInfo) => {
+  if (!isOnline && isNetworkDisconnectedError(errorInfo)) {
+    setUpdateOfflineStatus();
+    return;
+  }
+
   console.error('Update error:', errorInfo);
   
   // Create a more user-friendly error message
@@ -5443,6 +6322,12 @@ function checkForUpdatesManually() {
   const statusEl = document.getElementById('update-status');
   const checkBtn = document.querySelector('.update-actions-group .btn-primary');
 
+  if (!isOnline) {
+    setUpdateOfflineStatus();
+    showMessage('لا يوجد اتصال بالإنترنت', 'warning');
+    return;
+  }
+
   if (statusEl) statusEl.textContent = 'جاري الفحص...';
   if (checkBtn) checkBtn.disabled = true;
 
@@ -5470,6 +6355,17 @@ function checkForUpdatesManually() {
 ipcRenderer.on('update-check-result', (event, result) => {
   const statusEl = document.getElementById('update-status');
   const changelogBtn = document.getElementById('view-changelog-btn');
+
+  if (result.offline) {
+    setUpdateOfflineStatus();
+    return;
+  }
+
+  if (result.error) {
+    if (statusEl) statusEl.textContent = result.error;
+    if (changelogBtn) changelogBtn.style.display = 'none';
+    return;
+  }
 
   if (result.available) {
     if (statusEl) statusEl.textContent = `تحديث متاح: الإصدار ${result.version}`;
