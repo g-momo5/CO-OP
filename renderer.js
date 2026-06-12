@@ -4863,34 +4863,245 @@ async function loadPriceHistory() {
 }
 
 // General Settings Functions
-async function saveGeneralSettings() {
+async function saveGeneralSettings(silent = false) {
   const stationName = document.getElementById('station-name').value;
   const stationAddress = document.getElementById('station-address').value;
   const stationPhone = document.getElementById('station-phone').value;
+  const monthlyReportRecipients = document.getElementById('monthly-report-recipients')?.value || '';
+  const monthlyReportSmtpHost = document.getElementById('monthly-report-smtp-host')?.value || '';
+  const monthlyReportSmtpPort = document.getElementById('monthly-report-smtp-port')?.value || '';
+  const monthlyReportSmtpSecure = Boolean(document.getElementById('monthly-report-smtp-secure')?.checked);
+  const monthlyReportSmtpUser = document.getElementById('monthly-report-smtp-user')?.value || '';
+  const monthlyReportSmtpPassword = document.getElementById('monthly-report-smtp-password')?.value || '';
+  const monthlyReportFromEmail = document.getElementById('monthly-report-from-email')?.value || '';
 
   try {
     await ipcRenderer.invoke('save-general-settings', {
       stationName,
       stationAddress,
-      stationPhone
+      stationPhone,
+      monthlyReportRecipients,
+      monthlyReportSmtpHost,
+      monthlyReportSmtpPort,
+      monthlyReportSmtpSecure,
+      monthlyReportSmtpUser,
+      monthlyReportSmtpPassword,
+      monthlyReportFromEmail
     });
-    showMessage('تم حفظ الإعدادات بنجاح', 'success');
+    if (!silent) {
+      showMessage('تم حفظ الإعدادات بنجاح', 'success');
+    }
   } catch (error) {
-    showMessage('حدث خطأ أثناء حفظ الإعدادات', 'error');
+    if (!silent) {
+      showMessage('حدث خطأ أثناء حفظ الإعدادات', 'error');
+    }
     console.error('Error saving general settings:', error);
+    throw error;
   }
 }
 
 async function loadGeneralSettings() {
   try {
     const settings = await ipcRenderer.invoke('get-general-settings');
+    initMonthlyReportRecipientsControl();
     if (settings) {
       document.getElementById('station-name').value = settings.stationName || 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
       document.getElementById('station-address').value = settings.stationAddress || '';
       document.getElementById('station-phone').value = settings.stationPhone || '';
+      const recipientsInput = document.getElementById('monthly-report-recipients');
+      const smtpHostInput = document.getElementById('monthly-report-smtp-host');
+      const smtpPortInput = document.getElementById('monthly-report-smtp-port');
+      const smtpSecureInput = document.getElementById('monthly-report-smtp-secure');
+      const smtpUserInput = document.getElementById('monthly-report-smtp-user');
+      const smtpPasswordInput = document.getElementById('monthly-report-smtp-password');
+      const fromEmailInput = document.getElementById('monthly-report-from-email');
+      if (recipientsInput) {
+        recipientsInput.value = settings.monthlyReportRecipients || '';
+        renderMonthlyReportRecipientChips();
+      }
+      if (smtpHostInput) smtpHostInput.value = settings.monthlyReportSmtpHost || '';
+      if (smtpPortInput) smtpPortInput.value = settings.monthlyReportSmtpPort || '';
+      if (smtpSecureInput) smtpSecureInput.checked = Boolean(settings.monthlyReportSmtpSecure);
+      if (smtpUserInput) smtpUserInput.value = settings.monthlyReportSmtpUser || '';
+      if (smtpPasswordInput) smtpPasswordInput.value = settings.monthlyReportSmtpPassword || '';
+      if (fromEmailInput) fromEmailInput.value = settings.monthlyReportFromEmail || '';
     }
   } catch (error) {
     console.error('Error loading general settings:', error);
+  }
+}
+
+function parseMonthlyReportRecipients(value) {
+  return String(value || '')
+    .split(/[\n,;]/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+function getMonthlyReportRecipients() {
+  return parseMonthlyReportRecipients(document.getElementById('monthly-report-recipients')?.value || '');
+}
+
+function setMonthlyReportRecipients(recipients) {
+  const hiddenInput = document.getElementById('monthly-report-recipients');
+  if (!hiddenInput) return;
+  const normalized = [];
+  const seen = new Set();
+  (Array.isArray(recipients) ? recipients : []).forEach((email) => {
+    const cleanEmail = String(email || '').trim();
+    const dedupeKey = cleanEmail.toLowerCase();
+    if (!cleanEmail || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(cleanEmail);
+  });
+  hiddenInput.value = normalized.join('\n');
+  renderMonthlyReportRecipientChips();
+}
+
+function isMonthlyReportRecipientEmailValid(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+function renderMonthlyReportRecipientChips() {
+  const chipsContainer = document.getElementById('monthly-report-recipient-chips');
+  if (!chipsContainer) return;
+  const recipients = getMonthlyReportRecipients();
+  if (recipients.length === 0) {
+    chipsContainer.innerHTML = '<div class="email-chip-empty">لا يوجد مستلمون</div>';
+    return;
+  }
+
+  chipsContainer.innerHTML = recipients.map((email, index) => `
+    <span class="email-chip">
+      <span>${escapeHtml(email)}</span>
+      <button type="button" title="حذف" onclick="removeMonthlyReportRecipientAt(${index})">×</button>
+    </span>
+  `).join('');
+}
+
+function addMonthlyReportRecipients(rawValue) {
+  const newRecipients = parseMonthlyReportRecipients(rawValue);
+  if (newRecipients.length === 0) return false;
+  const validRecipients = newRecipients.filter(isMonthlyReportRecipientEmailValid);
+  const invalidRecipients = newRecipients.filter((email) => !isMonthlyReportRecipientEmailValid(email));
+
+  if (validRecipients.length > 0) {
+    setMonthlyReportRecipients([...getMonthlyReportRecipients(), ...validRecipients]);
+  }
+
+  if (invalidRecipients.length > 0) {
+    setMonthlyReportStatus(`إيميل غير صالح: ${invalidRecipients.join(', ')}`, 'error');
+  }
+
+  return validRecipients.length > 0;
+}
+
+function addMonthlyReportRecipientFromInput() {
+  const input = document.getElementById('monthly-report-recipient-input');
+  if (!input) return;
+  const added = addMonthlyReportRecipients(input.value);
+  if (added) {
+    input.value = '';
+    input.focus();
+  }
+}
+
+function removeMonthlyReportRecipient(email) {
+  const target = String(email || '').trim().toLowerCase();
+  setMonthlyReportRecipients(getMonthlyReportRecipients().filter((recipient) => (
+    recipient.toLowerCase() !== target
+  )));
+}
+
+function removeMonthlyReportRecipientAt(index) {
+  const removeIndex = parseInt(index, 10);
+  if (!Number.isFinite(removeIndex)) return;
+  setMonthlyReportRecipients(getMonthlyReportRecipients().filter((_recipient, recipientIndex) => (
+    recipientIndex !== removeIndex
+  )));
+}
+
+function initMonthlyReportRecipientsControl() {
+  const input = document.getElementById('monthly-report-recipient-input');
+  if (!input || input.dataset.bound === 'true') return;
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ',' || event.key === ';') {
+      event.preventDefault();
+      addMonthlyReportRecipientFromInput();
+    }
+  });
+
+  input.addEventListener('paste', (event) => {
+    const pastedText = event.clipboardData?.getData('text') || '';
+    if (!/[\n,;]/.test(pastedText)) return;
+    event.preventDefault();
+    addMonthlyReportRecipients(pastedText);
+  });
+
+  input.dataset.bound = 'true';
+  renderMonthlyReportRecipientChips();
+}
+
+function setMonthlyReportStatus(message, type = '') {
+  const status = document.getElementById('monthly-report-status');
+  if (!status) return;
+  status.style.display = 'block';
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function getMonthlyReportErrorMessage(error, fallback) {
+  const message = error?.message || '';
+  if (message.includes('No handler registered')) {
+    return 'يرجى إغلاق التطبيق وفتحه من جديد لتفعيل التقرير الشهري';
+  }
+  return message || fallback;
+}
+
+async function ensureMonthlyReportSettingsSaved() {
+  await saveGeneralSettings(true);
+}
+
+async function generateMonthlyReportPdf() {
+  try {
+    setMonthlyReportStatus('جاري إنشاء التقرير الشهري...');
+    await ensureMonthlyReportSettingsSaved();
+    const result = await ipcRenderer.invoke('generate-monthly-report-pdf');
+    if (!result?.success) {
+      throw new Error(result?.error || 'report_failed');
+    }
+    setMonthlyReportStatus(`تم إنشاء التقرير: ${result.filePath}`, 'success');
+    showMessage('تم إنشاء التقرير الشهري PDF بنجاح', 'success');
+  } catch (error) {
+    console.error('Error generating monthly report PDF:', error);
+    const errorMessage = getMonthlyReportErrorMessage(error, 'حدث خطأ أثناء إنشاء التقرير');
+    setMonthlyReportStatus(errorMessage, 'error');
+    showMessage(errorMessage, 'error');
+  }
+}
+
+async function sendMonthlyReportEmail() {
+  try {
+    setMonthlyReportStatus('جاري إنشاء وإرسال التقرير الشهري...');
+    await ensureMonthlyReportSettingsSaved();
+    const result = await ipcRenderer.invoke('send-monthly-report-email');
+    if (!result?.success) {
+      const errorMessage = result?.error || 'send_failed';
+      const statusMessage = result?.filePath
+        ? `${errorMessage}\nتم إنشاء التقرير هنا: ${result.filePath}`
+        : errorMessage;
+      setMonthlyReportStatus(statusMessage, 'error');
+      showMessage(errorMessage, 'error');
+      return;
+    }
+    setMonthlyReportStatus(`تم إرسال التقرير إلى ${result.sentTo.join(', ')}`, 'success');
+    showMessage('تم إرسال التقرير الشهري بالبريد بنجاح', 'success');
+  } catch (error) {
+    console.error('Error sending monthly report email:', error);
+    const errorMessage = getMonthlyReportErrorMessage(error, 'حدث خطأ أثناء إرسال التقرير');
+    setMonthlyReportStatus(errorMessage, 'error');
+    showMessage(errorMessage, 'error');
   }
 }
 

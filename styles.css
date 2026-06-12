@@ -4053,7 +4053,11 @@ body.modal-scroll-lock {
   text-align: right;
 }
 
-.settings-section .form-group input[type="text"] {
+.settings-section .form-group input[type="text"],
+.settings-section .form-group input[type="email"],
+.settings-section .form-group input[type="password"],
+.settings-section .form-group input[type="number"],
+.settings-section .form-group textarea {
   width: 100%;
   padding: 0.75rem;
   border: 2px solid #e9ecef;
@@ -4064,16 +4068,202 @@ body.modal-scroll-lock {
   text-align: right;
 }
 
-.settings-section .form-group input[type="text"]:focus {
+.settings-section .form-group input[type="text"]:focus,
+.settings-section .form-group input[type="email"]:focus,
+.settings-section .form-group input[type="password"]:focus,
+.settings-section .form-group input[type="number"]:focus,
+.settings-section .form-group textarea:focus {
   outline: none;
   border-color: #c4291d;
   box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);
+}
+
+.settings-section .form-group textarea {
+  min-height: 90px;
+  resize: vertical;
 }
 
 .settings-section .form-group p {
   color: #666;
   line-height: 1.6;
   margin-bottom: 1rem;
+}
+
+.monthly-report-settings {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  margin-bottom: 1.25rem;
+  padding: 0;
+}
+
+.monthly-report-main {
+  align-items: end;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+
+.monthly-report-recipients {
+  margin-bottom: 0;
+}
+
+.monthly-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+.monthly-report-actions .btn {
+  min-height: 44px;
+  min-width: 220px;
+  width: auto;
+}
+
+.email-chip-control {
+  background: #ffffff;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.email-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  min-height: 2rem;
+}
+
+.email-chip {
+  align-items: center;
+  background: #eef7ff;
+  border: 1px solid #b7d9f4;
+  border-radius: 999px;
+  color: #154c79;
+  direction: ltr;
+  display: inline-flex;
+  font-family: Arial, sans-serif;
+  font-size: 0.92rem;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.28rem 0.45rem 0.28rem 0.7rem;
+}
+
+.email-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-chip button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: #154c79;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.1rem;
+  height: 1.35rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 1.35rem;
+}
+
+.email-chip button:hover {
+  background: rgba(21, 76, 121, 0.12);
+}
+
+.email-chip-empty {
+  color: #7a8793;
+  font-size: 0.92rem;
+}
+
+.email-chip-input-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.email-chip-input-row .btn {
+  min-width: 84px;
+}
+
+#monthly-report-recipient-input {
+  direction: ltr;
+  font-family: Arial, sans-serif;
+  text-align: left;
+}
+
+#monthly-report-smtp-host,
+#monthly-report-smtp-port,
+#monthly-report-smtp-user,
+#monthly-report-smtp-password,
+#monthly-report-from-email {
+  direction: ltr;
+  font-family: Arial, sans-serif;
+  text-align: left;
+}
+
+.monthly-report-advanced {
+  background: transparent;
+  border: none;
+  border-top: 1px solid #e9ecef;
+  border-radius: 0;
+  margin-top: 1.15rem;
+  padding: 0;
+}
+
+.monthly-report-advanced summary {
+  color: #34495e;
+  cursor: pointer;
+  font-weight: 700;
+  list-style-position: inside;
+  padding: 0.75rem 0 0;
+  text-align: right;
+}
+
+.monthly-report-advanced[open] summary {
+  border-bottom: none;
+}
+
+.monthly-report-grid {
+  display: grid;
+  gap: 0.85rem 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.85rem;
+  padding: 0;
+}
+
+.monthly-report-secure-option {
+  align-items: end;
+  display: flex;
+  margin-bottom: 1rem;
+}
+
+.monthly-report-secure-option label {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .monthly-report-main,
+  .monthly-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .monthly-report-actions .btn {
+    width: 100%;
+  }
+
+  .email-chip-input-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Price Tabs Navigation */
@@ -7267,6 +7457,7 @@ select option {
   line-height: 1.7;
   margin: 1rem 0;
   padding: 0.9rem 1rem;
+  white-space: pre-wrap;
 }
 
 .excel-import-status.error {

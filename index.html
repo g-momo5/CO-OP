@@ -1241,6 +1241,63 @@
                 <input type="text" id="station-phone" placeholder="أدخل رقم الهاتف">
               </div>
 
+              <div class="settings-divider"></div>
+              <h3>التقرير الشهري بالبريد</h3>
+              <div class="monthly-report-settings">
+                <div class="monthly-report-main">
+                  <div class="form-group monthly-report-recipients">
+                    <label for="monthly-report-recipients">إيميلات المستلمين:</label>
+                    <input type="hidden" id="monthly-report-recipients">
+                    <div class="email-chip-control">
+                      <div id="monthly-report-recipient-chips" class="email-chip-list"></div>
+                      <div class="email-chip-input-row">
+                        <input type="email" id="monthly-report-recipient-input" placeholder="email@example.com">
+                        <button type="button" class="btn btn-secondary" onclick="addMonthlyReportRecipientFromInput()">إضافة</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="monthly-report-actions">
+                    <button type="button" class="btn btn-secondary" onclick="generateMonthlyReportPdf()">إنشاء التقرير الشهري PDF</button>
+                    <button type="button" class="btn btn-primary" onclick="sendMonthlyReportEmail()">إرسال التقرير الشهري بالبريد</button>
+                  </div>
+                </div>
+
+                <details class="monthly-report-advanced">
+                  <summary>إعدادات الإرسال SMTP</summary>
+                  <div class="monthly-report-grid">
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-host">SMTP Host:</label>
+                      <input type="text" id="monthly-report-smtp-host" placeholder="smtp.example.com">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-port">SMTP Port:</label>
+                      <input type="number" id="monthly-report-smtp-port" placeholder="465 أو 587">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-user">SMTP User:</label>
+                      <input type="text" id="monthly-report-smtp-user" placeholder="اسم المستخدم">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-password">SMTP Password:</label>
+                      <input type="password" id="monthly-report-smtp-password" placeholder="كلمة المرور">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-from-email">البريد المرسل:</label>
+                      <input type="text" id="monthly-report-from-email" placeholder="station@example.com">
+                    </div>
+                    <div class="form-group monthly-report-secure-option">
+                      <label>
+                        <input type="checkbox" id="monthly-report-smtp-secure">
+                        استخدام SSL/TLS
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <div id="monthly-report-status" class="excel-import-status" style="display: none;"></div>
+              </div>
+
               <button class="btn btn-primary" onclick="saveGeneralSettings()">حفظ الإعدادات</button>
 
               <!-- Updates Section -->
