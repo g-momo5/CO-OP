@@ -38,6 +38,12 @@ let excelSalesImportState = {
   validationErrors: [],
   conflicts: []
 };
+let excelExpensesImportState = {
+  fileName: '',
+  rawRows: [],
+  parsedRows: [],
+  validationErrors: []
+};
 const ANNUAL_INVENTORY_FIELDS = [
   { key: 'prev_balance', id: 'annual-prev-balance' },
   { key: 'station_profit', id: 'annual-station-profit' },
@@ -73,6 +79,7 @@ const settingsSectionTitles = {
   'manage-products': 'إدارة المنتجات',
   'manage-customers': 'إدارة العملاء',
   'excel-sales-import': 'استيراد مبيعات Excel',
+  'excel-expenses-import': 'استيراد مصاريف Excel',
   'invoices-list': 'عرض الفواتير',
   'general': 'إعدادات عامة',
   'backup': 'النسخ الاحتياطي'
@@ -5063,11 +5070,17 @@ async function ensureMonthlyReportSettingsSaved() {
   await saveGeneralSettings(true);
 }
 
+function getMonthlyReportOptions() {
+  return {
+    expenseRowOrder: getSavedExpenseRowOrder()
+  };
+}
+
 async function generateMonthlyReportPdf() {
   try {
     setMonthlyReportStatus('جاري إنشاء التقرير الشهري...');
     await ensureMonthlyReportSettingsSaved();
-    const result = await ipcRenderer.invoke('generate-monthly-report-pdf');
+    const result = await ipcRenderer.invoke('generate-monthly-report-pdf', getMonthlyReportOptions());
     if (!result?.success) {
       throw new Error(result?.error || 'report_failed');
     }
@@ -5085,7 +5098,7 @@ async function sendMonthlyReportEmail() {
   try {
     setMonthlyReportStatus('جاري إنشاء وإرسال التقرير الشهري...');
     await ensureMonthlyReportSettingsSaved();
-    const result = await ipcRenderer.invoke('send-monthly-report-email');
+    const result = await ipcRenderer.invoke('send-monthly-report-email', getMonthlyReportOptions());
     if (!result?.success) {
       const errorMessage = result?.error || 'send_failed';
       const statusMessage = result?.filePath
@@ -5247,7 +5260,7 @@ function isExcelWashLubeProduct(value) {
 }
 
 function normalizeExcelHeader(value) {
-  return normalizeExcelText(value).replace(/\s+/g, '');
+  return normalizeExcelText(value).toLowerCase().replace(/\s+/g, '');
 }
 
 function parseExcelNumber(value) {
@@ -5784,6 +5797,7 @@ function renderExcelSalesPreview() {
         : (row.quantity || 0);
     return `
       <tr class="${row.errors?.length ? 'excel-import-row-error' : ''}">
+        <td>${convertToArabicNumerals(row.sourceRowNumber || '')}</td>
         <td>${escapeHtml(row.date || '')}</td>
         <td>${escapeHtml(row.productName || row.rawProductName || '')}</td>
         <td>${typeLabel}</td>
@@ -5982,6 +5996,345 @@ async function importExcelSales() {
     console.error('Error importing Excel sales:', error);
     showMessage(error.message || 'حدث خطأ أثناء استيراد مبيعات Excel', 'error');
     updateExcelSalesImportButton();
+  }
+}
+
+function setExcelExpensesImportStatus(message, type = '') {
+  const status = document.getElementById('excel-expenses-import-status');
+  if (!status) return;
+
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function openExcelExpensesFilePicker() {
+  const input = document.getElementById('excel-expenses-file-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function resetExcelExpensesImport() {
+  excelExpensesImportState = {
+    fileName: '',
+    rawRows: [],
+    parsedRows: [],
+    validationErrors: []
+  };
+
+  const fileInput = document.getElementById('excel-expenses-file-input');
+  if (fileInput) fileInput.value = '';
+
+  setExcelExpensesImportStatus('اختر ملف Excel يحتوي على الأعمدة: التاريخ، المصروف، المبلغ.');
+  renderExcelExpensesSummary();
+  renderExcelExpensesPreview();
+  updateExcelExpensesImportButton();
+}
+
+async function handleExcelExpensesFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!XLSX) {
+    setExcelExpensesImportStatus('مكتبة قراءة Excel غير متاحة. تأكد من تثبيت xlsx.', 'error');
+    return;
+  }
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new Error('empty_workbook');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+      header: 1,
+      raw: true,
+      defval: ''
+    });
+
+    const parsedRows = parseExcelExpensesRows(rows);
+    excelExpensesImportState.fileName = file.name;
+    excelExpensesImportState.rawRows = parsedRows;
+    await refreshExcelExpensesImportPreview();
+  } catch (error) {
+    console.error('Error reading Excel expenses file:', error);
+    setExcelExpensesImportStatus('تعذر قراءة ملف Excel. تأكد من وجود أعمدة التاريخ والمصروف والمبلغ.', 'error');
+    excelExpensesImportState.rawRows = [];
+    excelExpensesImportState.parsedRows = [];
+    renderExcelExpensesSummary();
+    renderExcelExpensesPreview();
+    updateExcelExpensesImportButton();
+  }
+}
+
+function parseExcelExpensesRows(rows) {
+  const headerRowIndex = rows.findIndex((row) => {
+    const headers = Array.isArray(row) ? row : [];
+    return getExcelHeaderIndex(headers, ['التاريخ', 'اليوم', 'date']) !== -1
+      && getExcelHeaderIndex(headers, ['المصروف', 'المصاريف', 'spesa', 'expense']) !== -1;
+  });
+
+  if (headerRowIndex === -1) {
+    throw new Error('missing_headers');
+  }
+
+  const headers = rows[headerRowIndex];
+  const indexes = {
+    date: getExcelHeaderIndex(headers, ['التاريخ', 'اليوم', 'date']),
+    description: getExcelHeaderIndex(headers, ['المصروف', 'المصاريف', 'spesa', 'expense']),
+    amount: getExcelHeaderIndex(headers, ['المبلغ', 'القيمة', 'importo', 'amount'])
+  };
+
+  const missingRequired = ['date', 'description', 'amount'].filter((key) => indexes[key] === -1);
+  if (missingRequired.length > 0) {
+    throw new Error(`missing_required_headers:${missingRequired.join(',')}`);
+  }
+
+  return rows.slice(headerRowIndex + 1).map((row, offset) => {
+    const sourceRowNumber = headerRowIndex + offset + 2;
+    const description = String(row[indexes.description] || '').trim();
+    const date = parseExcelSalesDate(row[indexes.date]);
+    const amount = parseExcelNumber(row[indexes.amount]);
+    const empty = !description && !date && amount === null;
+
+    return {
+      sourceRowNumber,
+      date,
+      description,
+      amount,
+      empty,
+      errors: []
+    };
+  }).filter((row) => !row.empty);
+}
+
+function validateExcelExpensesRows(rows) {
+  const errors = [];
+
+  rows.forEach((row) => {
+    row.errors = [];
+    if (!row.date) row.errors.push('تاريخ غير صالح');
+    if (!Number.isFinite(row.amount) || row.amount <= 0) row.errors.push('مبلغ غير صالح');
+
+    if (row.errors.length > 0) {
+      errors.push(`صف ${row.sourceRowNumber}: ${row.errors.join('، ')}`);
+    }
+  });
+
+  return errors;
+}
+
+async function refreshExcelExpensesImportPreview() {
+  excelExpensesImportState.parsedRows = excelExpensesImportState.rawRows.map((row) => ({ ...row }));
+  excelExpensesImportState.validationErrors = validateExcelExpensesRows(excelExpensesImportState.parsedRows);
+  renderExcelExpensesSummary();
+  renderExcelExpensesPreview();
+  updateExcelExpensesImportButton();
+}
+
+function renderExcelExpensesSummary() {
+  const container = document.getElementById('excel-expenses-summary');
+  if (!container) return;
+
+  if (excelExpensesImportState.rawRows.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const datesCount = new Set(excelExpensesImportState.parsedRows.map((row) => row.date).filter(Boolean)).size;
+  const totalAmount = excelExpensesImportState.parsedRows.reduce((sum, row) => (
+    sum + (Number.isFinite(row.amount) ? row.amount : 0)
+  ), 0);
+
+  container.style.display = 'grid';
+  container.innerHTML = `
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(excelExpensesImportState.rawRows.length)}</strong>صفوف مقروءة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(datesCount)}</strong>تواريخ</div>
+    <div class="excel-import-summary-item"><strong>${formatPrice(totalAmount)}</strong>إجمالي المصاريف</div>
+  `;
+
+  if (excelExpensesImportState.validationErrors.length > 0) {
+    setExcelExpensesImportStatus(excelExpensesImportState.validationErrors.slice(0, 4).join(' | '), 'error');
+  } else {
+    setExcelExpensesImportStatus(`تم تجهيز الملف: ${excelExpensesImportState.fileName}`, 'success');
+  }
+}
+
+function renderExcelExpensesPreview() {
+  const wrapper = document.getElementById('excel-expenses-preview');
+  const body = document.getElementById('excel-expenses-preview-body');
+  if (!wrapper || !body) return;
+
+  if (excelExpensesImportState.parsedRows.length === 0) {
+    wrapper.style.display = 'none';
+    body.innerHTML = '';
+    updateExcelExpensesImportButton();
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  body.innerHTML = excelExpensesImportState.parsedRows.map((row) => `
+    <tr class="${row.errors?.length ? 'excel-import-row-error' : ''}">
+      <td>${convertToArabicNumerals(row.sourceRowNumber || '')}</td>
+      <td>${escapeHtml(row.date || '')}</td>
+      <td>${escapeHtml(row.description || 'غير محدد')}</td>
+      <td>${formatPrice(row.amount || 0)}</td>
+    </tr>
+  `).join('');
+
+  updateExcelExpensesImportButton();
+}
+
+function updateExcelExpensesImportButton() {
+  const button = document.getElementById('excel-expenses-import-btn');
+  if (!button) return;
+
+  button.disabled =
+    excelExpensesImportState.parsedRows.length === 0 ||
+    excelExpensesImportState.validationErrors.length > 0;
+}
+
+function parseShiftJsonValue(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function groupExcelExpensesByDate() {
+  const grouped = new Map();
+
+  excelExpensesImportState.parsedRows.forEach((row) => {
+    if (!row.date || !Number.isFinite(row.amount) || row.amount <= 0) return;
+    if (!grouped.has(row.date)) {
+      grouped.set(row.date, []);
+    }
+    grouped.get(row.date).push({
+      index: grouped.get(row.date).length + 1,
+      description: row.description || 'غير محدد',
+      amount: row.amount
+    });
+  });
+
+  return grouped;
+}
+
+async function buildExcelExpenseShiftPayload(date, importedExpenseItems) {
+  const existingShift = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: 1 });
+  const legacyData = parseShiftJsonValue(existingShift?.data, {});
+  const existingExpenses = normalizeExpenseItems(legacyData.expense_items);
+  const existingTotalExpenses = parseFloat(existingShift?.total_expenses ?? legacyData.total_expenses) || 0;
+
+  const preservedFuelData = existingShift
+    ? (existingShift.fuel_data || legacyData.fuel_data || '{}')
+    : '{}';
+  const preservedOilData = existingShift
+    ? (existingShift.oil_data || legacyData.oil_data || '{}')
+    : '{}';
+  const preservedFuelTotal = parseFloat(existingShift?.fuel_total ?? legacyData.fuel_total) || 0;
+  const preservedOilTotal = parseFloat(existingShift?.oil_total ?? legacyData.oil_total) || 0;
+  const preservedWashLubeRevenue = parseFloat(existingShift?.wash_lube_revenue ?? legacyData.wash_lube_revenue) || 0;
+  const preservedCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+  const preservedRevenueItems = Array.isArray(legacyData.revenue_items) ? legacyData.revenue_items : [];
+  const effectiveExistingExpenses = existingExpenses.length > 0
+    ? existingExpenses
+    : existingTotalExpenses > 0
+      ? [{ index: 1, description: LEGACY_AGGREGATED_EXPENSE_LABEL, amount: existingTotalExpenses }]
+      : [];
+
+  const baseIndex = effectiveExistingExpenses.length;
+  const mergedExpenseItems = [
+    ...effectiveExistingExpenses,
+    ...importedExpenseItems.map((item, index) => ({
+      index: baseIndex + index + 1,
+      description: item.description,
+      amount: item.amount
+    }))
+  ];
+  const importedTotalExpenses = importedExpenseItems.reduce((sum, item) => sum + item.amount, 0);
+  const totalExpenses = existingTotalExpenses + importedTotalExpenses;
+  const extraRevenueTotal = preservedRevenueItems.reduce((sum, item) => (
+    sum + (parseFloat(item?.amount) || 0)
+  ), 0);
+  const grandTotal = preservedFuelTotal + preservedOilTotal + preservedWashLubeRevenue + extraRevenueTotal - totalExpenses;
+
+  return {
+    date,
+    shift_number: 1,
+    fuel_data: typeof preservedFuelData === 'string' ? preservedFuelData : JSON.stringify(preservedFuelData),
+    fuel_total: preservedFuelTotal,
+    oil_data: typeof preservedOilData === 'string' ? preservedOilData : JSON.stringify(preservedOilData),
+    oil_total: preservedOilTotal,
+    customer_rows: preservedCustomerRows,
+    revenue_items: preservedRevenueItems,
+    expense_items: mergedExpenseItems,
+    wash_lube_revenue: preservedWashLubeRevenue,
+    total_expenses: totalExpenses,
+    grand_total: grandTotal,
+    is_saved: 1
+  };
+}
+
+async function refreshViewsAfterExcelExpensesImport() {
+  await Promise.allSettled([
+    loadSafeBookMovements(),
+    loadTodayStats()
+  ]);
+
+  if (currentScreen === 'expenses') {
+    await loadExpenseEntries().catch((error) => {
+      console.warn('Unable to refresh expenses after Excel import:', error);
+    });
+  }
+  if (currentScreen === 'profit') {
+    await loadProfitMonthlyData().catch((error) => {
+      console.warn('Unable to refresh profit after Excel expenses import:', error);
+    });
+  }
+}
+
+async function importExcelExpenses() {
+  try {
+    await refreshExcelExpensesImportPreview();
+    if (excelExpensesImportState.validationErrors.length > 0) {
+      showMessage('يوجد أخطاء في بيانات Excel', 'error');
+      return;
+    }
+
+    const grouped = groupExcelExpensesByDate();
+    if (grouped.size === 0) {
+      showMessage('لا توجد مصاريف صالحة للاستيراد', 'error');
+      return;
+    }
+
+    const button = document.getElementById('excel-expenses-import-btn');
+    if (button) button.disabled = true;
+
+    let saved = 0;
+    for (const [date, expenseItems] of grouped.entries()) {
+      const payload = await buildExcelExpenseShiftPayload(date, expenseItems);
+      const result = await ipcRenderer.invoke('save-shift', payload);
+      if (!result?.success) {
+        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+      }
+      saved += 1;
+    }
+
+    showMessage('تم استيراد مصاريف Excel بنجاح', 'success');
+    await refreshViewsAfterExcelExpensesImport();
+    resetExcelExpensesImport();
+    setExcelExpensesImportStatus(`تم استيراد المصاريف في ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
+  } catch (error) {
+    console.error('Error importing Excel expenses:', error);
+    showMessage(error.message || 'حدث خطأ أثناء استيراد مصاريف Excel', 'error');
+    updateExcelExpensesImportButton();
   }
 }
 
@@ -6727,6 +7080,16 @@ let profitLoadRequestId = 0;
 let expenseEntriesCache = [];
 let expenseDefaultRange = null;
 let expenseFilterDebounceTimer = null;
+const EXPENSE_ROW_ORDER_KEY = 'expenses-row-order';
+const DEFAULT_EXPENSE_ROW_ORDER = [
+  'اكرامية مواد',
+  'مجارى',
+  'مياة للمحطة',
+  'كهرباء للمحطة',
+  'سولار للديزل',
+  'رسوم البوسطة',
+  'تامينات'
+];
 
 function getCurrentShiftIdentifier() {
   const date = document.getElementById('shift-date')?.value || '';
@@ -8542,6 +8905,73 @@ function renderExpenseTableMessage(message, tone = 'neutral', months = []) {
   `;
 }
 
+function normalizeExpenseDescriptionForOrder(description) {
+  return normalizeExcelText(description).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function getSavedExpenseRowOrder() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPENSE_ROW_ORDER_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveExpenseRowOrder(descriptions) {
+  const normalized = [];
+  const seen = new Set();
+  (Array.isArray(descriptions) ? descriptions : []).forEach((description) => {
+    const clean = String(description || '').trim();
+    const key = normalizeExpenseDescriptionForOrder(clean);
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    normalized.push(clean);
+  });
+  localStorage.setItem(EXPENSE_ROW_ORDER_KEY, JSON.stringify(normalized));
+}
+
+function getExpenseDefaultOrderRank(description) {
+  const key = normalizeExpenseDescriptionForOrder(description);
+  return DEFAULT_EXPENSE_ROW_ORDER
+    .map(normalizeExpenseDescriptionForOrder)
+    .indexOf(key);
+}
+
+function getExpenseManualOrderRank(description) {
+  const key = normalizeExpenseDescriptionForOrder(description);
+  return getSavedExpenseRowOrder()
+    .map(normalizeExpenseDescriptionForOrder)
+    .indexOf(key);
+}
+
+function sortExpenseDescriptions(descriptions, rowMap) {
+  return [...descriptions].sort((a, b) => {
+    const manualA = getExpenseManualOrderRank(a);
+    const manualB = getExpenseManualOrderRank(b);
+    if (manualA !== -1 || manualB !== -1) {
+      if (manualA === -1) return 1;
+      if (manualB === -1) return -1;
+      return manualA - manualB;
+    }
+
+    const defaultA = getExpenseDefaultOrderRank(a);
+    const defaultB = getExpenseDefaultOrderRank(b);
+    if (defaultA !== -1 || defaultB !== -1) {
+      if (defaultA === -1) return 1;
+      if (defaultB === -1) return -1;
+      return defaultA - defaultB;
+    }
+
+    const totalA = rowMap.get(a)?.total || 0;
+    const totalB = rowMap.get(b)?.total || 0;
+    if (Math.abs(totalB - totalA) > 0.0001) {
+      return totalB - totalA;
+    }
+    return a.localeCompare(b, 'ar');
+  });
+}
+
 function renderExpenseTableRows(entries, months = []) {
   const headRow = document.getElementById('expenses-summary-head');
   const tbody = document.getElementById('expenses-table-body');
@@ -8589,14 +9019,7 @@ function renderExpenseTableRows(entries, months = []) {
     row.byMonth.set(monthKey, (row.byMonth.get(monthKey) || 0) + amount);
   });
 
-  const descriptions = Array.from(rowMap.keys()).sort((a, b) => {
-    const totalA = rowMap.get(a)?.total || 0;
-    const totalB = rowMap.get(b)?.total || 0;
-    if (Math.abs(totalB - totalA) > 0.0001) {
-      return totalB - totalA;
-    }
-    return a.localeCompare(b, 'ar');
-  });
+  const descriptions = sortExpenseDescriptions(Array.from(rowMap.keys()), rowMap);
 
   if (descriptions.length === 0) {
     renderExpenseTableMessage('لا توجد مصروفات في الفترة المحددة', 'neutral', safeMonths);
@@ -8618,13 +9041,69 @@ function renderExpenseTableRows(entries, months = []) {
     }).join('');
 
     return `
-      <tr>
-        <td class="oil-name-cell"><strong>${escapeHtml(description)}</strong></td>
+      <tr draggable="true" class="draggable-oil-row draggable-expense-row" data-expense-description="${escapeHtml(description)}">
+        <td class="oil-name-cell expenses-name-cell">
+          <div class="expenses-row-cell">
+            <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
+            <strong>${escapeHtml(description)}</strong>
+          </div>
+        </td>
         ${monthCells}
         <td class="cell-total expenses-total-cell">${formatArabicNumber(row.total)}</td>
       </tr>
     `;
   }).join('');
+
+  enableExpenseRowDragDrop();
+}
+
+function enableExpenseRowDragDrop() {
+  const tableBody = document.getElementById('expenses-table-body');
+  if (!tableBody) return;
+
+  let draggedRow = null;
+  const rows = tableBody.querySelectorAll('.draggable-expense-row');
+
+  rows.forEach((row) => {
+    row.addEventListener('dragstart', function(e) {
+      draggedRow = this;
+      this.style.opacity = '0.5';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    row.addEventListener('dragend', function() {
+      this.style.opacity = '1';
+      draggedRow = null;
+      saveExpenseRowOrderFromTable();
+    });
+
+    row.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      if (draggedRow && draggedRow !== this) {
+        const rect = this.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+
+        if (e.clientY < midpoint) {
+          tableBody.insertBefore(draggedRow, this);
+        } else {
+          tableBody.insertBefore(draggedRow, this.nextSibling);
+        }
+      }
+    });
+  });
+}
+
+function saveExpenseRowOrderFromTable() {
+  const tableBody = document.getElementById('expenses-table-body');
+  if (!tableBody) return;
+
+  const order = Array.from(tableBody.querySelectorAll('.draggable-expense-row'))
+    .map((row) => row.dataset.expenseDescription)
+    .filter(Boolean);
+
+  saveExpenseRowOrder(order);
 }
 
 async function loadExpenseEntries() {

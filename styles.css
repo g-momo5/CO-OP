@@ -633,6 +633,18 @@ body.modal-scroll-lock {
   font-weight: 800;
 }
 
+.expenses-row-cell {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+  justify-content: flex-start;
+}
+
+.expenses-row-cell strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .base-table.summary-table th.month-click {
   cursor: pointer;
   user-select: none;

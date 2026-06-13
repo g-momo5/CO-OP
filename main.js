@@ -902,6 +902,15 @@ function setupIPCHandlers() {
 
   const REPORT_FUEL_TYPES = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
   const REPORT_PURCHASE_FUEL_TYPES = REPORT_FUEL_TYPES.filter((fuelType) => fuelType !== 'غاز سيارات');
+  const DEFAULT_EXPENSE_ROW_ORDER = [
+    'اكرامية مواد',
+    'مجارى',
+    'مياة للمحطة',
+    'كهرباء للمحطة',
+    'سولار للديزل',
+    'رسوم البوسطة',
+    'تامينات'
+  ];
   const REPORT_PROFIT_BASE_ROWS = [
     { key: 'fuel_diesel', label: 'سولار', section: 'revenue' },
     { key: 'fuel_80', label: 'بنزين ٨٠', section: 'revenue' },
@@ -917,6 +926,16 @@ function setupIPCHandlers() {
       { key: 'bonus_tax', label: 'ضرائب الحافز', section: 'deduction' }
   ];
   const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
+  const normalizeReportExpenseDescription = (value) => String(value ?? '')
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\u0640/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
   const ARABIC_MONTH_NAMES = [
     'يناير',
     'فبراير',
@@ -1262,7 +1281,7 @@ function setupIPCHandlers() {
     };
   };
 
-  const collectMonthlyReportData = async () => {
+  const collectMonthlyReportData = async (options = {}) => {
     const range = getLastCompleteReportRange();
     const salesMap = createMonthlyBucketMap(range.months);
     const purchasesMap = createMonthlyBucketMap(range.months, REPORT_PURCHASE_FUEL_TYPES);
@@ -1310,7 +1329,7 @@ function setupIPCHandlers() {
     });
 
     const profitData = await collectReportProfitRows(range);
-    const expenses = buildMonthlyExpenseReportRows(range.months, shiftRows);
+    const expenses = buildMonthlyExpenseReportRows(range.months, shiftRows, options.expenseRowOrder);
 
     return {
       ...range,
@@ -1323,9 +1342,12 @@ function setupIPCHandlers() {
     };
   };
 
-  const buildMonthlyExpenseReportRows = (months, shiftRows) => {
+  const buildMonthlyExpenseReportRows = (months, shiftRows, expenseRowOrder = []) => {
     const monthSet = new Set(months);
     const rowMap = new Map();
+    const manualOrder = Array.isArray(expenseRowOrder) ? expenseRowOrder : [];
+    const manualOrderKeys = manualOrder.map(normalizeReportExpenseDescription);
+    const defaultOrderKeys = DEFAULT_EXPENSE_ROW_ORDER.map(normalizeReportExpenseDescription);
 
     (Array.isArray(shiftRows) ? shiftRows : []).forEach((row) => {
       const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
@@ -1357,6 +1379,22 @@ function setupIPCHandlers() {
     });
 
     return Array.from(rowMap.values()).sort((a, b) => {
+      const manualA = manualOrderKeys.indexOf(normalizeReportExpenseDescription(a.description));
+      const manualB = manualOrderKeys.indexOf(normalizeReportExpenseDescription(b.description));
+      if (manualA !== -1 || manualB !== -1) {
+        if (manualA === -1) return 1;
+        if (manualB === -1) return -1;
+        return manualA - manualB;
+      }
+
+      const defaultA = defaultOrderKeys.indexOf(normalizeReportExpenseDescription(a.description));
+      const defaultB = defaultOrderKeys.indexOf(normalizeReportExpenseDescription(b.description));
+      if (defaultA !== -1 || defaultB !== -1) {
+        if (defaultA === -1) return 1;
+        if (defaultB === -1) return -1;
+        return defaultA - defaultB;
+      }
+
       if (Math.abs(b.total - a.total) > 0.0001) {
         return b.total - a.total;
       }
@@ -1492,10 +1530,15 @@ function setupIPCHandlers() {
     return `
       <section>
         <h2>المصاريف</h2>
-        <table>
+        <table class="expenses-report-table">
+          <colgroup>
+            <col class="expense-name-column">
+            ${months.map(() => '<col>').join('')}
+            <col class="expense-total-column">
+          </colgroup>
           <thead>
             <tr>
-              <th>المصروف</th>
+              <th class="expense-label-col">المصروف</th>
               ${months.map((monthKey) => `<th>${escapeHtml(getMonthDisplayName(monthKey))}</th>`).join('')}
               <th>الإجمالي</th>
             </tr>
@@ -1640,6 +1683,20 @@ function setupIPCHandlers() {
             background: #f4f6f8;
             text-align: right;
           }
+          .expenses-report-table {
+            table-layout: fixed;
+          }
+          .expenses-report-table col.expense-name-column {
+            width: 12%;
+          }
+          .expenses-report-table col.expense-total-column {
+            width: 9%;
+          }
+          .expenses-report-table .expense-label-col,
+          .expenses-report-table tbody th {
+            white-space: normal;
+            line-height: 1.25;
+          }
           .total-row th,
           .total-row td {
             background: #fff3cd;
@@ -1721,8 +1778,8 @@ function setupIPCHandlers() {
     `;
   };
 
-  const writeMonthlyReportPdf = async ({ promptSave = false } = {}) => {
-    const reportData = await collectMonthlyReportData();
+  const writeMonthlyReportPdf = async ({ promptSave = false, expenseRowOrder = [] } = {}) => {
+    const reportData = await collectMonthlyReportData({ expenseRowOrder });
     const html = buildMonthlyReportHtml(reportData);
     const reportWindow = new BrowserWindow({
       show: false,
@@ -1836,9 +1893,12 @@ function setupIPCHandlers() {
     return emailSettings.recipients;
   };
 
-  ipcMain.handle('generate-monthly-report-pdf', async () => {
+  ipcMain.handle('generate-monthly-report-pdf', async (_event, options = {}) => {
     try {
-      const { filePath, reportData } = await writeMonthlyReportPdf({ promptSave: true });
+      const { filePath, reportData } = await writeMonthlyReportPdf({
+        promptSave: true,
+        expenseRowOrder: options.expenseRowOrder
+      });
       return {
         success: true,
         filePath,
@@ -1853,12 +1913,14 @@ function setupIPCHandlers() {
     }
   });
 
-  ipcMain.handle('send-monthly-report-email', async () => {
+  ipcMain.handle('send-monthly-report-email', async (_event, options = {}) => {
     let filePath = null;
     let reportData = null;
     try {
       getMonthlyReportEmailSettings();
-      ({ filePath, reportData } = await writeMonthlyReportPdf());
+      ({ filePath, reportData } = await writeMonthlyReportPdf({
+        expenseRowOrder: options.expenseRowOrder
+      }));
       const sentTo = await sendMonthlyReportEmailWithAttachment(filePath, reportData);
       return {
         success: true,

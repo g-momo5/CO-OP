@@ -1073,6 +1073,7 @@
               <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
               <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
               <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
+              <li class="settings-menu-item" data-settings-section="excel-expenses-import">استيراد مصاريف Excel</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
@@ -1208,6 +1209,7 @@
                   <table class="base-table excel-import-preview-table">
                     <thead>
                       <tr>
+                        <th>صف</th>
                         <th>التاريخ</th>
                         <th>المنتج</th>
                         <th>النوع</th>
@@ -1220,6 +1222,41 @@
                       </tr>
                     </thead>
                     <tbody id="excel-sales-preview-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- Excel Expenses Import Section -->
+            <section id="settings-section-excel-expenses-import" class="settings-section">
+              <h3>استيراد مصاريف Excel</h3>
+
+              <div class="excel-import-actions">
+                <input type="file" id="excel-expenses-file-input" accept=".xlsx,.xls" style="display: none;" onchange="handleExcelExpensesFile(event)">
+                <button class="btn btn-primary" onclick="openExcelExpensesFilePicker()">اختيار ملف Excel</button>
+                <button class="btn btn-secondary" onclick="resetExcelExpensesImport()">مسح البيانات</button>
+                <button class="btn btn-success" id="excel-expenses-import-btn" onclick="importExcelExpenses()" disabled>استيراد المصاريف</button>
+              </div>
+
+              <div id="excel-expenses-import-status" class="excel-import-status">
+                اختر ملف Excel يحتوي على الأعمدة: التاريخ، المصروف، المبلغ.
+              </div>
+
+              <div id="excel-expenses-summary" class="excel-import-summary" style="display: none;"></div>
+
+              <div id="excel-expenses-preview" class="excel-import-block" style="display: none;">
+                <h4>معاينة البيانات</h4>
+                <div class="excel-import-table-wrapper">
+                  <table class="base-table excel-import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>صف</th>
+                        <th>التاريخ</th>
+                        <th>المصروف</th>
+                        <th>المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody id="excel-expenses-preview-body"></tbody>
                   </table>
                 </div>
               </div>
