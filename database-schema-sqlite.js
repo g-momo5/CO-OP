@@ -27,6 +27,7 @@ class DatabaseSchema {
     this.createShiftsTable(db);
     this.createAnnualInventoriesTable(db);
     this.createSafeBookMovementsTable(db);
+    this.createShiftBalanceChangeHistoryTable(db);
     this.createMonthlyProfitInputsTable(db);
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
@@ -241,6 +242,22 @@ class DatabaseSchema {
     `);
   }
 
+  static createShiftBalanceChangeHistoryTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS shift_balance_change_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shift_date TEXT NOT NULL,
+        shift_number INTEGER NOT NULL,
+        item_type TEXT NOT NULL,
+        item_name TEXT NOT NULL,
+        field_name TEXT NOT NULL,
+        old_value REAL,
+        new_value REAL NOT NULL,
+        changed_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
   static createMonthlyProfitInputsTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS monthly_profit_inputs (
@@ -332,6 +349,9 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_direction ON safe_book_movements(direction)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_changed_at ON shift_balance_change_history(changed_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_shift ON shift_balance_change_history(shift_date, shift_number)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_item ON shift_balance_change_history(item_type, item_name)');
 
     // Sync queue indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced)');
@@ -441,6 +461,12 @@ class DatabaseSchema {
       ensureShiftColumn('is_saved', 'INTEGER DEFAULT 0');
 
       const monthlyProfitInputsInfo = db.prepare("PRAGMA table_info(monthly_profit_inputs)").all();
+      const balanceHistoryInfo = db.prepare("PRAGMA table_info(shift_balance_change_history)").all();
+      if (balanceHistoryInfo.length === 0) {
+        console.log('Creating shift_balance_change_history table...');
+        this.createShiftBalanceChangeHistoryTable(db);
+      }
+
       if (monthlyProfitInputsInfo.length === 0) {
         console.log('Creating monthly_profit_inputs table...');
         this.createMonthlyProfitInputsTable(db);

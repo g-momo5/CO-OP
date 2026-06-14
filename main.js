@@ -1810,7 +1810,7 @@ function setupIPCHandlers() {
           : await dialog.showSaveDialog(saveDialogOptions);
 
         if (saveResult.canceled || !saveResult.filePath) {
-          throw new Error('تم إلغاء إنشاء التقرير');
+          return { canceled: true, reportData };
         }
 
         filePath = saveResult.filePath;
@@ -1895,10 +1895,20 @@ function setupIPCHandlers() {
 
   ipcMain.handle('generate-monthly-report-pdf', async (_event, options = {}) => {
     try {
-      const { filePath, reportData } = await writeMonthlyReportPdf({
+      const result = await writeMonthlyReportPdf({
         promptSave: true,
         expenseRowOrder: options.expenseRowOrder
       });
+      if (result.canceled) {
+        return {
+          success: false,
+          canceled: true,
+          error: 'تم إلغاء إنشاء التقرير',
+          month: result.reportData?.toMonth || null
+        };
+      }
+
+      const { filePath, reportData } = result;
       return {
         success: true,
         filePath,
@@ -4832,6 +4842,90 @@ ipcMain.handle('get-last-saved-shift', async () => {
   } catch (error) {
     console.error('Error getting last saved shift:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('record-shift-balance-changes', async (_event, changes = []) => {
+  try {
+    const validChanges = (Array.isArray(changes) ? changes : []).filter((change) => {
+      const shiftDate = normalizeIsoDate(change?.shift_date);
+      const shiftNumber = parseInt(change?.shift_number, 10);
+      const itemType = String(change?.item_type || '').trim();
+      const itemName = String(change?.item_name || '').trim();
+      const fieldName = String(change?.field_name || '').trim();
+      const newValue = parseOptionalNumber(change?.new_value);
+      return shiftDate
+        && Number.isFinite(shiftNumber)
+        && ['fuel', 'oil'].includes(itemType)
+        && itemName
+        && fieldName
+        && newValue !== null;
+    });
+
+    let saved = 0;
+    for (const change of validChanges) {
+      const shiftDate = normalizeIsoDate(change.shift_date);
+      const shiftNumber = parseInt(change.shift_number, 10);
+      await executeInsert(
+        `INSERT INTO shift_balance_change_history
+          (shift_date, shift_number, item_type, item_name, field_name, old_value, new_value, changed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+        [
+          shiftDate,
+          shiftNumber,
+          String(change.item_type).trim(),
+          String(change.item_name).trim(),
+          String(change.field_name).trim(),
+          parseOptionalNumber(change.old_value),
+          parseOptionalNumber(change.new_value)
+        ],
+        'shift_balance_change_history'
+      );
+      saved += 1;
+    }
+
+    return { success: true, saved };
+  } catch (error) {
+    console.error('Error recording shift balance changes:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-shift-balance-change-history', async (_event, filters = {}) => {
+  try {
+    const clauses = [];
+    const params = [];
+
+    const itemType = String(filters.itemType || '').trim();
+    if (['fuel', 'oil'].includes(itemType)) {
+      params.push(itemType);
+      clauses.push(`item_type = $${params.length}`);
+    }
+
+    const fromDate = normalizeIsoDate(filters.fromDate);
+    if (fromDate) {
+      params.push(fromDate);
+      clauses.push(`shift_date >= $${params.length}`);
+    }
+
+    const toDate = normalizeIsoDate(filters.toDate);
+    if (toDate) {
+      params.push(toDate);
+      clauses.push(`shift_date <= $${params.length}`);
+    }
+
+    const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    return await executeQuery(
+      `SELECT id, shift_date, shift_number, item_type, item_name, field_name, old_value, new_value, changed_at
+       FROM shift_balance_change_history
+       ${whereSql}
+       ORDER BY changed_at DESC, id DESC
+       LIMIT 500`,
+      params
+    );
+  } catch (error) {
+    console.error('Error getting shift balance change history:', error);
+    return [];
   }
 });
 

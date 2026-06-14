@@ -80,6 +80,7 @@ const settingsSectionTitles = {
   'manage-customers': 'إدارة العملاء',
   'excel-sales-import': 'استيراد مبيعات Excel',
   'excel-expenses-import': 'استيراد مصاريف Excel',
+  'balance-history': 'سجل الأرصدة والعدادات',
   'invoices-list': 'عرض الفواتير',
   'general': 'إعدادات عامة',
   'backup': 'النسخ الاحتياطي'
@@ -4247,6 +4248,8 @@ function showSettingsSectionWithoutHistory(sectionName) {
       loadInvoicesList();
     } else if (sectionName === 'excel-sales-import') {
       loadExcelSalesImportProducts();
+    } else if (sectionName === 'balance-history') {
+      loadShiftBalanceHistory();
     }
   }
 }
@@ -5081,6 +5084,10 @@ async function generateMonthlyReportPdf() {
     setMonthlyReportStatus('جاري إنشاء التقرير الشهري...');
     await ensureMonthlyReportSettingsSaved();
     const result = await ipcRenderer.invoke('generate-monthly-report-pdf', getMonthlyReportOptions());
+    if (result?.canceled) {
+      setMonthlyReportStatus('تم إلغاء إنشاء التقرير');
+      return;
+    }
     if (!result?.success) {
       throw new Error(result?.error || 'report_failed');
     }
@@ -5115,6 +5122,133 @@ async function sendMonthlyReportEmail() {
     const errorMessage = getMonthlyReportErrorMessage(error, 'حدث خطأ أثناء إرسال التقرير');
     setMonthlyReportStatus(errorMessage, 'error');
     showMessage(errorMessage, 'error');
+  }
+}
+
+function getShiftBalanceHistoryFilters() {
+  return {
+    itemType: document.getElementById('balance-history-type')?.value || '',
+    fromDate: document.getElementById('balance-history-from')?.value || '',
+    toDate: document.getElementById('balance-history-to')?.value || ''
+  };
+}
+
+function formatBalanceHistoryChangedAt(value) {
+  if (!value) return '';
+  const rawValue = String(value);
+  const timestamp = typeof value === 'number' || /^\d+$/.test(rawValue)
+    ? Number(value) * 1000
+    : new Date(value).getTime();
+
+  if (!Number.isFinite(timestamp)) {
+    return escapeHtml(rawValue);
+  }
+
+  return escapeHtml(new Date(timestamp).toLocaleString('ar-EG', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }));
+}
+
+function getBalanceHistoryTypeLabel(itemType) {
+  return itemType === 'oil' ? 'زيوت' : itemType === 'fuel' ? 'وقود' : itemType || '';
+}
+
+function setBalanceHistoryStatus(message, type = '') {
+  const status = document.getElementById('balance-history-status');
+  if (!status) return;
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function renderShiftBalanceHistory(rows = []) {
+  const tbody = document.getElementById('balance-history-table-body');
+  if (!tbody) return;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="balance-history-empty">لا توجد تغييرات مسجلة</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${formatBalanceHistoryChangedAt(row.changed_at)}</td>
+      <td>${escapeHtml(formatDateOnlyDisplay(row.shift_date))}</td>
+      <td>${convertToArabicNumerals(row.shift_number || '')}</td>
+      <td>${escapeHtml(getBalanceHistoryTypeLabel(row.item_type))}</td>
+      <td>${escapeHtml(row.item_name || '')}</td>
+      <td>${escapeHtml(row.field_name || '')}</td>
+      <td>${row.old_value === null || row.old_value === undefined ? '' : formatArabicNumber(row.old_value)}</td>
+      <td>${formatArabicNumber(row.new_value)}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadShiftBalanceHistory() {
+  try {
+    setBalanceHistoryStatus('جاري تحميل السجل...');
+    const rows = await ipcRenderer.invoke('get-shift-balance-change-history', getShiftBalanceHistoryFilters());
+    renderShiftBalanceHistory(rows);
+    setBalanceHistoryStatus(`تم تحميل ${convertToArabicNumerals(Array.isArray(rows) ? rows.length : 0)} تغيير`, 'success');
+  } catch (error) {
+    console.error('Error loading shift balance history:', error);
+    renderShiftBalanceHistory([]);
+    setBalanceHistoryStatus('حدث خطأ أثناء تحميل السجل', 'error');
+  }
+}
+
+function resetShiftBalanceHistoryFilters() {
+  const typeInput = document.getElementById('balance-history-type');
+  const fromInput = document.getElementById('balance-history-from');
+  const toInput = document.getElementById('balance-history-to');
+  if (typeInput) typeInput.value = '';
+  if (fromInput) fromInput.value = '';
+  if (toInput) toInput.value = '';
+  loadShiftBalanceHistory();
+}
+
+function parseBalanceHistoryNumber(value) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+  if (!normalized) return null;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getCurrentShiftBalanceIdentifier() {
+  return {
+    shift_date: document.getElementById('shift-date')?.value || getTodayDate(),
+    shift_number: parseInt(document.getElementById('shift-number')?.value || '1', 10) || 1
+  };
+}
+
+async function recordShiftBalanceChanges(changes) {
+  const validChanges = (Array.isArray(changes) ? changes : []).filter((change) => {
+    const oldValue = parseBalanceHistoryNumber(change.old_value);
+    const newValue = parseBalanceHistoryNumber(change.new_value);
+    return newValue !== null && (oldValue === null || Math.abs(oldValue - newValue) > 0.000001);
+  }).map((change) => ({
+    ...getCurrentShiftBalanceIdentifier(),
+    ...change,
+    old_value: parseBalanceHistoryNumber(change.old_value),
+    new_value: parseBalanceHistoryNumber(change.new_value)
+  }));
+
+  if (validChanges.length === 0) return;
+
+  try {
+    const result = await ipcRenderer.invoke('record-shift-balance-changes', validChanges);
+    if (!result?.success) {
+      throw new Error(result?.error || 'record_failed');
+    }
+  } catch (error) {
+    console.warn('Unable to record shift balance history:', error);
   }
 }
 
@@ -11888,6 +12022,17 @@ function getFuelTypeByFirstShiftInputId(inputId = '') {
   return '';
 }
 
+function getFuelCounterIndexByFirstShiftInputId(inputId = '') {
+  const match = inputId.match(/first-(\d+)$/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function getOilNameByInitialInput(input) {
+  if (!input) return '';
+  const row = input.closest('tr[data-oil-name]');
+  return row?.getAttribute('data-oil-name') || input.getAttribute('data-oil') || '';
+}
+
 function recalculateFuelAfterFirstShiftChange(inputId = '') {
   const fuelType = getFuelTypeByFirstShiftInputId(inputId);
   if (!fuelType) return;
@@ -11902,6 +12047,11 @@ function recalculateFuelAfterFirstShiftChange(inputId = '') {
 
 async function handleFuelInlineResetFieldChange(input) {
   if (!input || !fuelInlineResetMode) return;
+
+  const oldValue = input.dataset.balanceHistoryOldValue ?? '';
+  const newValue = input.value;
+  const fuelType = getFuelTypeByFirstShiftInputId(input.id);
+  const counterIndex = getFuelCounterIndexByFirstShiftInputId(input.id);
 
   recalculateFuelAfterFirstShiftChange(input.id);
   input.readOnly = true;
@@ -11918,11 +12068,22 @@ async function handleFuelInlineResetFieldChange(input) {
 
   currentShiftData.hasUnsavedChanges = false;
   setShiftDraftStatus('saved');
+  await recordShiftBalanceChanges([{
+    item_type: 'fuel',
+    item_name: counterIndex ? `${fuelType} - عداد ${convertToArabicNumerals(counterIndex)}` : fuelType,
+    field_name: 'أول الوردية',
+    old_value: oldValue,
+    new_value: newValue
+  }]);
+  input.dataset.balanceHistoryOldValue = input.value;
 }
 
 async function handleOilInlineResetFieldChange(input) {
   if (!input || !oilInlineResetMode) return;
 
+  const oldValue = input.dataset.balanceHistoryOldValue ?? '';
+  const newValue = input.value;
+  const oilName = getOilNameByInitialInput(input);
   const match = input.id.match(/^oil-(.+)-initial$/);
   const oilId = match ? match[1] : null;
   if (!oilId) return;
@@ -11942,6 +12103,14 @@ async function handleOilInlineResetFieldChange(input) {
 
   currentShiftData.hasUnsavedChanges = false;
   setShiftDraftStatus('saved');
+  await recordShiftBalanceChanges([{
+    item_type: 'oil',
+    item_name: oilName,
+    field_name: 'رصيد',
+    old_value: oldValue,
+    new_value: newValue
+  }]);
+  input.dataset.balanceHistoryOldValue = input.value;
 }
 
 function openResetCountersModal() {
@@ -11954,6 +12123,7 @@ function openResetCountersModal() {
 
   const inputs = getFuelFirstShiftInputs();
   inputs.forEach((input) => {
+    input.dataset.balanceHistoryOldValue = input.value;
     input.readOnly = false;
     input.classList.add(INLINE_RESET_ACTIVE_CLASS);
 
@@ -11989,6 +12159,7 @@ function openResetOilBalancesModal() {
 
   const inputs = getOilInitialInputs();
   inputs.forEach((input) => {
+    input.dataset.balanceHistoryOldValue = input.value;
     input.readOnly = false;
     input.classList.add(INLINE_RESET_ACTIVE_CLASS);
 
@@ -12047,6 +12218,7 @@ async function applyResetOilBalances() {
   const tableBody = document.getElementById('shift-oil-table-body');
   const rows = tableBody ? Array.from(tableBody.querySelectorAll('tr[data-oil-id]')) : [];
   let hasChanges = false;
+  const historyChanges = [];
 
   if (rows.length === 0) {
     if (msg) msg.textContent = 'لا توجد زيوت نشطة';
@@ -12058,6 +12230,7 @@ async function applyResetOilBalances() {
     const sourceInput = document.getElementById(`reset-oil-balance-${oilId}`);
     const targetInput = document.getElementById(`oil-${oilId}-initial`);
     const rawValue = String(sourceInput?.value ?? '').trim();
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
 
     if (!targetInput || rawValue === '') {
       continue;
@@ -12067,8 +12240,16 @@ async function applyResetOilBalances() {
 
     if (Number.isFinite(numericValue) && numericValue >= 0) {
       const nextValue = String(numericValue);
+      const oldValue = targetInput.value;
       if (targetInput.value !== nextValue) {
         hasChanges = true;
+        historyChanges.push({
+          item_type: 'oil',
+          item_name: oilName,
+          field_name: 'رصيد',
+          old_value: oldValue,
+          new_value: nextValue
+        });
       }
       targetInput.value = nextValue;
       await calculateOilRow(oilId);
@@ -12082,6 +12263,7 @@ async function applyResetOilBalances() {
       if (msg) msg.textContent = 'تعذر حفظ التغييرات في قاعدة البيانات';
       return;
     }
+    await recordShiftBalanceChanges(historyChanges);
   }
   if (msg) msg.textContent = '';
   closeResetOilBalancesModal();
@@ -12135,6 +12317,7 @@ function renderResetCounterFields(fuel) {
 async function applyResetCounters() {
   const fuel = document.getElementById('reset-fuel-type')?.value;
   const msg = document.getElementById('reset-counters-message');
+  const historyChanges = [];
   if (!fuel) {
     if (msg) msg.textContent = 'يرجى اختيار نوع الوقود';
     return;
@@ -12167,8 +12350,17 @@ async function applyResetCounters() {
 
     const targetEl = targetId ? document.getElementById(targetId) : null;
     const nextValue = String(val);
+    const oldValue = targetEl?.value ?? '';
     if (targetEl?.value !== nextValue) {
       hasChanges = true;
+      const fuelType = getFuelTypeByFirstShiftInputId(targetId);
+      historyChanges.push({
+        item_type: 'fuel',
+        item_name: `${fuelType} - عداد ${convertToArabicNumerals(i)}`,
+        field_name: 'أول الوردية',
+        old_value: oldValue,
+        new_value: nextValue
+      });
     }
     setValue(targetId, nextValue);
   }
@@ -12192,6 +12384,7 @@ async function applyResetCounters() {
       if (msg) msg.textContent = 'تعذر حفظ التغييرات في قاعدة البيانات';
       return;
     }
+    await recordShiftBalanceChanges(historyChanges);
   }
   if (msg) msg.textContent = '';
   closeResetCountersModal();

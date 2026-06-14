@@ -645,6 +645,41 @@ body.modal-scroll-lock {
   overflow-wrap: anywhere;
 }
 
+.balance-history-filters {
+  align-items: end;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: minmax(140px, 0.8fr) repeat(2, minmax(170px, 1fr)) auto auto;
+  margin-bottom: 1rem;
+}
+
+.balance-history-filters .form-group {
+  margin-bottom: 0;
+}
+
+.balance-history-table th,
+.balance-history-table td {
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.balance-history-table td:nth-child(5) {
+  min-width: 170px;
+  white-space: normal;
+}
+
+.balance-history-empty {
+  color: #777;
+  padding: 1.5rem !important;
+  text-align: center !important;
+}
+
+@media (max-width: 900px) {
+  .balance-history-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
 .base-table.summary-table th.month-click {
   cursor: pointer;
   user-select: none;

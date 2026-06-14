@@ -342,6 +342,27 @@ class DatabaseManager {
       console.log('Safe book indexes creation:', err.message);
     }
 
+    // Shift balance changes history table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS shift_balance_change_history (
+      id SERIAL PRIMARY KEY,
+      shift_date TEXT NOT NULL,
+      shift_number INTEGER NOT NULL,
+      item_type TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      old_value REAL,
+      new_value REAL NOT NULL,
+      changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_balance_history_changed_at ON shift_balance_change_history(changed_at)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_balance_history_shift ON shift_balance_change_history(shift_date, shift_number)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_balance_history_item ON shift_balance_change_history(item_type, item_name)`);
+    } catch (err) {
+      console.log('Shift balance history indexes creation:', err.message);
+    }
+
     // Monthly profit manual inputs table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS monthly_profit_inputs (
       id SERIAL PRIMARY KEY,
@@ -640,6 +661,7 @@ class DatabaseManager {
       'sales', 'purchase_prices', 'products', 'price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
       'customers', 'shifts', 'annual_inventories', 'safe_book_movements',
+      'shift_balance_change_history',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values'
     ];
 

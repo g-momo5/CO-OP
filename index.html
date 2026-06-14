@@ -1074,6 +1074,7 @@
               <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
               <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
               <li class="settings-menu-item" data-settings-section="excel-expenses-import">استيراد مصاريف Excel</li>
+              <li class="settings-menu-item" data-settings-section="balance-history">سجل الأرصدة والعدادات</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
@@ -1259,6 +1260,49 @@
                     <tbody id="excel-expenses-preview-body"></tbody>
                   </table>
                 </div>
+              </div>
+            </section>
+
+            <!-- Balance And Counter History Section -->
+            <section id="settings-section-balance-history" class="settings-section">
+              <h3>سجل الأرصدة والعدادات</h3>
+              <div class="balance-history-filters">
+                <div class="form-group compact">
+                  <label for="balance-history-type">النوع:</label>
+                  <select id="balance-history-type" class="form-control" onchange="loadShiftBalanceHistory()">
+                    <option value="">الكل</option>
+                    <option value="fuel">وقود</option>
+                    <option value="oil">زيوت</option>
+                  </select>
+                </div>
+                <div class="form-group compact">
+                  <label for="balance-history-from">من تاريخ:</label>
+                  <input type="date" id="balance-history-from" class="form-control" onchange="loadShiftBalanceHistory()">
+                </div>
+                <div class="form-group compact">
+                  <label for="balance-history-to">إلى تاريخ:</label>
+                  <input type="date" id="balance-history-to" class="form-control" onchange="loadShiftBalanceHistory()">
+                </div>
+                <button class="btn btn-secondary" onclick="resetShiftBalanceHistoryFilters()">مسح الفلاتر</button>
+                <button class="btn btn-primary" onclick="loadShiftBalanceHistory()">تحديث</button>
+              </div>
+              <div id="balance-history-status" class="excel-import-status">يعرض التغييرات المسجلة من الآن فصاعداً.</div>
+              <div class="excel-import-table-wrapper">
+                <table class="base-table balance-history-table">
+                  <thead>
+                    <tr>
+                      <th>وقت التغيير</th>
+                      <th>تاريخ الوردية</th>
+                      <th>الوردية</th>
+                      <th>النوع</th>
+                      <th>البند</th>
+                      <th>الحقل</th>
+                      <th>القيمة السابقة</th>
+                      <th>القيمة الجديدة</th>
+                    </tr>
+                  </thead>
+                  <tbody id="balance-history-table-body"></tbody>
+                </table>
               </div>
             </section>
 
