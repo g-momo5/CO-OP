@@ -2245,8 +2245,14 @@ function renderFuelPriceRows(prices) {
     input.min = '0';
     input.className = 'table-price-input';
     input.placeholder = '0.00';
+    input.autocomplete = 'off';
     input.dataset.productType = 'fuel';
     input.dataset.productName = productName;
+    input.dataset.currentPrice = String(parseFloat(product.price) || 0);
+    input.dataset.dirty = '0';
+    input.addEventListener('input', () => {
+      input.dataset.dirty = '1';
+    });
     newPriceCell.appendChild(input);
 
     row.appendChild(nameCell);
@@ -3915,8 +3921,14 @@ async function loadOilPrices() {
       input.min = '0';
       input.className = 'table-price-input';
       input.placeholder = '0.00';
+      input.autocomplete = 'off';
       input.dataset.productType = 'oil';
       input.dataset.productName = oilName;
+      input.dataset.currentPrice = String(parseFloat(oil.price) || 0);
+      input.dataset.dirty = '0';
+      input.addEventListener('input', () => {
+        input.dataset.dirty = '1';
+      });
       newPriceCell.appendChild(input);
 
       row.appendChild(nameCell);
@@ -3975,12 +3987,17 @@ function initializePriceDate() {
 function resetPriceInputs() {
   document.querySelectorAll('#price-edit-modal .table-price-input').forEach(input => {
     input.value = '';
+    input.dataset.dirty = '0';
   });
 }
 
+function normalizeSalePriceInput(value) {
+  return convertFromArabicNumerals(String(value ?? '')).replace(',', '.').trim();
+}
+
 function parseSalePriceInputValue(value) {
-  const normalized = convertFromArabicNumerals(value).replace(',', '.').trim();
-  if (!normalized) return null;
+  const normalized = normalizeSalePriceInput(value);
+  if (normalized === '') return null;
 
   const price = parseFloat(normalized);
   return Number.isFinite(price) ? price : NaN;
@@ -4003,13 +4020,18 @@ async function saveAllPrices() {
     );
 
     priceInputs.forEach(input => {
-      const productType = input.dataset.productType;
-      const productName = input.dataset.productName;
-      const price = parseSalePriceInputValue(input.value);
-
-      if (price === null) {
+      if (input.dataset.dirty !== '1') {
         return;
       }
+
+      const rawPrice = normalizeSalePriceInput(input.value);
+      if (rawPrice === '') {
+        return;
+      }
+
+      const productType = input.dataset.productType;
+      const productName = input.dataset.productName;
+      const price = parseSalePriceInputValue(rawPrice);
 
       if (!productType || !productName || isNaN(price) || price <= 0) {
         invalidProducts.push(productName || '');
@@ -4707,64 +4729,20 @@ async function loadPriceHistory() {
     ]);
 
     let history = historyTypeFilter
-      ? historyRaw.filter((item) => item?.product_type === historyTypeFilter)
-      : historyRaw;
+      ? (Array.isArray(historyRaw) ? historyRaw : []).filter((item) => item?.product_type === historyTypeFilter)
+      : (Array.isArray(historyRaw) ? historyRaw : []);
     const container = document.getElementById('price-history-content');
 
     if (!container) return;
 
-    const fuelProducts = Array.isArray(fuelProductsRaw) ? fuelProductsRaw : [];
-    const oilProducts = Array.isArray(oilProductsRaw) ? oilProductsRaw : [];
-    const allProducts = [
-      ...fuelProducts.map((item) => ({ type: 'fuel', name: item?.fuel_type, price: item?.price, effective_date: item?.effective_date })),
-      ...oilProducts.map((item) => ({ type: 'oil', name: item?.oil_type, price: item?.price, effective_date: item?.effective_date }))
-    ].filter((item) => String(item?.name || '').trim() !== '');
-
-    const productCatalog = allProducts.filter((item) => {
-      if (filter === '__all_fuel__') return item.type === 'fuel';
-      if (filter === '__all_oil__') return item.type === 'oil';
-      if (filter) return item.name === filter;
-      return true;
-    });
-
-    const historyProductNames = new Set(
-      history.map((item) => String(item?.product_name || '').trim()).filter(Boolean)
-    );
-
-    const fallbackRows = [];
-    productCatalog.forEach((product) => {
-      if (historyProductNames.has(product.name)) {
-        return;
-      }
-
-      const numericPrice = parseFloat(product.price);
-      if (!Number.isFinite(numericPrice)) {
-        return;
-      }
-
-      fallbackRows.push({
-        product_type: product.type,
-        product_name: product.name,
-        price: numericPrice,
-        start_date: product.effective_date || getTodayDate(),
-        created_at: 0
-      });
-    });
-
-    history = [...history, ...fallbackRows];
-
-    if (history.length === 0) {
-      container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
-      return;
-    }
-
     const parseDateKey = (value) => {
-      const parts = parseIsoDateParts(value);
-      if (parts) {
-        return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+      const raw = String(value || '').trim().replace(/^"+|"+$/g, '');
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return raw;
       }
 
-      const parsedDate = value instanceof Date ? value : new Date(value);
+      const parsedDate = value instanceof Date ? value : new Date(raw);
       if (Number.isNaN(parsedDate.getTime())) {
         return '';
       }
@@ -4774,6 +4752,51 @@ async function loadPriceHistory() {
       const day = String(parsedDate.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     };
+
+    const existingHistoryKeys = new Set();
+    history.forEach((item) => {
+      const productName = String(item?.product_name || '').trim();
+      const dateKey = parseDateKey(item?.start_date);
+      if (productName && dateKey) {
+        existingHistoryKeys.add(`${productName}@@${dateKey}`);
+      }
+    });
+
+    const fuelProducts = Array.isArray(fuelProductsRaw) ? fuelProductsRaw : [];
+    const oilProducts = Array.isArray(oilProductsRaw) ? oilProductsRaw : [];
+    const allProducts = [
+      ...fuelProducts.map((item) => ({ type: 'fuel', name: item?.fuel_type, price: item?.price, effective_date: item?.effective_date })),
+      ...oilProducts.map((item) => ({ type: 'oil', name: item?.oil_type, price: item?.price, effective_date: item?.effective_date }))
+    ].filter((item) => String(item?.name || '').trim() !== '');
+
+    const fallbackRows = allProducts.reduce((rows, product) => {
+      if (filter === '__all_fuel__' && product.type !== 'fuel') return rows;
+      if (filter === '__all_oil__' && product.type !== 'oil') return rows;
+      if (filter && !filter.startsWith('__all_') && product.name !== filter) return rows;
+
+      const dateKey = parseDateKey(product.effective_date);
+      const numericPrice = parseFloat(product.price);
+      const productName = String(product.name || '').trim();
+
+      if (!productName || !dateKey || !Number.isFinite(numericPrice)) return rows;
+      if (existingHistoryKeys.has(`${productName}@@${dateKey}`)) return rows;
+
+      rows.push({
+        product_type: product.type,
+        product_name: productName,
+        price: numericPrice,
+        start_date: dateKey,
+        created_at: 0
+      });
+      return rows;
+    }, []);
+
+    history = [...history, ...fallbackRows];
+
+    if (history.length === 0) {
+      container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
+      return;
+    }
 
     const dateSet = new Set();
     const changesByProduct = new Map();

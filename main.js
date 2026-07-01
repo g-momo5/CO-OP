@@ -2208,12 +2208,19 @@ function setupIPCHandlers() {
       for (const item of prices) {
         const product_type = String(item?.product_type || '').trim();
         const product_name = String(item?.product_name || '').trim();
-        const price = parseFloat(item?.price);
+        const rawPrice = item?.price;
+        const normalizedPrice = String(rawPrice ?? '').replace(',', '.').trim();
+        const price = parseFloat(normalizedPrice);
         const start_date = normalizeDateOnly(item?.start_date);
 
         if (!['fuel', 'oil'].includes(product_type) || !product_name || !isValidDateOnly(start_date)) {
           console.warn(`Missing or invalid required fields for price: ${JSON.stringify(item)}`);
           skipped.push({ product_name, reason: 'invalid_fields' });
+          continue;
+        }
+
+        if (normalizedPrice === '') {
+          skipped.push({ product_name, reason: 'empty_price' });
           continue;
         }
 
