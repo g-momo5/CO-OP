@@ -5577,7 +5577,7 @@ function resetExcelSalesImport() {
   const fileInput = document.getElementById('excel-sales-file-input');
   if (fileInput) fileInput.value = '';
 
-  setExcelSalesImportStatus('اختر ملف Excel يحتوي على الأعمدة: اليوم، الصنف، الكمية، سايب، عيارات، عملاء، السعر.');
+  setExcelSalesImportStatus('اختر ملف Excel يحتوي على الأعمدة الإلزامية: اليوم، الصنف، الكمية، السعر. الأعمدة الاختيارية: سايب، عيارات، عملاء. تعرض المعاينة أيضاً النوع والإجمالي المحسوب.');
   renderExcelSalesSummary();
   renderExcelSalesUnknownProducts();
   renderExcelSalesPreview();
@@ -5754,6 +5754,23 @@ async function refreshExcelSalesImportPreview() {
   updateExcelSalesImportButton();
 }
 
+function hasExcelSalesData(existingShift) {
+  if (!existingShift) return false;
+
+  const legacyData = parseShiftJsonValue(existingShift.data, {});
+  const fuelData = parseShiftJsonValue(existingShift.fuel_data ?? legacyData.fuel_data, {});
+  const oilData = parseShiftJsonValue(existingShift.oil_data ?? legacyData.oil_data, {});
+  const fuelTotal = parseFloat(existingShift.fuel_total ?? legacyData.fuel_total) || 0;
+  const oilTotal = parseFloat(existingShift.oil_total ?? legacyData.oil_total) || 0;
+  const washLubeRevenue = parseFloat(existingShift.wash_lube_revenue ?? legacyData.wash_lube_revenue) || 0;
+
+  return Object.keys(fuelData).length > 0
+    || Object.keys(oilData).length > 0
+    || Math.abs(fuelTotal) > 0.0001
+    || Math.abs(oilTotal) > 0.0001
+    || Math.abs(washLubeRevenue) > 0.0001;
+}
+
 async function refreshExcelSalesConflicts() {
   const dates = Array.from(new Set(
     excelSalesImportState.parsedRows
@@ -5765,7 +5782,7 @@ async function refreshExcelSalesConflicts() {
   for (const date of dates) {
     try {
       const existing = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: 1 });
-      if (existing) {
+      if (hasExcelSalesData(existing)) {
         conflicts.push(date);
       }
     } catch (error) {
@@ -5794,7 +5811,7 @@ function renderExcelSalesSummary() {
     <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(excelSalesImportState.rawRows.length)}</strong>صفوف مقروءة</div>
     <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(datesCount)}</strong>تواريخ</div>
     <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(unresolvedCount)}</strong>منتجات تحتاج مراجعة</div>
-    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(conflictsCount)}</strong>ورديات موجودة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(conflictsCount)}</strong>مبيعات موجودة مسبقاً</div>
   `;
 
   if (excelSalesImportState.validationErrors.length > 0) {
@@ -5802,7 +5819,7 @@ function renderExcelSalesSummary() {
   } else if (unresolvedCount > 0) {
     setExcelSalesImportStatus('راجع المنتجات غير الموجودة قبل الاستيراد.', 'error');
   } else if (conflictsCount > 0) {
-    setExcelSalesImportStatus('تم تجهيز الملف، لكن توجد ورديات محفوظة لنفس التاريخ وسيطلب البرنامج تأكيد قبل الكتابة فوقها.');
+    setExcelSalesImportStatus(`تم تجهيز الملف: توجد مبيعات محفوظة مسبقاً في ${convertToArabicNumerals(conflictsCount)} من أصل ${convertToArabicNumerals(datesCount)} تاريخ، وسيطلب البرنامج تأكيد قبل الكتابة فوقها.`);
   } else {
     setExcelSalesImportStatus(`تم تجهيز الملف: ${excelSalesImportState.fileName}`, 'success');
   }
@@ -5981,7 +5998,7 @@ function updateExcelSalesImportButton() {
     excelSalesImportState.validationErrors.length > 0;
 }
 
-function buildExcelSalesShiftPayloads() {
+async function buildExcelSalesShiftPayloads() {
   const shiftsByDate = new Map();
 
   excelSalesImportState.parsedRows.forEach((row) => {
@@ -6023,7 +6040,9 @@ function buildExcelSalesShiftPayloads() {
     item.clients += row.clients || 0;
   });
 
-  return Array.from(shiftsByDate.values()).map((shift) => {
+  const payloads = [];
+
+  for (const shift of shiftsByDate.values()) {
     const fuelData = {};
     let fuelTotal = 0;
     shift.fuelRows.forEach((item) => {
@@ -6075,23 +6094,44 @@ function buildExcelSalesShiftPayloads() {
     });
 
     const washLubeRevenue = shift.washLubeRevenue || 0;
-    const grandTotal = fuelTotal + oilTotal + washLubeRevenue;
-    return {
+    let existingShift = null;
+    try {
+      existingShift = await ipcRenderer.invoke('get-saved-shift', { date: shift.date, shift_number: 1 });
+    } catch (error) {
+      console.warn('Unable to preserve existing shift details during Excel sales import:', shift.date, error);
+    }
+
+    const legacyData = parseShiftJsonValue(existingShift?.data, {});
+    const existingExpenseItems = normalizeExpenseItems(legacyData.expense_items);
+    const existingTotalExpenses = parseFloat(existingShift?.total_expenses ?? legacyData.total_expenses) || 0;
+    const effectiveExpenseItems = existingExpenseItems.length > 0
+      ? existingExpenseItems
+      : existingTotalExpenses > 0
+        ? [{ index: 1, description: LEGACY_AGGREGATED_EXPENSE_LABEL, amount: existingTotalExpenses }]
+        : [];
+    const revenueItems = normalizeRevenueItems(legacyData.revenue_items);
+    const customerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+    const extraRevenueTotal = revenueItems.reduce((sum, item) => sum + (parseFloat(item?.amount) || 0), 0);
+    const grandTotal = fuelTotal + oilTotal + washLubeRevenue + extraRevenueTotal - existingTotalExpenses;
+
+    payloads.push({
       date: shift.date,
       shift_number: 1,
       fuel_data: JSON.stringify(fuelData),
       fuel_total: fuelTotal,
       oil_data: JSON.stringify(oilData),
       oil_total: oilTotal,
-      customer_rows: [],
-      revenue_items: [],
-      expense_items: [],
+      customer_rows: customerRows,
+      revenue_items: revenueItems,
+      expense_items: effectiveExpenseItems,
       wash_lube_revenue: washLubeRevenue,
-      total_expenses: 0,
+      total_expenses: existingTotalExpenses,
       grand_total: grandTotal,
       is_saved: 1
-    };
-  });
+    });
+  }
+
+  return payloads;
 }
 
 async function refreshViewsAfterExcelSalesImport() {
@@ -6121,7 +6161,7 @@ async function importExcelSales() {
       return;
     }
 
-    const payloads = buildExcelSalesShiftPayloads();
+    const payloads = await buildExcelSalesShiftPayloads();
     if (payloads.length === 0) {
       showMessage('لا توجد بيانات صالحة للاستيراد', 'error');
       return;
@@ -6129,7 +6169,7 @@ async function importExcelSales() {
 
     if (excelSalesImportState.conflicts.length > 0) {
       const dates = excelSalesImportState.conflicts.join(', ');
-      const confirmed = confirm(`توجد وردية رقم 1 محفوظة بالفعل لهذه التواريخ:\n${dates}\n\nهل تريد الكتابة فوقها؟`);
+      const confirmed = confirm(`توجد مبيعات محفوظة بالفعل في وردية رقم 1 لهذه التواريخ:\n${dates}\n\nهل تريد الكتابة فوق بيانات المبيعات؟`);
       if (!confirmed) return;
     }
 
