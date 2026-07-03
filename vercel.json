@@ -1,12 +1,17 @@
 {
   "buildCommand": null,
+  "outputDirectory": "public",
   "rewrites": [
     {
-      "source": "/m/:token",
+      "source": "/",
       "destination": "/mobile/index.html"
     },
     {
-      "source": "/m/:token/:path*",
+      "source": "/m",
+      "destination": "/mobile/index.html"
+    },
+    {
+      "source": "/m/:path*",
       "destination": "/mobile/index.html"
     }
   ],
