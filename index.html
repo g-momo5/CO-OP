@@ -7,10 +7,10 @@
   <meta http-equiv="Content-Language" content="ar">
   <meta name="format-detection" content="telephone=no">
   <title>محطة بنزين سمنود - الجمعية التعاونية للبترول</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260703-fuel-header-center">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
     rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="node_modules/chart.js/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="rtl-config.js"></script>
@@ -48,10 +48,10 @@
           <div class="home-chart-column">
             <div class="home-chart-container">
               <div class="home-chart-header">
-                <h2 id="home-chart-title">كميات المشتريات الشهرية حسب نوع الوقود</h2>
+                <h2 id="home-chart-title">كميات المبيعات الشهرية حسب نوع الوقود</h2>
                 <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
-                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="purchases">المشتراة</button>
-                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="sales">المباعة</button>
+                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="purchases">المشتراة</button>
+                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="sales">المباعة</button>
                 </div>
               </div>
               <div class="chart-wrapper">
@@ -83,6 +83,13 @@
                     <div class="card-icon">📦</div>
                     <h3>إدارة المخزن</h3>
                     <p>تتبع مخزون الوقود والزيوت</p>
+                  </div>
+
+                  <!-- Card 2b - Tank Management -->
+                  <div class="action-card" onclick="showScreen('tank-management', 'home')">
+                    <div class="card-icon">⛽</div>
+                    <h3>ادارة التنكات</h3>
+                    <p>متابعة دخول وخروج الوقود من التنكات</p>
                   </div>
 
                   <!-- Card 5 - Sales Summary -->
@@ -127,7 +134,7 @@
                 <h3 class="home-card-group-title">إدارة المبيعات</h3>
                 <div class="action-cards-grid">
                   <!-- Card 3 - Shift Entry -->
-                  <div class="action-card" onclick="showScreen('shift-entry', 'home')">
+                  <div class="action-card" onclick="openNewShiftEntry()">
                     <div class="card-icon">🔄</div>
                     <h3>إدخال وردية جديدة</h3>
                     <p>تسجيل مبيعات الوردية</p>
@@ -287,7 +294,6 @@
                     <select id="profit-end-year"></select>
                   </div>
                 </div>
-                <button type="button" class="btn btn-secondary" id="profit-filter-btn">تطبيق</button>
                 <button type="button" class="btn btn-secondary profit-clear-filter-btn" id="profit-clear-filter-btn" title="إعادة الفترة الافتراضية">
                   ↺
                 </button>
@@ -495,11 +501,6 @@
       <div id="shift-entry-screen" class="screen">
         <div class="shift-header-row">
           <h2 id="shift-entry-title">إدخال وردية جديدة</h2>
-          <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
-            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
-            <div class="history-chip" id="history-chip">-</div>
-            <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('next')">الوردية التالية</button>
-          </div>
         </div>
 
         <!-- Shift Info Section -->
@@ -517,6 +518,14 @@
               </select>
             </div>
             <div class="form-group">
+              <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
+                <button class="btn btn-secondary btn-compact shift-history-nav-btn" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
+                <div class="history-chip" id="history-chip">-</div>
+                <button class="btn btn-secondary btn-compact shift-history-nav-btn" onclick="navigateShiftHistory('next')">الوردية التالية</button>
+                <button class="btn btn-primary btn-compact" id="start-shift-correction-btn" onclick="startShiftCorrection()">تصحيح الوردية</button>
+                <button class="btn btn-success btn-compact" id="save-shift-correction-btn" onclick="saveShiftCorrection()" style="display: none;">حفظ التصحيح</button>
+                <button class="btn btn-secondary btn-compact" id="cancel-shift-correction-btn" onclick="cancelShiftCorrection()" style="display: none;">إلغاء التصحيح</button>
+              </div>
               <button class="btn-primary" id="save-shift-btn" onclick="saveShift()">
                 حفظ الوردية
               </button>
@@ -534,33 +543,36 @@
           </div>
         </div>
 
-        <!-- Shift Tabs -->
-        <div class="price-type-tabs">
-          <div class="price-type-tab active" data-shift-tab="fuel" onclick="switchShiftTab('fuel')">
-            الوقود
-          </div>
-          <div class="price-type-tab" data-shift-tab="oil" onclick="switchShiftTab('oil')">
-            الزيوت
-          </div>
-          <div class="price-type-tab" data-shift-tab="total" onclick="switchShiftTab('total')">
-            الإجمالي
-          </div>
-        </div>
+        <div class="shift-workspace">
+          <div class="shift-main-panel">
+            <!-- Shift Tabs -->
+            <div class="price-type-tabs">
+              <div class="price-type-tab active" data-shift-tab="fuel" onclick="switchShiftTab('fuel')">
+                الوقود
+              </div>
+              <div class="price-type-tab" data-shift-tab="oil" onclick="switchShiftTab('oil')">
+                الزيوت
+              </div>
+            </div>
 
-        <!-- Shift Content Sections -->
-        <div id="shift-fuel-section" class="shift-tab-section active">
+            <!-- Shift Content Sections -->
+            <div id="shift-fuel-section" class="shift-tab-section active">
           <div class="shift-content">
             <div class="fuel-tables-wrapper">
               <!-- Left side: Fuel tables -->
               <div class="fuel-tables-left">
-                <!-- Tabella Diesel e Gas -->
+                <!-- Tabella Diesel e Benzina 92 -->
                 <div class="shift-fuel-table-container">
               <table class="shift-fuel-table diesel-gas-table">
+                <colgroup>
+                  <col class="fuel-row-label-col">
+                  <col class="fuel-counter-col" span="6">
+                </colgroup>
                 <thead>
                   <tr>
                     <th></th>
-                    <th colspan="4">سولار</th>
-                    <th colspan="2">غاز سيارات</th>
+                    <th colspan="4" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">سولار</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٩٢</span></span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -571,8 +583,8 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-2" oninput="calculateDieselQuantity()"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-3" oninput="calculateDieselQuantity()"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-4" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
                   </tr>
                   <!-- أول الوردية -->
                   <tr>
@@ -581,8 +593,8 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-2" oninput="calculateDieselQuantity()" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-3" oninput="calculateDieselQuantity()" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-4" oninput="calculateDieselQuantity()" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
@@ -591,119 +603,123 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-2" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-3" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-4" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-1" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-1" readonly></td>
                   </tr>
                   <!-- إجمالي الكمية -->
                   <tr>
                     <td class="row-label">إجمالي الكمية</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-total-qty" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-gas-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-total-qty" readonly></td>
                   </tr>
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-clients" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-clients" readonly></td>
                   </tr>
                   <!-- عيارات -->
                   <tr>
                     <td class="row-label">عيارات</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel" id="fuel-diesel-cars" oninput="calculateCashForFuel('diesel')"></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-cars" oninput="calculateCashForFuel('92')"></td>
                   </tr>
                   <!-- السعر -->
                   <tr>
                     <td class="row-label">السعر</td>
                     <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-price" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-price" readonly></td>
                   </tr>
                   <!-- نقدى -->
                   <tr>
                     <td class="row-label">نقدى</td>
                     <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-cash" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-cash" readonly></td>
                   </tr>
                 </tbody>
               </table>
             </div>
             
-            <!-- Tabella Benzine -->
+            <!-- Tabella Benzina 80, Benzina 95 e Gas -->
             <div class="shift-fuel-table-container" style="margin-top: 2rem;">
               <table class="shift-fuel-table benzine-table">
+                <colgroup>
+                  <col class="fuel-row-label-col">
+                  <col class="fuel-counter-col" span="6">
+                </colgroup>
                 <thead>
                   <tr>
                     <th></th>
-                    <th colspan="2">بنزين ٩٥</th>
-                    <th colspan="2">بنزين ٩٢</th>
-                    <th colspan="2">بنزين ٨٠</th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٨٠</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٩٥</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">غاز سيارات</span></span></th>
                   </tr>
                 </thead>
                 <tbody>
                   <!-- آخر الوردية -->
                   <tr>
                     <td class="row-label">آخر الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-2" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-1" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
                   </tr>
                   <!-- أول الوردية -->
                   <tr>
                     <td class="row-label">أول الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-2" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-1" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
                     <td class="row-label">الكمية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-2" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-1" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-2" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-1" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-2" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-2" readonly></td>
                   </tr>
                   <!-- إجمالي الكمية -->
                   <tr>
                     <td class="row-label">إجمالي الكمية</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-total-qty" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-total-qty" readonly></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-gas-total-qty" readonly></td>
                   </tr>
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-clients" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-clients" readonly></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-clients" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-clients" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- عيارات -->
                   <tr>
                     <td class="row-label">عيارات</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-cars" oninput="calculateCashForFuel('95')"></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-cars" oninput="calculateCashForFuel('92')"></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-80-cars" oninput="calculateCashForFuel('80')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-cars" oninput="calculateCashForFuel('95')"></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- السعر -->
                   <tr>
                     <td class="row-label">السعر</td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-price" readonly></td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-price" readonly></td>
                     <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-price" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-price" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- نقدى -->
                   <tr>
                     <td class="row-label">نقدى</td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-cash" readonly></td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-cash" readonly></td>
                     <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-cash" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-cash" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                 </tbody>
               </table>
@@ -736,184 +752,115 @@
           </div>
         </div>
 
-        <div id="shift-oil-section" class="shift-tab-section">
-          <div class="shift-content">
-            <!-- Oil Table -->
-            <div class="shift-oil-table-container">
-              <table class="shift-oil-table">
-                <thead>
-                  <tr>
-                    <th>نوع الزيت</th>
-                    <th>رصيد</th>
-                    <th>وارد</th>
-                    <th>الاجمالى</th>
-                    <th>المباع</th>
-                    <th>المتبقي</th>
-                    <th class="spacer-column"></th>
-                    <th>مفتوح</th>
-                    <th>عملاء</th>
-                    <th>السعر</th>
-                    <th>اجمالى النقدى</th>
-                  </tr>
-                </thead>
-                <tbody id="shift-oil-table-body">
-                  <!-- Oil rows will be loaded dynamically -->
-                  <tr>
-                    <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
-                      جاري تحميل الزيوت النشطة...
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div id="shift-oil-section" class="shift-tab-section">
+              <div class="shift-content">
+                <!-- Oil Table -->
+                <div class="shift-oil-table-container">
+                  <table class="shift-oil-table">
+                    <thead>
+                      <tr>
+                        <th>نوع الزيت</th>
+                        <th>رصيد</th>
+                        <th>وارد</th>
+                        <th>الاجمالى</th>
+                        <th>المباع</th>
+                        <th>المتبقي</th>
+                        <th class="spacer-column"></th>
+                        <th>مفتوح</th>
+                        <th>عملاء</th>
+                        <th>السعر</th>
+                        <th>اجمالى النقدى</th>
+                      </tr>
+                    </thead>
+                    <tbody id="shift-oil-table-body">
+                      <!-- Oil rows will be loaded dynamically -->
+                      <tr>
+                        <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+                          جاري تحميل الزيوت النشطة...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
             </div>
-
           </div>
-        </div>
 
-        <div id="shift-total-section" class="shift-tab-section">
-          <div class="shift-content">
-            <!-- Two Column Layout -->
-            <div class="shift-total-layout">
+          <aside class="shift-summary-sidebar">
+            <details id="shift-summary-details" class="shift-summary-details" open>
+              <summary class="shift-summary-toggle">ملخص الوردية</summary>
+              <div class="shift-summary-content">
+                <section class="shift-final-total">
+                  <div class="final-total-row">
+                    <label>صافى الوردية</label>
+                    <input type="text" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
+                  </div>
+                </section>
+
+                <div class="shift-total-layout">
 
               <!-- Right Column: Revenue -->
-              <div class="shift-total-column">
+              <div class="shift-total-column revenue-column">
                 <h3 class="column-title">الإيرادات</h3>
 
                 <div class="total-section">
                   <div class="total-row">
                     <label>سولار:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-diesel-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-diesel-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٨٠:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-80-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-80-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٩٢:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-92-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-92-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>بنزين ٩٥:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-95-cash" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-95-cash" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>الزيوت:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated" id="total-oil-revenue" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated" id="total-oil-revenue" readonly>
                   </div>
 
                   <div class="total-row">
                     <label>غسيل و تشحيم:</label>
-                    <input type="number" step="0.01" class="total-input" id="total-wash-lube-revenue" oninput="calculateGrandTotal()">
+                    <input type="text" inputmode="decimal" class="total-input summary-numeric-input" id="total-wash-lube-revenue" oninput="handleSummaryFixedRevenueInput(this)">
                   </div>
 
-                  <!-- Free fields for other revenue -->
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-1" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-1" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-2" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-2" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-3" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-3" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-4" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-4" oninput="calculateGrandTotal()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input" id="revenue-desc-5" placeholder="وصف الإيراد">
-                    <input type="number" step="0.01" class="total-input" id="revenue-amount-5" oninput="calculateGrandTotal()">
-                  </div>
+                  <div id="shift-revenue-extra-rows" class="summary-dynamic-rows"></div>
 
                   <div class="total-row total-divider grand-total">
                     <label>إجمالي الإيرادات:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
                   </div>
                 </div>
               </div>
 
               <!-- Left Column: Expenses -->
-              <div class="shift-total-column">
+              <div class="shift-total-column expenses-column">
                 <h3 class="column-title">المصاريف</h3>
 
                 <div class="total-section">
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-1" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-1" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-2" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-2" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-3" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-3" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-4" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-4" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-5" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-5" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-6" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-6" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-7" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-7" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-8" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-8" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-9" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-9" oninput="calculateTotalExpenses()">
-                  </div>
-
-                  <div class="total-row">
-                    <input type="text" class="total-description-input shift-expense-input shift-expense-desc" id="expense-desc-10" placeholder="وصف المصروف">
-                    <input type="number" step="0.01" class="total-input shift-expense-input shift-expense-amount" id="expense-amount-10" oninput="calculateTotalExpenses()">
-                  </div>
+                  <div id="shift-expense-rows" class="summary-dynamic-rows"></div>
 
                   <div class="total-row total-divider grand-total">
                     <label>إجمالي المصاريف:</label>
-                    <input type="number" step="0.01" class="total-input auto-calculated highlighted" id="total-expenses" readonly>
+                    <input type="text" inputmode="decimal" class="total-input auto-calculated highlighted" id="total-expenses" readonly>
                   </div>
                 </div>
               </div>
             </div>
-
-            <!-- Final Net Total -->
-            <div class="shift-final-total">
-              <div class="final-total-row">
-                <label>صافى الوردية:</label>
-                <input type="text" class="total-input auto-calculated final-total-input" id="final-net-total" readonly>
               </div>
-            </div>
-          </div>
+            </details>
+          </aside>
         </div>
       </div>
 
@@ -1136,6 +1083,9 @@
             <ul class="settings-menu">
               <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
               <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
+              <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
+              <li class="settings-menu-item" data-settings-section="excel-expenses-import">استيراد مصاريف Excel</li>
+              <li class="settings-menu-item" data-settings-section="balance-history">سجل الأرصدة والعدادات</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
@@ -1242,6 +1192,131 @@
               </div>
             </section>
 
+            <!-- Excel Sales Import Section -->
+            <section id="settings-section-excel-sales-import" class="settings-section">
+              <h3>استيراد مبيعات Excel</h3>
+
+              <div class="excel-import-actions">
+                <input type="file" id="excel-sales-file-input" accept=".xlsx,.xls" style="display: none;" onchange="handleExcelSalesFile(event)">
+                <button class="btn btn-primary" onclick="openExcelSalesFilePicker()">اختيار ملف Excel</button>
+                <button class="btn btn-secondary" onclick="resetExcelSalesImport()">مسح البيانات</button>
+                <button class="btn btn-success" id="excel-sales-import-btn" onclick="importExcelSales()" disabled>استيراد المبيعات</button>
+              </div>
+
+              <div id="excel-sales-import-status" class="excel-import-status">
+                اختر ملف Excel يحتوي على الأعمدة الإلزامية: اليوم، الصنف، الكمية، السعر. الأعمدة الاختيارية: سايب، عيارات، عملاء. تعرض المعاينة أيضاً النوع والإجمالي المحسوب.
+              </div>
+
+              <div id="excel-sales-summary" class="excel-import-summary" style="display: none;"></div>
+
+              <div id="excel-sales-unknown-products" class="excel-import-block" style="display: none;">
+                <h4>منتجات غير موجودة</h4>
+                <p>راجع الاسم المقروء من الملف. يمكنك ربطه بمنتج موجود أو تصحيح الاسم وإضافته كمنتج جديد.</p>
+                <div id="excel-sales-unknown-products-list"></div>
+              </div>
+
+              <div id="excel-sales-preview" class="excel-import-block" style="display: none;">
+                <h4>معاينة البيانات</h4>
+                <div class="excel-import-table-wrapper">
+                  <table class="base-table excel-import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>صف</th>
+                        <th>التاريخ</th>
+                        <th>المنتج</th>
+                        <th>النوع</th>
+                        <th>الكمية</th>
+                        <th>سايب</th>
+                        <th>عيارات</th>
+                        <th>عملاء</th>
+                        <th>السعر</th>
+                        <th>الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody id="excel-sales-preview-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- Excel Expenses Import Section -->
+            <section id="settings-section-excel-expenses-import" class="settings-section">
+              <h3>استيراد مصاريف Excel</h3>
+
+              <div class="excel-import-actions">
+                <input type="file" id="excel-expenses-file-input" accept=".xlsx,.xls" style="display: none;" onchange="handleExcelExpensesFile(event)">
+                <button class="btn btn-primary" onclick="openExcelExpensesFilePicker()">اختيار ملف Excel</button>
+                <button class="btn btn-secondary" onclick="resetExcelExpensesImport()">مسح البيانات</button>
+                <button class="btn btn-success" id="excel-expenses-import-btn" onclick="importExcelExpenses()" disabled>استيراد المصاريف</button>
+              </div>
+
+              <div id="excel-expenses-import-status" class="excel-import-status">
+                اختر ملف Excel يحتوي على الأعمدة: التاريخ، المصروف، المبلغ.
+              </div>
+
+              <div id="excel-expenses-summary" class="excel-import-summary" style="display: none;"></div>
+
+              <div id="excel-expenses-preview" class="excel-import-block" style="display: none;">
+                <h4>معاينة البيانات</h4>
+                <div class="excel-import-table-wrapper">
+                  <table class="base-table excel-import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>صف</th>
+                        <th>التاريخ</th>
+                        <th>المصروف</th>
+                        <th>المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody id="excel-expenses-preview-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- Balance And Counter History Section -->
+            <section id="settings-section-balance-history" class="settings-section">
+              <h3>سجل الأرصدة والعدادات</h3>
+              <div class="balance-history-filters">
+                <div class="form-group compact">
+                  <label for="balance-history-type">النوع:</label>
+                  <select id="balance-history-type" class="form-control" onchange="loadShiftBalanceHistory()">
+                    <option value="">الكل</option>
+                    <option value="fuel">وقود</option>
+                    <option value="oil">زيوت</option>
+                  </select>
+                </div>
+                <div class="form-group compact">
+                  <label for="balance-history-from">من تاريخ:</label>
+                  <input type="date" id="balance-history-from" class="form-control" onchange="loadShiftBalanceHistory()">
+                </div>
+                <div class="form-group compact">
+                  <label for="balance-history-to">إلى تاريخ:</label>
+                  <input type="date" id="balance-history-to" class="form-control" onchange="loadShiftBalanceHistory()">
+                </div>
+                <button class="btn btn-secondary" onclick="resetShiftBalanceHistoryFilters()">مسح الفلاتر</button>
+                <button class="btn btn-primary" onclick="loadShiftBalanceHistory()">تحديث</button>
+              </div>
+              <div id="balance-history-status" class="excel-import-status">يعرض التغييرات المسجلة من الآن فصاعداً.</div>
+              <div class="excel-import-table-wrapper">
+                <table class="base-table balance-history-table">
+                  <thead>
+                    <tr>
+                      <th>وقت التغيير</th>
+                      <th>تاريخ الوردية</th>
+                      <th>الوردية</th>
+                      <th>النوع</th>
+                      <th>البند</th>
+                      <th>الحقل</th>
+                      <th>القيمة السابقة</th>
+                      <th>القيمة الجديدة</th>
+                    </tr>
+                  </thead>
+                  <tbody id="balance-history-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+
             <!-- General Settings Section -->
             <section id="settings-section-general" class="settings-section">
               <h3>إعدادات عامة</h3>
@@ -1258,6 +1333,63 @@
                 <input type="text" id="station-phone" placeholder="أدخل رقم الهاتف">
               </div>
 
+              <div class="settings-divider"></div>
+              <h3>التقرير الشهري بالبريد</h3>
+              <div class="monthly-report-settings">
+                <div class="monthly-report-main">
+                  <div class="form-group monthly-report-recipients">
+                    <label for="monthly-report-recipients">إيميلات المستلمين:</label>
+                    <input type="hidden" id="monthly-report-recipients">
+                    <div class="email-chip-control">
+                      <div id="monthly-report-recipient-chips" class="email-chip-list"></div>
+                      <div class="email-chip-input-row">
+                        <input type="email" id="monthly-report-recipient-input" placeholder="email@example.com">
+                        <button type="button" class="btn btn-secondary" onclick="addMonthlyReportRecipientFromInput()">إضافة</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="monthly-report-actions">
+                    <button type="button" class="btn btn-secondary" onclick="generateMonthlyReportPdf()">إنشاء التقرير الشهري PDF</button>
+                    <button type="button" class="btn btn-primary" onclick="sendMonthlyReportEmail()">إرسال التقرير الشهري بالبريد</button>
+                  </div>
+                </div>
+
+                <details class="monthly-report-advanced">
+                  <summary>إعدادات الإرسال SMTP</summary>
+                  <div class="monthly-report-grid">
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-host">SMTP Host:</label>
+                      <input type="text" id="monthly-report-smtp-host" placeholder="smtp.example.com">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-port">SMTP Port:</label>
+                      <input type="number" id="monthly-report-smtp-port" placeholder="465 أو 587">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-user">SMTP User:</label>
+                      <input type="text" id="monthly-report-smtp-user" placeholder="اسم المستخدم">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-smtp-password">SMTP Password:</label>
+                      <input type="password" id="monthly-report-smtp-password" placeholder="كلمة المرور">
+                    </div>
+                    <div class="form-group">
+                      <label for="monthly-report-from-email">البريد المرسل:</label>
+                      <input type="text" id="monthly-report-from-email" placeholder="station@example.com">
+                    </div>
+                    <div class="form-group monthly-report-secure-option">
+                      <label>
+                        <input type="checkbox" id="monthly-report-smtp-secure">
+                        استخدام SSL/TLS
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <div id="monthly-report-status" class="excel-import-status" style="display: none;"></div>
+              </div>
+
               <button class="btn btn-primary" onclick="saveGeneralSettings()">حفظ الإعدادات</button>
 
               <!-- Updates Section -->
@@ -1267,7 +1399,7 @@
               <div class="update-info-card">
                 <div class="update-info-row">
                   <span class="update-label">الإصدار الحالي:</span>
-                  <span class="update-value" id="current-version">1.0.0</span>
+                  <span class="update-value" id="current-version">1.0.1</span>
                 </div>
                 <div class="update-info-row">
                   <span class="update-label">آخر فحص:</span>
@@ -1369,6 +1501,7 @@
               </div>
               <div class="form-actions">
                 <button class="btn btn-primary" onclick="exportBackup()">تصدير نسخة احتياطية</button>
+                <button class="btn btn-primary" onclick="openChatGptExportModal()">تصدير إلى ChatGPT</button>
                 <button class="btn btn-secondary" onclick="importBackup()">استيراد نسخة احتياطية</button>
               </div>
               <input type="file" id="backup-file-input" style="display: none;" accept=".json" onchange="handleBackupFile(event)">
@@ -1466,6 +1599,24 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tank Management Screen -->
+      <div id="tank-management-screen" class="screen">
+        <div class="depot-container tank-container">
+          <div class="tank-summary-page">
+            <div class="depot-topbar">
+              <div>
+                <h3>ادارة التنكات</h3>
+                <p class="depot-subtitle">كل نوع وقود يعتبر تنك واحد: الداخل من الفواتير والخارج من الورديات</p>
+              </div>
+            </div>
+
+            <div id="tank-ledgers-container" class="tank-ledgers-container">
+              <div class="tank-ledger-loading">جاري تحميل بيانات التنكات...</div>
             </div>
           </div>
         </div>
@@ -1571,6 +1722,33 @@
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeProductsModal()">إغلاق</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ChatGPT Export Modal -->
+      <div id="chatgpt-export-modal" class="modal">
+        <div class="modal-content modal-compact modal-medium">
+          <div class="modal-header">
+            <h3>تصدير إلى ChatGPT</h3>
+            <button class="close-modal" onclick="closeChatGptExportModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="form-group">
+                <label for="chatgpt-export-start-date">من تاريخ:</label>
+                <input type="date" id="chatgpt-export-start-date">
+              </div>
+              <div class="form-group">
+                <label for="chatgpt-export-end-date">إلى تاريخ:</label>
+                <input type="date" id="chatgpt-export-end-date">
+              </div>
+              <div id="chatgpt-export-message" class="modal-message-error"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" id="chatgpt-export-confirm-btn" onclick="exportToChatGPT()">تصدير CSV</button>
+            <button class="btn btn-secondary" onclick="closeChatGptExportModal()">إلغاء</button>
           </div>
         </div>
       </div>
@@ -1816,7 +1994,7 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="movement-quantity">الكمية:</label>
-                <input type="number" id="movement-quantity" min="1" required>
+                <input type="number" id="movement-quantity" min="0.01" step="0.01" required>
               </div>
               <div class="form-group" id="invoice-field" style="display: none;">
                 <label for="movement-invoice">رقم الفاتورة:</label>
@@ -1940,7 +2118,7 @@
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
 
-  <script src="renderer.js"></script>
+  <script src="renderer.js?v=20260703-night-gas-auto-close"></script>
 </body>
 
 </html>

@@ -1,0 +1,32 @@
+{
+  "rewrites": [
+    {
+      "source": "/m/:token",
+      "destination": "/mobile/index.html"
+    },
+    {
+      "source": "/m/:token/:path*",
+      "destination": "/mobile/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/mobile-assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    }
+  ]
+}

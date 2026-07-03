@@ -1,0 +1,9 @@
+[[redirects]]
+  from = "/m/*"
+  to = "/mobile/index.html"
+  status = 200
+
+[[headers]]
+  for = "/.netlify/functions/mobile-data"
+  [headers.values]
+    Cache-Control = "no-store"

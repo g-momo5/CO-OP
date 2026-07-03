@@ -1,5 +1,12 @@
 const { ipcRenderer } = require('electron');
 
+let XLSX = null;
+try {
+  XLSX = require('xlsx');
+} catch (error) {
+  console.warn('Excel import library is unavailable:', error.message);
+}
+
 // Global variables
 let charts = {};
 let currentScreen = 'home';
@@ -7,7 +14,7 @@ window.__currentScreen = currentScreen;
 let currentParentScreen = null;
 let oilItemCounter = 0;
 let navigationHistory = [];
-let isOnline = true;
+let isOnline = navigator.onLine !== false;
 let offlineRestricted = {
   screens: ['report', 'charts'],
   settingsSections: ['invoices-list', 'backup']
@@ -20,8 +27,23 @@ const HOME_CHART_MODE = {
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
-let currentHomeChartMode = HOME_CHART_MODE.PURCHASES;
+let currentHomeChartMode = HOME_CHART_MODE.SALES;
 window.__skipBeforeUnloadWarning = false;
+let excelSalesImportState = {
+  fileName: '',
+  rawRows: [],
+  parsedRows: [],
+  products: [],
+  resolutions: {},
+  validationErrors: [],
+  conflicts: []
+};
+let excelExpensesImportState = {
+  fileName: '',
+  rawRows: [],
+  parsedRows: [],
+  validationErrors: []
+};
 const ANNUAL_INVENTORY_FIELDS = [
   { key: 'prev_balance', id: 'annual-prev-balance' },
   { key: 'station_profit', id: 'annual-station-profit' },
@@ -46,6 +68,7 @@ const screenTitles = {
   'report': 'التقارير',
   'settings': 'الإعدادات',
   'depot': 'المخزن',
+  'tank-management': 'ادارة التنكات',
   'annual-inventory': 'جرد سنوي',
   'sales-summary': 'ملخص المبيعات',
   'profit': 'المكسب',
@@ -55,6 +78,9 @@ const screenTitles = {
 const settingsSectionTitles = {
   'manage-products': 'إدارة المنتجات',
   'manage-customers': 'إدارة العملاء',
+  'excel-sales-import': 'استيراد مبيعات Excel',
+  'excel-expenses-import': 'استيراد مصاريف Excel',
+  'balance-history': 'سجل الأرصدة والعدادات',
   'invoices-list': 'عرض الفواتير',
   'general': 'إعدادات عامة',
   'backup': 'النسخ الاحتياطي'
@@ -170,6 +196,7 @@ async function bootstrapApp() {
     initSalesSummaryFilters();
     initSafeBookFilters();
     initializeConnectionMonitoring();
+    await updateConnectionStatus();
 
     await Promise.allSettled([
       loadHomeChart(),
@@ -186,7 +213,7 @@ async function bootstrapApp() {
     // Check for updates on startup if enabled
     setTimeout(() => {
       const autoCheck = localStorage.getItem('auto-check-updates');
-      if (autoCheck === null || autoCheck === 'true') {
+      if ((autoCheck === null || autoCheck === 'true') && isOnline) {
         ipcRenderer.send('check-for-updates-manual');
       }
     }, 3000);
@@ -663,15 +690,18 @@ function showScreenWithoutHistory(screenName) {
       initializeExpensesDashboard();
       break;
     case 'shift-entry':
-      // Initialize customers table IMMEDIATELY to avoid visible delay
-      initializeCustomersTable();
-      loadCustomerNameOptions();
-
-      // Initialize shift entry functionality async (don't wait)
-      initializeShiftEntry();
+      if (shiftViewMode === 'edit') {
+        // Initialize entry-only helpers. History view renders from saved shift data only.
+        initializeCustomersTable();
+        loadCustomerNameOptions();
+        initializeShiftEntry();
+      }
       break;
     case 'depot':
       resetDepotView();
+      break;
+    case 'tank-management':
+      initializeTankManagement();
       break;
     case 'annual-inventory':
       refreshAnnualInventoryView();
@@ -686,6 +716,10 @@ function showScreen(screenName, parentScreen = null) {
   }
 
   if (currentScreen === 'shift-entry' && screenName !== 'shift-entry') {
+    if (shiftViewMode === 'correction' && currentShiftData.hasUnsavedChanges) {
+      const confirmed = confirm('لديك تصحيح غير محفوظ. هل تريد مغادرة الشاشة؟');
+      if (!confirmed) return;
+    }
     flushShiftDraftAutoSave();
   }
 
@@ -703,12 +737,32 @@ function showScreen(screenName, parentScreen = null) {
   }
 
   // Reset shift view mode when leaving shift-entry
-  if (screenName !== 'shift-entry' && shiftViewMode === 'history') {
+  if (screenName !== 'shift-entry' && shiftViewMode !== 'edit') {
     shiftViewMode = 'edit';
     disableReadOnlyMode();
+    setShiftIdentifierFieldsLocked(false);
     updateShiftTitle();
     toggleHistoryBar(false);
+    currentShiftData.hasUnsavedChanges = false;
   }
+}
+
+function openNewShiftEntry() {
+  shiftViewMode = 'edit';
+  disableReadOnlyMode();
+  setShiftIdentifierFieldsLocked(false);
+  updateShiftTitle();
+  toggleHistoryBar(false);
+  setShiftDraftStatus('idle');
+  clearShiftForm();
+  setCustomerRowsData([]);
+  currentShiftData.date = null;
+  currentShiftData.shiftNumber = null;
+  currentShiftData.isSaved = false;
+  currentShiftData.hasUnsavedChanges = false;
+  currentShiftData.draftCleanupQueue = [];
+
+  showScreen('shift-entry', 'home');
 }
 
 function syncSafeBookScrollMode() {
@@ -753,14 +807,23 @@ function resetDepotView() {
   }
 }
 
+function setTodayStatsUnavailable() {
+  const todaySalesEl = document.getElementById('today-sales');
+  const todayRevenueEl = document.getElementById('today-revenue');
+  const todayTransactionsEl = document.getElementById('today-transactions');
+  if (todaySalesEl) todaySalesEl.textContent = '-';
+  if (todayRevenueEl) todayRevenueEl.textContent = '-';
+  if (todayTransactionsEl) todayTransactionsEl.textContent = '-';
+}
+
+function isOfflineRequiredError(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('تتطلب اتصالاً بالإنترنت') || message.includes('requires an internet connection');
+}
+
 async function loadTodayStats() {
   if (!isOnline) {
-    const todaySalesEl = document.getElementById('today-sales');
-    const todayRevenueEl = document.getElementById('today-revenue');
-    const todayTransactionsEl = document.getElementById('today-transactions');
-    if (todaySalesEl) todaySalesEl.textContent = '-';
-    if (todayRevenueEl) todayRevenueEl.textContent = '-';
-    if (todayTransactionsEl) todayTransactionsEl.textContent = '-';
+    setTodayStatsUnavailable();
     return;
   }
   try {
@@ -779,6 +842,10 @@ async function loadTodayStats() {
     if (todayRevenueEl) todayRevenueEl.textContent = formatArabicCurrency(totalRevenue);
     if (todayTransactionsEl) todayTransactionsEl.textContent = convertToArabicNumerals(totalTransactions);
   } catch (error) {
+    if (isOfflineRequiredError(error)) {
+      setTodayStatsUnavailable();
+      return;
+    }
     console.error('Error loading today stats:', error);
   }
 }
@@ -1485,6 +1552,17 @@ function setupHomeChartToggle() {
   updateHomeChartToggleUI();
 }
 
+function getChartConstructor() {
+  return window.Chart || (typeof Chart !== 'undefined' ? Chart : null);
+}
+
+function clearChartCanvas(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas?.getContext('2d');
+  if (!canvas || !ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
 function syncHomeChartHeightToCardRows() {
   const homeScreen = document.getElementById('home-screen');
   if (!homeScreen || !homeScreen.classList.contains('active')) return;
@@ -2073,14 +2151,19 @@ async function loadHomeChart() {
     let chartData = [];
 
     if (isSalesMode) {
-      const sales = await ipcRenderer.invoke('get-sales');
-      if (!sales || !Array.isArray(sales)) {
-        console.error('Invalid sales data');
-        return;
-      }
-      chartData = sales.length > 0
-        ? sales
-        : await ipcRenderer.invoke('get-shift-fuel-sales');
+      const [salesResult, shiftFuelSalesResult] = await Promise.allSettled([
+        ipcRenderer.invoke('get-sales'),
+        ipcRenderer.invoke('get-shift-fuel-sales')
+      ]);
+
+      const sales = salesResult.status === 'fulfilled' && Array.isArray(salesResult.value)
+        ? salesResult.value
+        : [];
+      const shiftFuelSales = shiftFuelSalesResult.status === 'fulfilled' && Array.isArray(shiftFuelSalesResult.value)
+        ? shiftFuelSalesResult.value
+        : [];
+
+      chartData = [...sales, ...shiftFuelSales];
     } else {
       const movements = await ipcRenderer.invoke('get-fuel-movements');
       if (!movements || !Array.isArray(movements)) {
@@ -2106,11 +2189,19 @@ function normalizeFuelTypeForHomeChart(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
 
-  if (text === 'سولار' || text === 'ديزل' || text.toLowerCase() === 'diesel') return 'سولار';
-  if (text === 'غاز سيارات' || text.toLowerCase() === 'gas') return 'غاز سيارات';
-  if (text.includes('٩٥') || text.includes('95')) return 'بنزين ٩٥';
-  if (text.includes('٩٢') || text.includes('92')) return 'بنزين ٩٢';
-  if (text === 'بنزين ٨' || text.includes('٨٠') || text.includes('80')) return 'بنزين ٨٠';
+  const normalized = text
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .toLowerCase();
+
+  if (normalized === 'سولار' || normalized === 'ديزل' || normalized === 'diesel') return 'سولار';
+  if (normalized === 'غاز سيارات' || normalized === 'gas') return 'غاز سيارات';
+
+  const isFuelName = /بنزين|benz|gasoline|petrol/.test(normalized);
+  const hasOctane = (octane) => new RegExp(`(^|[^0-9])${octane}([^0-9]|$)`).test(normalized);
+  if (isFuelName && hasOctane('95')) return 'بنزين ٩٥';
+  if (isFuelName && hasOctane('92')) return 'بنزين ٩٢';
+  if (isFuelName && (hasOctane('80') || normalized === 'بنزين 8')) return 'بنزين ٨٠';
 
   return text;
 }
@@ -2161,8 +2252,14 @@ function renderFuelPriceRows(prices) {
     input.min = '0';
     input.className = 'table-price-input';
     input.placeholder = '0.00';
+    input.autocomplete = 'off';
     input.dataset.productType = 'fuel';
     input.dataset.productName = productName;
+    input.dataset.currentPrice = String(parseFloat(product.price) || 0);
+    input.dataset.dirty = '0';
+    input.addEventListener('input', () => {
+      input.dataset.dirty = '1';
+    });
     newPriceCell.appendChild(input);
 
     row.appendChild(nameCell);
@@ -2338,12 +2435,17 @@ async function loadCharts() {
 
 function createFuelSalesChart(summary) {
   const ctx = document.getElementById('fuel-sales-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('fuel-sales-chart');
+    return;
+  }
 
   if (charts.fuelSales) {
     charts.fuelSales.destroy();
   }
 
-  charts.fuelSales = new Chart(ctx, {
+  charts.fuelSales = new ChartCtor(ctx, {
     type: 'doughnut',
     data: {
       labels: summary.map(item => item.fuel_type),
@@ -2375,6 +2477,11 @@ function createFuelSalesChart(summary) {
 
 function createMonthlyRevenueChart(sales) {
   const ctx = document.getElementById('monthly-revenue-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('monthly-revenue-chart');
+    return;
+  }
 
   if (charts.monthlyRevenue) {
     charts.monthlyRevenue.destroy();
@@ -2393,7 +2500,7 @@ function createMonthlyRevenueChart(sales) {
   const months = Object.keys(monthlyData).sort();
   const revenues = months.map(month => monthlyData[month]);
 
-  charts.monthlyRevenue = new Chart(ctx, {
+  charts.monthlyRevenue = new ChartCtor(ctx, {
     type: 'line',
     data: {
       labels: months.map(month => {
@@ -2447,6 +2554,11 @@ function createMonthlyRevenueChart(sales) {
 
 function createPaymentMethodsChart(sales) {
   const ctx = document.getElementById('payment-methods-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('payment-methods-chart');
+    return;
+  }
 
   if (charts.paymentMethods) {
     charts.paymentMethods.destroy();
@@ -2458,7 +2570,7 @@ function createPaymentMethodsChart(sales) {
     paymentCounts[sale.payment_method] = (paymentCounts[sale.payment_method] || 0) + 1;
   });
 
-  charts.paymentMethods = new Chart(ctx, {
+  charts.paymentMethods = new ChartCtor(ctx, {
     type: 'bar',
     data: {
       labels: Object.keys(paymentCounts),
@@ -2507,6 +2619,11 @@ function createPaymentMethodsChart(sales) {
 
 function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) {
   const ctx = document.getElementById('monthly-fuel-sales-chart').getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!ChartCtor) {
+    clearChartCanvas('monthly-fuel-sales-chart');
+    return;
+  }
 
   if (charts.monthlyFuelSales) {
     charts.monthlyFuelSales.destroy();
@@ -2519,7 +2636,18 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   // Group entries by month and fuel type
   const monthlyData = {};
   const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
-  const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+  const colors = [
+    '#FF6384',
+    '#36A2EB',
+    '#FFCE56',
+    '#4BC0C0',
+    '#9966FF',
+    '#2E7D32',
+    '#C2185B',
+    '#6D4C41',
+    '#00838F',
+    '#EF6C00'
+  ];
 
   // Initialize data structure
   entries.forEach(entry => {
@@ -2527,6 +2655,8 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
 
     const month = entry.date.substring(0, 7); // YYYY-MM
     const normalizedFuelType = normalizeFuelTypeForHomeChart(entry.fuel_type);
+    if (!normalizedFuelType) return;
+
     if (!monthlyData[month]) {
       monthlyData[month] = {};
       fuelTypes.forEach(type => {
@@ -2545,14 +2675,14 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   // Create datasets for each fuel type
   const datasets = fuelTypes.map((fuelType, index) => ({
     label: fuelType,
-    data: months.map(month => monthlyData[month][fuelType]),
-    backgroundColor: colors[index],
-    borderColor: colors[index],
+    data: months.map(month => monthlyData[month][fuelType] || 0),
+    backgroundColor: colors[index % colors.length],
+    borderColor: colors[index % colors.length],
     borderWidth: 2,
     fill: false
   }));
 
-  charts.monthlyFuelSales = new Chart(ctx, {
+  charts.monthlyFuelSales = new ChartCtor(ctx, {
     type: 'line',
     data: {
       labels: months.map(month => {
@@ -3225,6 +3355,209 @@ function showDepotScreen() {
   showScreen('depot', 'home');
 }
 
+async function initializeTankManagement() {
+  const container = document.getElementById('tank-ledgers-container');
+  if (!container) return;
+
+  try {
+    container.innerHTML = '<div class="tank-ledger-loading">جاري تحميل بيانات التنكات...</div>';
+    const ledgers = await loadTankLedgerData();
+    renderTankLedgers(ledgers);
+  } catch (error) {
+    console.error('Error initializing tank management:', error);
+    container.innerHTML = '<div class="tank-ledger-error">حدث خطأ أثناء تحميل بيانات التنكات</div>';
+    showMessage('حدث خطأ أثناء تحميل إدارة التنكات', 'error');
+  }
+}
+
+async function loadTankLedgerData() {
+  const fuelTypes = await loadTankFuelTypes();
+  const tankFuelTypes = fuelTypes.filter((fuelType) => String(fuelType || '').trim() !== 'غاز سيارات');
+  const ledgers = await Promise.all(tankFuelTypes.map(async (fuelType) => {
+    const movements = await loadTankFuelMovements(fuelType);
+    const balance = movements.reduce((sum, movement) => {
+      const quantity = Math.abs(parseFloat(movement.quantity) || 0);
+      return sum + (movement.type === 'out' ? -quantity : quantity);
+    }, 0);
+
+    return {
+      fuel_type: fuelType,
+      balance,
+      movements: sortTankMovementsNewestFirst(movements)
+    };
+  }));
+
+  return ledgers;
+}
+
+async function loadTankFuelTypes() {
+  try {
+    const fuelTypes = await ipcRenderer.invoke('get-tank-fuel-types');
+    if (Array.isArray(fuelTypes) && fuelTypes.length > 0) {
+      return fuelTypes.map((type) => String(type || '').trim()).filter(Boolean);
+    }
+  } catch (error) {
+    if (!String(error?.message || error).includes('No handler registered')) {
+      throw error;
+    }
+
+    console.warn('get-tank-fuel-types IPC is not available, using renderer fallback:', error);
+  }
+
+  return loadTankFuelTypesFallback();
+}
+
+async function loadTankFuelTypesFallback() {
+  const preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥'];
+  const types = new Set(preferredOrder);
+
+  const addFuel = (fuelType) => {
+    const name = String(fuelType || '').trim();
+    if (name) types.add(name);
+  };
+
+  const fuelProducts = await ipcRenderer.invoke('get-fuel-prices').catch(() => []);
+  fuelProducts.forEach((row) => addFuel(row.fuel_type || row.product_name));
+
+  const invoices = await ipcRenderer.invoke('get-fuel-invoices').catch(() => []);
+  invoices.forEach((row) => addFuel(row.fuel_type));
+
+  const shiftFuelSales = await ipcRenderer.invoke('get-shift-fuel-sales').catch(() => []);
+  shiftFuelSales.forEach((row) => addFuel(row.fuel_type));
+
+  return Array.from(types).sort((a, b) => sortTankFuelTypes(a, b, preferredOrder));
+}
+
+async function loadTankFuelMovements(fuelType) {
+  try {
+    const movements = await ipcRenderer.invoke('get-tank-fuel-movements', fuelType);
+    return Array.isArray(movements) ? movements : [];
+  } catch (error) {
+    if (!String(error?.message || error).includes('No handler registered')) {
+      throw error;
+    }
+
+    console.warn('get-tank-fuel-movements IPC is not available, using renderer fallback:', error);
+    return loadTankFuelMovementsFallback(fuelType);
+  }
+}
+
+async function loadTankFuelMovementsFallback(fuelType) {
+  const selectedFuelType = String(fuelType || '').trim();
+  if (!selectedFuelType) return [];
+
+  const invoiceRows = await ipcRenderer.invoke('get-fuel-invoices').catch(() => []);
+  const invoiceMovements = invoiceRows
+    .filter((row) => String(row.fuel_type || '').trim() === selectedFuelType)
+    .map((row) => {
+      const netQuantity = parseFloat(row.net_quantity) || 0;
+      const quantity = netQuantity > 0 ? netQuantity : (parseFloat(row.quantity) || 0);
+      return {
+        date: String(row.date || '').slice(0, 10),
+        type: 'in',
+        quantity,
+        source: row.invoice_number ? `فاتورة ${row.invoice_number}` : 'فاتورة وقود'
+      };
+    })
+    .filter((movement) => movement.date && movement.quantity > 0);
+
+  const shiftRows = await ipcRenderer.invoke('get-shift-fuel-sales').catch(() => []);
+  const shiftMovements = shiftRows
+    .filter((row) => String(row.fuel_type || '').trim() === selectedFuelType)
+    .map((row) => ({
+      date: String(row.date || '').slice(0, 10),
+      type: 'out',
+      quantity: Math.max(parseFloat(row.quantity) || 0, 0),
+      source: 'وردية'
+    }))
+    .filter((movement) => movement.date && movement.quantity > 0);
+
+  return [...invoiceMovements, ...shiftMovements];
+}
+
+function sortTankFuelTypes(a, b, preferredOrder = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥']) {
+  const indexA = preferredOrder.indexOf(a);
+  const indexB = preferredOrder.indexOf(b);
+  if (indexA !== -1 || indexB !== -1) {
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  }
+  return String(a || '').localeCompare(String(b || ''), 'ar');
+}
+
+function sortTankMovementsNewestFirst(movements) {
+  return [...movements].sort((a, b) => {
+    const dateCompare = String(b.date || '').localeCompare(String(a.date || ''));
+    if (dateCompare !== 0) return dateCompare;
+    if (a.type !== b.type) return a.type === 'out' ? -1 : 1;
+    return String(b.source || '').localeCompare(String(a.source || ''), 'ar');
+  });
+}
+
+function renderTankLedgers(ledgers) {
+  const container = document.getElementById('tank-ledgers-container');
+  if (!container) return;
+
+  if (!Array.isArray(ledgers) || ledgers.length === 0) {
+    container.innerHTML = '<div class="tank-ledger-empty">لا توجد بيانات للتنكات</div>';
+    return;
+  }
+
+  container.innerHTML = ledgers.map((ledger) => {
+    const fuelType = ledger.fuel_type || '-';
+    const balance = parseFloat(ledger.balance) || 0;
+    const movements = Array.isArray(ledger.movements) ? ledger.movements : [];
+    const rowsHtml = movements.length > 0
+      ? movements.map((movement) => renderTankLedgerMovementRow(movement)).join('')
+      : '<tr><td colspan="2" class="tank-ledger-empty-row">لا توجد حركات لهذا الوقود</td></tr>';
+
+    return `
+      <section class="tank-ledger-section">
+        <div class="tank-ledger-header">
+          <h4>${escapeHtml(fuelType)}</h4>
+          <div class="tank-current-balance ${balance < 0 ? 'negative' : ''}">
+            <span>الرصيد الحالي</span>
+            <strong>${formatArabicNumber(balance)}</strong>
+          </div>
+        </div>
+        <div class="tank-ledger-table-wrap">
+          <table class="base-table tank-ledger-table">
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>الحركة</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }).join('');
+}
+
+function renderTankLedgerMovementRow(movement) {
+  const type = movement.type === 'out' ? 'out' : 'in';
+  const quantity = Math.abs(parseFloat(movement.quantity) || 0);
+  const sign = type === 'out' ? '-' : '+';
+  const label = type === 'out' ? '' : 'دخول';
+  const source = String(movement.source || '').trim();
+  const showSource = type !== 'out' && source;
+  const sourceHtml = showSource ? `<span class="tank-ledger-source">- ${escapeHtml(source)}</span>` : '';
+
+  return `
+    <tr class="tank-ledger-row ${type === 'out' ? 'row-out' : 'row-in'}">
+      <td class="tank-ledger-date">${formatDateDDMMYYYY(movement.date)}</td>
+      <td class="tank-ledger-movement">
+        ${label ? `<span class="tank-ledger-type ${type === 'out' ? 'out' : 'in'}">${label}</span>` : ''}
+        <span class="tank-ledger-quantity ${type === 'out' ? 'out' : 'in'}">${sign}${formatArabicNumber(quantity)}</span>
+        ${sourceHtml}
+      </td>
+    </tr>
+  `;
+}
+
 function selectOilType(oilType) {
   // Remove selected class from all items (sidebar e modal)
   document.querySelectorAll('.oil-item, .oil-item-modal').forEach(item => {
@@ -3377,11 +3710,11 @@ async function saveMovement() {
   const oilType = selectedOilItem ? selectedOilItem.dataset.oil : '';
   const date = document.getElementById('movement-date').value;
   const type = document.getElementById('movement-type').value;
-  const quantity = parseInt(document.getElementById('movement-quantity').value);
+  const quantity = parseFloat(document.getElementById('movement-quantity').value);
   const invoiceNumber = document.getElementById('movement-invoice').value;
   
   // Basic validation
-  if (!oilType || !date || !type || !quantity) {
+  if (!oilType || !date || !type || !Number.isFinite(quantity)) {
     showMessage('يرجى ملء جميع الحقول المطلوبة', 'error');
     return;
   }
@@ -3595,8 +3928,14 @@ async function loadOilPrices() {
       input.min = '0';
       input.className = 'table-price-input';
       input.placeholder = '0.00';
+      input.autocomplete = 'off';
       input.dataset.productType = 'oil';
       input.dataset.productName = oilName;
+      input.dataset.currentPrice = String(parseFloat(oil.price) || 0);
+      input.dataset.dirty = '0';
+      input.addEventListener('input', () => {
+        input.dataset.dirty = '1';
+      });
       newPriceCell.appendChild(input);
 
       row.appendChild(nameCell);
@@ -3655,12 +3994,17 @@ function initializePriceDate() {
 function resetPriceInputs() {
   document.querySelectorAll('#price-edit-modal .table-price-input').forEach(input => {
     input.value = '';
+    input.dataset.dirty = '0';
   });
 }
 
+function normalizeSalePriceInput(value) {
+  return convertFromArabicNumerals(String(value ?? '')).replace(',', '.').trim();
+}
+
 function parseSalePriceInputValue(value) {
-  const normalized = convertFromArabicNumerals(value).replace(',', '.').trim();
-  if (!normalized) return null;
+  const normalized = normalizeSalePriceInput(value);
+  if (normalized === '') return null;
 
   const price = parseFloat(normalized);
   return Number.isFinite(price) ? price : NaN;
@@ -3683,13 +4027,18 @@ async function saveAllPrices() {
     );
 
     priceInputs.forEach(input => {
-      const productType = input.dataset.productType;
-      const productName = input.dataset.productName;
-      const price = parseSalePriceInputValue(input.value);
-
-      if (price === null) {
+      if (input.dataset.dirty !== '1') {
         return;
       }
+
+      const rawPrice = normalizeSalePriceInput(input.value);
+      if (rawPrice === '') {
+        return;
+      }
+
+      const productType = input.dataset.productType;
+      const productName = input.dataset.productName;
+      const price = parseSalePriceInputValue(rawPrice);
 
       if (!productType || !productName || isNaN(price) || price <= 0) {
         invalidProducts.push(productName || '');
@@ -3878,23 +4227,19 @@ function switchShiftTab(tab) {
   // Update sections
   const fuelSection = document.getElementById('shift-fuel-section');
   const oilSection = document.getElementById('shift-oil-section');
-  const totalSection = document.getElementById('shift-total-section');
 
   // Remove active from all
   if (fuelSection) fuelSection.classList.remove('active');
   if (oilSection) oilSection.classList.remove('active');
-  if (totalSection) totalSection.classList.remove('active');
 
   // Add active to selected
   if (tab === 'fuel' && fuelSection) {
     fuelSection.classList.add('active');
   } else if (tab === 'oil' && oilSection) {
     oilSection.classList.add('active');
-  } else if (tab === 'total' && totalSection) {
-    totalSection.classList.add('active');
-    // Update totals when switching to totals tab
-    updateTotalsPage();
   }
+
+  updateShiftHorizontalScrollControls();
 }
 
 // Show settings section without adding to history
@@ -3930,6 +4275,10 @@ function showSettingsSectionWithoutHistory(sectionName) {
       updateUpdatesPageUI(); // Show install button if update is ready
     } else if (sectionName === 'invoices-list') {
       loadInvoicesList();
+    } else if (sectionName === 'excel-sales-import') {
+      loadExcelSalesImportProducts();
+    } else if (sectionName === 'balance-history') {
+      loadShiftBalanceHistory();
     }
   }
 }
@@ -4387,64 +4736,20 @@ async function loadPriceHistory() {
     ]);
 
     let history = historyTypeFilter
-      ? historyRaw.filter((item) => item?.product_type === historyTypeFilter)
-      : historyRaw;
+      ? (Array.isArray(historyRaw) ? historyRaw : []).filter((item) => item?.product_type === historyTypeFilter)
+      : (Array.isArray(historyRaw) ? historyRaw : []);
     const container = document.getElementById('price-history-content');
 
     if (!container) return;
 
-    const fuelProducts = Array.isArray(fuelProductsRaw) ? fuelProductsRaw : [];
-    const oilProducts = Array.isArray(oilProductsRaw) ? oilProductsRaw : [];
-    const allProducts = [
-      ...fuelProducts.map((item) => ({ type: 'fuel', name: item?.fuel_type, price: item?.price, effective_date: item?.effective_date })),
-      ...oilProducts.map((item) => ({ type: 'oil', name: item?.oil_type, price: item?.price, effective_date: item?.effective_date }))
-    ].filter((item) => String(item?.name || '').trim() !== '');
-
-    const productCatalog = allProducts.filter((item) => {
-      if (filter === '__all_fuel__') return item.type === 'fuel';
-      if (filter === '__all_oil__') return item.type === 'oil';
-      if (filter) return item.name === filter;
-      return true;
-    });
-
-    const historyProductNames = new Set(
-      history.map((item) => String(item?.product_name || '').trim()).filter(Boolean)
-    );
-
-    const fallbackRows = [];
-    productCatalog.forEach((product) => {
-      if (historyProductNames.has(product.name)) {
-        return;
-      }
-
-      const numericPrice = parseFloat(product.price);
-      if (!Number.isFinite(numericPrice)) {
-        return;
-      }
-
-      fallbackRows.push({
-        product_type: product.type,
-        product_name: product.name,
-        price: numericPrice,
-        start_date: product.effective_date || getTodayDate(),
-        created_at: 0
-      });
-    });
-
-    history = [...history, ...fallbackRows];
-
-    if (history.length === 0) {
-      container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
-      return;
-    }
-
     const parseDateKey = (value) => {
-      const parts = parseIsoDateParts(value);
-      if (parts) {
-        return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+      const raw = String(value || '').trim().replace(/^"+|"+$/g, '');
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return raw;
       }
 
-      const parsedDate = value instanceof Date ? value : new Date(value);
+      const parsedDate = value instanceof Date ? value : new Date(raw);
       if (Number.isNaN(parsedDate.getTime())) {
         return '';
       }
@@ -4454,6 +4759,51 @@ async function loadPriceHistory() {
       const day = String(parsedDate.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     };
+
+    const existingHistoryKeys = new Set();
+    history.forEach((item) => {
+      const productName = String(item?.product_name || '').trim();
+      const dateKey = parseDateKey(item?.start_date);
+      if (productName && dateKey) {
+        existingHistoryKeys.add(`${productName}@@${dateKey}`);
+      }
+    });
+
+    const fuelProducts = Array.isArray(fuelProductsRaw) ? fuelProductsRaw : [];
+    const oilProducts = Array.isArray(oilProductsRaw) ? oilProductsRaw : [];
+    const allProducts = [
+      ...fuelProducts.map((item) => ({ type: 'fuel', name: item?.fuel_type, price: item?.price, effective_date: item?.effective_date })),
+      ...oilProducts.map((item) => ({ type: 'oil', name: item?.oil_type, price: item?.price, effective_date: item?.effective_date }))
+    ].filter((item) => String(item?.name || '').trim() !== '');
+
+    const fallbackRows = allProducts.reduce((rows, product) => {
+      if (filter === '__all_fuel__' && product.type !== 'fuel') return rows;
+      if (filter === '__all_oil__' && product.type !== 'oil') return rows;
+      if (filter && !filter.startsWith('__all_') && product.name !== filter) return rows;
+
+      const dateKey = parseDateKey(product.effective_date);
+      const numericPrice = parseFloat(product.price);
+      const productName = String(product.name || '').trim();
+
+      if (!productName || !dateKey || !Number.isFinite(numericPrice)) return rows;
+      if (existingHistoryKeys.has(`${productName}@@${dateKey}`)) return rows;
+
+      rows.push({
+        product_type: product.type,
+        product_name: productName,
+        price: numericPrice,
+        start_date: dateKey,
+        created_at: 0
+      });
+      return rows;
+    }, []);
+
+    history = [...history, ...fallbackRows];
+
+    if (history.length === 0) {
+      container.innerHTML = '<p class="price-history-empty">لا يوجد سجل للأسعار</p>';
+      return;
+    }
 
     const dateSet = new Set();
     const changesByProduct = new Map();
@@ -4553,34 +4903,382 @@ async function loadPriceHistory() {
 }
 
 // General Settings Functions
-async function saveGeneralSettings() {
+async function saveGeneralSettings(silent = false) {
   const stationName = document.getElementById('station-name').value;
   const stationAddress = document.getElementById('station-address').value;
   const stationPhone = document.getElementById('station-phone').value;
+  const monthlyReportRecipients = document.getElementById('monthly-report-recipients')?.value || '';
+  const monthlyReportSmtpHost = document.getElementById('monthly-report-smtp-host')?.value || '';
+  const monthlyReportSmtpPort = document.getElementById('monthly-report-smtp-port')?.value || '';
+  const monthlyReportSmtpSecure = Boolean(document.getElementById('monthly-report-smtp-secure')?.checked);
+  const monthlyReportSmtpUser = document.getElementById('monthly-report-smtp-user')?.value || '';
+  const monthlyReportSmtpPassword = document.getElementById('monthly-report-smtp-password')?.value || '';
+  const monthlyReportFromEmail = document.getElementById('monthly-report-from-email')?.value || '';
 
   try {
     await ipcRenderer.invoke('save-general-settings', {
       stationName,
       stationAddress,
-      stationPhone
+      stationPhone,
+      monthlyReportRecipients,
+      monthlyReportSmtpHost,
+      monthlyReportSmtpPort,
+      monthlyReportSmtpSecure,
+      monthlyReportSmtpUser,
+      monthlyReportSmtpPassword,
+      monthlyReportFromEmail
     });
-    showMessage('تم حفظ الإعدادات بنجاح', 'success');
+    if (!silent) {
+      showMessage('تم حفظ الإعدادات بنجاح', 'success');
+    }
   } catch (error) {
-    showMessage('حدث خطأ أثناء حفظ الإعدادات', 'error');
+    if (!silent) {
+      showMessage('حدث خطأ أثناء حفظ الإعدادات', 'error');
+    }
     console.error('Error saving general settings:', error);
+    throw error;
   }
 }
 
 async function loadGeneralSettings() {
   try {
     const settings = await ipcRenderer.invoke('get-general-settings');
+    initMonthlyReportRecipientsControl();
     if (settings) {
       document.getElementById('station-name').value = settings.stationName || 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
       document.getElementById('station-address').value = settings.stationAddress || '';
       document.getElementById('station-phone').value = settings.stationPhone || '';
+      const recipientsInput = document.getElementById('monthly-report-recipients');
+      const smtpHostInput = document.getElementById('monthly-report-smtp-host');
+      const smtpPortInput = document.getElementById('monthly-report-smtp-port');
+      const smtpSecureInput = document.getElementById('monthly-report-smtp-secure');
+      const smtpUserInput = document.getElementById('monthly-report-smtp-user');
+      const smtpPasswordInput = document.getElementById('monthly-report-smtp-password');
+      const fromEmailInput = document.getElementById('monthly-report-from-email');
+      if (recipientsInput) {
+        recipientsInput.value = settings.monthlyReportRecipients || '';
+        renderMonthlyReportRecipientChips();
+      }
+      if (smtpHostInput) smtpHostInput.value = settings.monthlyReportSmtpHost || '';
+      if (smtpPortInput) smtpPortInput.value = settings.monthlyReportSmtpPort || '';
+      if (smtpSecureInput) smtpSecureInput.checked = Boolean(settings.monthlyReportSmtpSecure);
+      if (smtpUserInput) smtpUserInput.value = settings.monthlyReportSmtpUser || '';
+      if (smtpPasswordInput) smtpPasswordInput.value = settings.monthlyReportSmtpPassword || '';
+      if (fromEmailInput) fromEmailInput.value = settings.monthlyReportFromEmail || '';
     }
   } catch (error) {
     console.error('Error loading general settings:', error);
+  }
+}
+
+function parseMonthlyReportRecipients(value) {
+  return String(value || '')
+    .split(/[\n,;]/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+function getMonthlyReportRecipients() {
+  return parseMonthlyReportRecipients(document.getElementById('monthly-report-recipients')?.value || '');
+}
+
+function setMonthlyReportRecipients(recipients) {
+  const hiddenInput = document.getElementById('monthly-report-recipients');
+  if (!hiddenInput) return;
+  const normalized = [];
+  const seen = new Set();
+  (Array.isArray(recipients) ? recipients : []).forEach((email) => {
+    const cleanEmail = String(email || '').trim();
+    const dedupeKey = cleanEmail.toLowerCase();
+    if (!cleanEmail || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(cleanEmail);
+  });
+  hiddenInput.value = normalized.join('\n');
+  renderMonthlyReportRecipientChips();
+}
+
+function isMonthlyReportRecipientEmailValid(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+function renderMonthlyReportRecipientChips() {
+  const chipsContainer = document.getElementById('monthly-report-recipient-chips');
+  if (!chipsContainer) return;
+  const recipients = getMonthlyReportRecipients();
+  if (recipients.length === 0) {
+    chipsContainer.innerHTML = '<div class="email-chip-empty">لا يوجد مستلمون</div>';
+    return;
+  }
+
+  chipsContainer.innerHTML = recipients.map((email, index) => `
+    <span class="email-chip">
+      <span>${escapeHtml(email)}</span>
+      <button type="button" title="حذف" onclick="removeMonthlyReportRecipientAt(${index})">×</button>
+    </span>
+  `).join('');
+}
+
+function addMonthlyReportRecipients(rawValue) {
+  const newRecipients = parseMonthlyReportRecipients(rawValue);
+  if (newRecipients.length === 0) return false;
+  const validRecipients = newRecipients.filter(isMonthlyReportRecipientEmailValid);
+  const invalidRecipients = newRecipients.filter((email) => !isMonthlyReportRecipientEmailValid(email));
+
+  if (validRecipients.length > 0) {
+    setMonthlyReportRecipients([...getMonthlyReportRecipients(), ...validRecipients]);
+  }
+
+  if (invalidRecipients.length > 0) {
+    setMonthlyReportStatus(`إيميل غير صالح: ${invalidRecipients.join(', ')}`, 'error');
+  }
+
+  return validRecipients.length > 0;
+}
+
+function addMonthlyReportRecipientFromInput() {
+  const input = document.getElementById('monthly-report-recipient-input');
+  if (!input) return;
+  const added = addMonthlyReportRecipients(input.value);
+  if (added) {
+    input.value = '';
+    input.focus();
+  }
+}
+
+function removeMonthlyReportRecipient(email) {
+  const target = String(email || '').trim().toLowerCase();
+  setMonthlyReportRecipients(getMonthlyReportRecipients().filter((recipient) => (
+    recipient.toLowerCase() !== target
+  )));
+}
+
+function removeMonthlyReportRecipientAt(index) {
+  const removeIndex = parseInt(index, 10);
+  if (!Number.isFinite(removeIndex)) return;
+  setMonthlyReportRecipients(getMonthlyReportRecipients().filter((_recipient, recipientIndex) => (
+    recipientIndex !== removeIndex
+  )));
+}
+
+function initMonthlyReportRecipientsControl() {
+  const input = document.getElementById('monthly-report-recipient-input');
+  if (!input || input.dataset.bound === 'true') return;
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ',' || event.key === ';') {
+      event.preventDefault();
+      addMonthlyReportRecipientFromInput();
+    }
+  });
+
+  input.addEventListener('paste', (event) => {
+    const pastedText = event.clipboardData?.getData('text') || '';
+    if (!/[\n,;]/.test(pastedText)) return;
+    event.preventDefault();
+    addMonthlyReportRecipients(pastedText);
+  });
+
+  input.dataset.bound = 'true';
+  renderMonthlyReportRecipientChips();
+}
+
+function setMonthlyReportStatus(message, type = '') {
+  const status = document.getElementById('monthly-report-status');
+  if (!status) return;
+  status.style.display = 'block';
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function getMonthlyReportErrorMessage(error, fallback) {
+  const message = error?.message || '';
+  if (message.includes('No handler registered')) {
+    return 'يرجى إغلاق التطبيق وفتحه من جديد لتفعيل التقرير الشهري';
+  }
+  return message || fallback;
+}
+
+async function ensureMonthlyReportSettingsSaved() {
+  await saveGeneralSettings(true);
+}
+
+function getMonthlyReportOptions() {
+  return {
+    expenseRowOrder: getSavedExpenseRowOrder()
+  };
+}
+
+async function generateMonthlyReportPdf() {
+  try {
+    setMonthlyReportStatus('جاري إنشاء التقرير الشهري...');
+    await ensureMonthlyReportSettingsSaved();
+    const result = await ipcRenderer.invoke('generate-monthly-report-pdf', getMonthlyReportOptions());
+    if (result?.canceled) {
+      setMonthlyReportStatus('تم إلغاء إنشاء التقرير');
+      return;
+    }
+    if (!result?.success) {
+      throw new Error(result?.error || 'report_failed');
+    }
+    setMonthlyReportStatus(`تم إنشاء التقرير: ${result.filePath}`, 'success');
+    showMessage('تم إنشاء التقرير الشهري PDF بنجاح', 'success');
+  } catch (error) {
+    console.error('Error generating monthly report PDF:', error);
+    const errorMessage = getMonthlyReportErrorMessage(error, 'حدث خطأ أثناء إنشاء التقرير');
+    setMonthlyReportStatus(errorMessage, 'error');
+    showMessage(errorMessage, 'error');
+  }
+}
+
+async function sendMonthlyReportEmail() {
+  try {
+    setMonthlyReportStatus('جاري إنشاء وإرسال التقرير الشهري...');
+    await ensureMonthlyReportSettingsSaved();
+    const result = await ipcRenderer.invoke('send-monthly-report-email', getMonthlyReportOptions());
+    if (!result?.success) {
+      const errorMessage = result?.error || 'send_failed';
+      const statusMessage = result?.filePath
+        ? `${errorMessage}\nتم إنشاء التقرير هنا: ${result.filePath}`
+        : errorMessage;
+      setMonthlyReportStatus(statusMessage, 'error');
+      showMessage(errorMessage, 'error');
+      return;
+    }
+    setMonthlyReportStatus(`تم إرسال التقرير إلى ${result.sentTo.join(', ')}`, 'success');
+    showMessage('تم إرسال التقرير الشهري بالبريد بنجاح', 'success');
+  } catch (error) {
+    console.error('Error sending monthly report email:', error);
+    const errorMessage = getMonthlyReportErrorMessage(error, 'حدث خطأ أثناء إرسال التقرير');
+    setMonthlyReportStatus(errorMessage, 'error');
+    showMessage(errorMessage, 'error');
+  }
+}
+
+function getShiftBalanceHistoryFilters() {
+  return {
+    itemType: document.getElementById('balance-history-type')?.value || '',
+    fromDate: document.getElementById('balance-history-from')?.value || '',
+    toDate: document.getElementById('balance-history-to')?.value || ''
+  };
+}
+
+function formatBalanceHistoryChangedAt(value) {
+  if (!value) return '';
+  const rawValue = String(value);
+  const timestamp = typeof value === 'number' || /^\d+$/.test(rawValue)
+    ? Number(value) * 1000
+    : new Date(value).getTime();
+
+  if (!Number.isFinite(timestamp)) {
+    return escapeHtml(rawValue);
+  }
+
+  return escapeHtml(new Date(timestamp).toLocaleString('ar-EG', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }));
+}
+
+function getBalanceHistoryTypeLabel(itemType) {
+  return itemType === 'oil' ? 'زيوت' : itemType === 'fuel' ? 'وقود' : itemType || '';
+}
+
+function setBalanceHistoryStatus(message, type = '') {
+  const status = document.getElementById('balance-history-status');
+  if (!status) return;
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function renderShiftBalanceHistory(rows = []) {
+  const tbody = document.getElementById('balance-history-table-body');
+  if (!tbody) return;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="balance-history-empty">لا توجد تغييرات مسجلة</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${formatBalanceHistoryChangedAt(row.changed_at)}</td>
+      <td>${escapeHtml(formatDateOnlyDisplay(row.shift_date))}</td>
+      <td>${convertToArabicNumerals(row.shift_number || '')}</td>
+      <td>${escapeHtml(getBalanceHistoryTypeLabel(row.item_type))}</td>
+      <td>${escapeHtml(row.item_name || '')}</td>
+      <td>${escapeHtml(row.field_name || '')}</td>
+      <td>${row.old_value === null || row.old_value === undefined ? '' : formatArabicNumber(row.old_value)}</td>
+      <td>${formatArabicNumber(row.new_value)}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadShiftBalanceHistory() {
+  try {
+    setBalanceHistoryStatus('جاري تحميل السجل...');
+    const rows = await ipcRenderer.invoke('get-shift-balance-change-history', getShiftBalanceHistoryFilters());
+    renderShiftBalanceHistory(rows);
+    setBalanceHistoryStatus(`تم تحميل ${convertToArabicNumerals(Array.isArray(rows) ? rows.length : 0)} تغيير`, 'success');
+  } catch (error) {
+    console.error('Error loading shift balance history:', error);
+    renderShiftBalanceHistory([]);
+    setBalanceHistoryStatus('حدث خطأ أثناء تحميل السجل', 'error');
+  }
+}
+
+function resetShiftBalanceHistoryFilters() {
+  const typeInput = document.getElementById('balance-history-type');
+  const fromInput = document.getElementById('balance-history-from');
+  const toInput = document.getElementById('balance-history-to');
+  if (typeInput) typeInput.value = '';
+  if (fromInput) fromInput.value = '';
+  if (toInput) toInput.value = '';
+  loadShiftBalanceHistory();
+}
+
+function parseBalanceHistoryNumber(value) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+  if (!normalized) return null;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getCurrentShiftBalanceIdentifier() {
+  return {
+    shift_date: document.getElementById('shift-date')?.value || getTodayDate(),
+    shift_number: parseInt(document.getElementById('shift-number')?.value || '1', 10) || 1
+  };
+}
+
+async function recordShiftBalanceChanges(changes) {
+  const validChanges = (Array.isArray(changes) ? changes : []).filter((change) => {
+    const oldValue = parseBalanceHistoryNumber(change.old_value);
+    const newValue = parseBalanceHistoryNumber(change.new_value);
+    return newValue !== null && (oldValue === null || Math.abs(oldValue - newValue) > 0.000001);
+  }).map((change) => ({
+    ...getCurrentShiftBalanceIdentifier(),
+    ...change,
+    old_value: parseBalanceHistoryNumber(change.old_value),
+    new_value: parseBalanceHistoryNumber(change.new_value)
+  }));
+
+  if (validChanges.length === 0) return;
+
+  try {
+    const result = await ipcRenderer.invoke('record-shift-balance-changes', validChanges);
+    if (!result?.success) {
+      throw new Error(result?.error || 'record_failed');
+    }
+  } catch (error) {
+    console.warn('Unable to record shift balance history:', error);
   }
 }
 
@@ -4596,6 +5294,75 @@ async function exportBackup() {
   } catch (error) {
     showMessage('حدث خطأ أثناء تصدير النسخة الاحتياطية', 'error');
     console.error('Error exporting backup:', error);
+  }
+}
+
+function openChatGptExportModal() {
+  const modal = document.getElementById('chatgpt-export-modal');
+  const startInput = document.getElementById('chatgpt-export-start-date');
+  const endInput = document.getElementById('chatgpt-export-end-date');
+  const message = document.getElementById('chatgpt-export-message');
+
+  if (!modal || !startInput || !endInput) return;
+
+  const today = getTodayDate();
+  const currentDate = new Date();
+  const firstDay = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
+  startInput.value = startInput.value || firstDay;
+  endInput.value = endInput.value || today;
+  if (message) message.textContent = '';
+
+  modal.classList.add('show');
+}
+
+function closeChatGptExportModal() {
+  const modal = document.getElementById('chatgpt-export-modal');
+  const message = document.getElementById('chatgpt-export-message');
+  if (modal) modal.classList.remove('show');
+  if (message) message.textContent = '';
+}
+
+async function exportToChatGPT() {
+  const startInput = document.getElementById('chatgpt-export-start-date');
+  const endInput = document.getElementById('chatgpt-export-end-date');
+  const message = document.getElementById('chatgpt-export-message');
+  const button = document.getElementById('chatgpt-export-confirm-btn');
+  const startDate = String(startInput?.value || '').trim();
+  const endDate = String(endInput?.value || '').trim();
+
+  const setModalMessage = (text) => {
+    if (message) message.textContent = text;
+  };
+
+  if (!startDate || !endDate) {
+    setModalMessage('يرجى تحديد تاريخ البداية والنهاية');
+    return;
+  }
+
+  if (startDate > endDate) {
+    setModalMessage('فترة زمنية غير صحيحة');
+    return;
+  }
+
+  try {
+    setModalMessage('');
+    if (button) button.disabled = true;
+    const result = await ipcRenderer.invoke('export-chatgpt-csv', { startDate, endDate });
+
+    if (result?.success) {
+      closeChatGptExportModal();
+      const rowsText = Number(result.rowCount) === 1 ? 'صف واحد' : `${result.rowCount || 0} صف`;
+      showMessage(`تم تصدير ملف ChatGPT CSV بنجاح (${rowsText})`, 'success');
+    } else if (!result?.canceled) {
+      showMessage('حدث خطأ أثناء تصدير ملف ChatGPT', 'error');
+      setModalMessage(result?.error || 'حدث خطأ أثناء التصدير');
+    }
+  } catch (error) {
+    showMessage('حدث خطأ أثناء تصدير ملف ChatGPT', 'error');
+    setModalMessage('حدث خطأ أثناء التصدير');
+    console.error('Error exporting ChatGPT CSV:', error);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -4632,6 +5399,1146 @@ async function handleBackupFile(event) {
   } catch (error) {
     showMessage('حدث خطأ أثناء قراءة الملف', 'error');
     console.error('Error reading backup file:', error);
+  }
+}
+
+function normalizeExcelText(value) {
+  return String(value ?? '')
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\u0640/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeExcelProductKey(value) {
+  return normalizeExcelText(value).toLowerCase().replace(/\s+/g, '');
+}
+
+function isExcelWashLubeProduct(value) {
+  const key = normalizeExcelProductKey(value).replace(/[^\p{L}\p{N}]/gu, '');
+  return key === 'غسيلوتشحيم' || key === 'غسيلتشحيم';
+}
+
+function normalizeExcelHeader(value) {
+  return normalizeExcelText(value).toLowerCase().replace(/\s+/g, '');
+}
+
+function parseExcelNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = normalizeExcelText(value)
+    .replace(/,/g, '.')
+    .replace(/[^\d.-]/g, '');
+
+  if (!text || text === '-' || text === '.') {
+    return null;
+  }
+
+  const parsed = parseFloat(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toIsoDateFromParts(year, month, day) {
+  const fullYear = year < 100 ? (year >= 70 ? 1900 + year : 2000 + year) : year;
+  const parsed = new Date(Date.UTC(fullYear, month - 1, day));
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== fullYear ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${fullYear.toString().padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function parseExcelSalesDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toIsoDateFromParts(value.getFullYear(), value.getMonth() + 1, value.getDate());
+  }
+
+  if (typeof value === 'number' && XLSX?.SSF?.parse_date_code) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return toIsoDateFromParts(parsed.y, parsed.m, parsed.d);
+    }
+  }
+
+  const text = normalizeExcelText(value);
+  const isoMatch = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (isoMatch) {
+    return toIsoDateFromParts(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10), parseInt(isoMatch[3], 10));
+  }
+
+  const dayMonthYearMatch = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if (dayMonthYearMatch) {
+    return toIsoDateFromParts(
+      parseInt(dayMonthYearMatch[3], 10),
+      parseInt(dayMonthYearMatch[2], 10),
+      parseInt(dayMonthYearMatch[1], 10)
+    );
+  }
+
+  return null;
+}
+
+function getExcelHeaderIndex(headers, acceptedNames) {
+  const accepted = acceptedNames.map(normalizeExcelHeader);
+  return headers.findIndex((header) => accepted.includes(normalizeExcelHeader(header)));
+}
+
+function getExcelProductOptionsHtml(selectedValue = '') {
+  const options = ['<option value="">اختر منتج موجود</option>'];
+  excelSalesImportState.products.forEach((product) => {
+    const value = `${product.type}\u001f${product.name}`;
+    options.push(
+      `<option value="${escapeHtml(value)}"${value === selectedValue ? ' selected' : ''}>${escapeHtml(product.name)} - ${product.type === 'fuel' ? 'وقود' : 'زيت'}</option>`
+    );
+  });
+  return options.join('');
+}
+
+function findExcelProductMatch(name) {
+  if (isExcelWashLubeProduct(name)) {
+    return { type: 'wash_lube', name: 'غسيل و تشحيم', key: 'wash_lube' };
+  }
+
+  const key = normalizeExcelProductKey(name);
+  if (!key) return null;
+
+  const exact = excelSalesImportState.products.find((product) => product.name === String(name || '').trim());
+  if (exact) return exact;
+
+  return excelSalesImportState.products.find((product) => product.key === key) || null;
+}
+
+async function loadExcelSalesImportProducts() {
+  try {
+    const [fuelRows, oilRows] = await Promise.all([
+      ipcRenderer.invoke('get-fuel-prices'),
+      ipcRenderer.invoke('get-oil-prices')
+    ]);
+
+    const fuelProducts = Array.isArray(fuelRows)
+      ? fuelRows.map((row) => ({
+          type: 'fuel',
+          name: String(row.fuel_type || '').trim(),
+          price: parseFloat(row.price) || 0
+        }))
+      : [];
+    const oilProducts = Array.isArray(oilRows)
+      ? oilRows.map((row) => ({
+          type: 'oil',
+          name: String(row.oil_type || '').trim(),
+          price: parseFloat(row.price) || 0
+        }))
+      : [];
+
+    excelSalesImportState.products = [...fuelProducts, ...oilProducts]
+      .filter((product) => product.name)
+      .map((product) => ({
+        ...product,
+        key: normalizeExcelProductKey(product.name)
+      }));
+
+    renderExcelSalesUnknownProducts();
+  } catch (error) {
+    console.error('Error loading products for Excel import:', error);
+    setExcelSalesImportStatus('حدث خطأ أثناء تحميل المنتجات', 'error');
+  }
+}
+
+function setExcelSalesImportStatus(message, type = '') {
+  const status = document.getElementById('excel-sales-import-status');
+  if (!status) return;
+
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function openExcelSalesFilePicker() {
+  const input = document.getElementById('excel-sales-file-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function resetExcelSalesImport() {
+  excelSalesImportState = {
+    fileName: '',
+    rawRows: [],
+    parsedRows: [],
+    products: excelSalesImportState.products || [],
+    resolutions: {},
+    validationErrors: [],
+    conflicts: []
+  };
+
+  const fileInput = document.getElementById('excel-sales-file-input');
+  if (fileInput) fileInput.value = '';
+
+  setExcelSalesImportStatus('اختر ملف Excel يحتوي على الأعمدة الإلزامية: اليوم، الصنف، الكمية، السعر. الأعمدة الاختيارية: سايب، عيارات، عملاء. تعرض المعاينة أيضاً النوع والإجمالي المحسوب.');
+  renderExcelSalesSummary();
+  renderExcelSalesUnknownProducts();
+  renderExcelSalesPreview();
+}
+
+async function handleExcelSalesFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!XLSX) {
+    setExcelSalesImportStatus('مكتبة قراءة Excel غير متاحة. تأكد من تثبيت xlsx.', 'error');
+    return;
+  }
+
+  try {
+    await loadExcelSalesImportProducts();
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new Error('empty_workbook');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+      header: 1,
+      raw: true,
+      defval: ''
+    });
+
+    const parsedRows = parseExcelSalesRows(rows);
+    excelSalesImportState.fileName = file.name;
+    excelSalesImportState.rawRows = parsedRows;
+    excelSalesImportState.resolutions = {};
+    await refreshExcelSalesImportPreview();
+  } catch (error) {
+    console.error('Error reading Excel sales file:', error);
+    setExcelSalesImportStatus('تعذر قراءة ملف Excel. تأكد من أن الأعمدة موجودة وأن الملف غير تالف.', 'error');
+    excelSalesImportState.rawRows = [];
+    excelSalesImportState.parsedRows = [];
+    renderExcelSalesSummary();
+    renderExcelSalesUnknownProducts();
+    renderExcelSalesPreview();
+  }
+}
+
+function parseExcelSalesRows(rows) {
+  const headerRowIndex = rows.findIndex((row) => {
+    const headers = Array.isArray(row) ? row : [];
+    return getExcelHeaderIndex(headers, ['اليوم']) !== -1 && getExcelHeaderIndex(headers, ['الصنف']) !== -1;
+  });
+
+  if (headerRowIndex === -1) {
+    throw new Error('missing_headers');
+  }
+
+  const headers = rows[headerRowIndex];
+  const indexes = {
+    date: getExcelHeaderIndex(headers, ['اليوم']),
+    product: getExcelHeaderIndex(headers, ['الصنف']),
+    quantity: getExcelHeaderIndex(headers, ['الكمية']),
+    open: getExcelHeaderIndex(headers, ['سايب']),
+    cars: getExcelHeaderIndex(headers, ['عيارات']),
+    clients: getExcelHeaderIndex(headers, ['عملاء']),
+    price: getExcelHeaderIndex(headers, ['السعر'])
+  };
+
+  const missingRequired = ['date', 'product', 'quantity', 'price'].filter((key) => indexes[key] === -1);
+  if (missingRequired.length > 0) {
+    throw new Error(`missing_required_headers:${missingRequired.join(',')}`);
+  }
+
+  return rows.slice(headerRowIndex + 1).map((row, offset) => {
+    const sourceRowNumber = headerRowIndex + offset + 2;
+    const rawProductName = String(row[indexes.product] || '').trim();
+    const date = parseExcelSalesDate(row[indexes.date]);
+    const quantity = parseExcelNumber(row[indexes.quantity]);
+    const open = indexes.open === -1 ? 0 : parseExcelNumber(row[indexes.open]) ?? 0;
+    const cars = indexes.cars === -1 ? 0 : parseExcelNumber(row[indexes.cars]) ?? 0;
+    const clients = indexes.clients === -1 ? 0 : parseExcelNumber(row[indexes.clients]) ?? 0;
+    const price = parseExcelNumber(row[indexes.price]);
+    const empty = !rawProductName && !date && quantity === null && price === null;
+
+    return {
+      sourceRowNumber,
+      rawProductName,
+      date,
+      quantity,
+      open,
+      cars,
+      clients,
+      price,
+      empty,
+      errors: []
+    };
+  }).filter((row) => !row.empty);
+}
+
+function getExcelSalesUnknownKeys() {
+  const unknownMap = new Map();
+  excelSalesImportState.rawRows.forEach((row) => {
+    const key = normalizeExcelProductKey(row.rawProductName);
+    if (!key || isExcelWashLubeProduct(row.rawProductName) || findExcelProductMatch(row.rawProductName) || excelSalesImportState.resolutions[key]) {
+      return;
+    }
+
+    if (!unknownMap.has(key)) {
+      unknownMap.set(key, {
+        key,
+        name: row.rawProductName,
+        price: row.price,
+        date: row.date
+      });
+    }
+  });
+
+  return Array.from(unknownMap.values());
+}
+
+function validateExcelSalesRows(rows) {
+  const errors = [];
+  const priceByGroup = new Map();
+
+  rows.forEach((row) => {
+    row.errors = [];
+    if (!row.date) row.errors.push('تاريخ غير صالح');
+    if (!row.rawProductName) row.errors.push('اسم المنتج مفقود');
+    if (!Number.isFinite(row.quantity) && row.product?.type !== 'wash_lube') {
+      row.errors.push('كمية غير صالحة');
+    }
+    if (
+      row.product?.type !== 'wash_lube' &&
+      row.product?.name !== 'غاز سيارات' &&
+      (!Number.isFinite(row.price) || row.price <= 0)
+    ) {
+      row.errors.push('سعر غير صالح');
+    }
+    if (row.product && row.date && row.product.type !== 'wash_lube' && row.product.name !== 'غاز سيارات') {
+      const groupKey = `${row.date}\u001f${row.product.type}\u001f${normalizeExcelProductKey(row.product.name)}`;
+      const previousPrice = priceByGroup.get(groupKey);
+      if (previousPrice !== undefined && Math.abs(previousPrice - row.price) > 0.0001) {
+        row.errors.push('نفس المنتج في نفس التاريخ له أكثر من سعر');
+      } else {
+        priceByGroup.set(groupKey, row.price);
+      }
+    }
+
+    if (row.errors.length > 0) {
+      errors.push(`صف ${row.sourceRowNumber}: ${row.errors.join('، ')}`);
+    }
+  });
+
+  return errors;
+}
+
+async function refreshExcelSalesImportPreview() {
+  const parsedRows = excelSalesImportState.rawRows.map((row) => {
+    const unknownKey = normalizeExcelProductKey(row.rawProductName);
+    const resolution = excelSalesImportState.resolutions[unknownKey];
+    const product = resolution || findExcelProductMatch(row.rawProductName);
+    return {
+      ...row,
+      product,
+      productName: product?.name || row.rawProductName,
+      productType: product?.type || ''
+    };
+  });
+
+  excelSalesImportState.parsedRows = parsedRows;
+  excelSalesImportState.validationErrors = validateExcelSalesRows(parsedRows);
+  await refreshExcelSalesConflicts();
+  renderExcelSalesSummary();
+  renderExcelSalesUnknownProducts();
+  renderExcelSalesPreview();
+  updateExcelSalesImportButton();
+}
+
+function hasExcelSalesData(existingShift) {
+  if (!existingShift) return false;
+
+  const legacyData = parseShiftJsonValue(existingShift.data, {});
+  const fuelData = parseShiftJsonValue(existingShift.fuel_data ?? legacyData.fuel_data, {});
+  const oilData = parseShiftJsonValue(existingShift.oil_data ?? legacyData.oil_data, {});
+  const fuelTotal = parseFloat(existingShift.fuel_total ?? legacyData.fuel_total) || 0;
+  const oilTotal = parseFloat(existingShift.oil_total ?? legacyData.oil_total) || 0;
+  const washLubeRevenue = parseFloat(existingShift.wash_lube_revenue ?? legacyData.wash_lube_revenue) || 0;
+
+  return Object.keys(fuelData).length > 0
+    || Object.keys(oilData).length > 0
+    || Math.abs(fuelTotal) > 0.0001
+    || Math.abs(oilTotal) > 0.0001
+    || Math.abs(washLubeRevenue) > 0.0001;
+}
+
+async function refreshExcelSalesConflicts() {
+  const dates = Array.from(new Set(
+    excelSalesImportState.parsedRows
+      .map((row) => row.date)
+      .filter(Boolean)
+  ));
+  const conflicts = [];
+
+  for (const date of dates) {
+    try {
+      const existing = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: 1 });
+      if (hasExcelSalesData(existing)) {
+        conflicts.push(date);
+      }
+    } catch (error) {
+      console.warn('Unable to check existing shift for Excel import:', date, error);
+    }
+  }
+
+  excelSalesImportState.conflicts = conflicts;
+}
+
+function renderExcelSalesSummary() {
+  const container = document.getElementById('excel-sales-summary');
+  if (!container) return;
+
+  if (excelSalesImportState.rawRows.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const unresolvedCount = getExcelSalesUnknownKeys().length;
+  const datesCount = new Set(excelSalesImportState.parsedRows.map((row) => row.date).filter(Boolean)).size;
+  const conflictsCount = excelSalesImportState.conflicts.length;
+
+  container.style.display = 'grid';
+  container.innerHTML = `
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(excelSalesImportState.rawRows.length)}</strong>صفوف مقروءة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(datesCount)}</strong>تواريخ</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(unresolvedCount)}</strong>منتجات تحتاج مراجعة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(conflictsCount)}</strong>مبيعات موجودة مسبقاً</div>
+  `;
+
+  if (excelSalesImportState.validationErrors.length > 0) {
+    setExcelSalesImportStatus(excelSalesImportState.validationErrors.slice(0, 4).join(' | '), 'error');
+  } else if (unresolvedCount > 0) {
+    setExcelSalesImportStatus('راجع المنتجات غير الموجودة قبل الاستيراد.', 'error');
+  } else if (conflictsCount > 0) {
+    setExcelSalesImportStatus(`تم تجهيز الملف: توجد مبيعات محفوظة مسبقاً في ${convertToArabicNumerals(conflictsCount)} من أصل ${convertToArabicNumerals(datesCount)} تاريخ، وسيطلب البرنامج تأكيد قبل الكتابة فوقها.`);
+  } else {
+    setExcelSalesImportStatus(`تم تجهيز الملف: ${excelSalesImportState.fileName}`, 'success');
+  }
+}
+
+function renderExcelSalesUnknownProducts() {
+  const wrapper = document.getElementById('excel-sales-unknown-products');
+  const list = document.getElementById('excel-sales-unknown-products-list');
+  if (!wrapper || !list) return;
+
+  const unknownProducts = getExcelSalesUnknownKeys();
+  if (unknownProducts.length === 0) {
+    wrapper.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  list.innerHTML = unknownProducts.map((item) => `
+    <div class="excel-import-unknown-row" data-key="${escapeHtml(item.key)}">
+      <div class="excel-import-unknown-grid">
+        <div>
+          <label>الاسم المقروء</label>
+          <div>${escapeHtml(item.name)}</div>
+        </div>
+        <div>
+          <label>ربط بمنتج موجود</label>
+          <select data-action="existing-product">${getExcelProductOptionsHtml()}</select>
+        </div>
+        <div>
+          <label>تصحيح الاسم</label>
+          <input type="text" data-action="corrected-name" value="${escapeHtml(item.name)}">
+        </div>
+        <button type="button" class="btn btn-secondary" data-action="match-corrected">تطبيق</button>
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" class="btn btn-primary" data-action="add-fuel">إضافة كوقود</button>
+          <button type="button" class="btn btn-primary" data-action="add-oil">إضافة كزيت</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('select[data-action="existing-product"]').forEach((select) => {
+    select.addEventListener('change', async (event) => {
+      const row = event.target.closest('.excel-import-unknown-row');
+      const key = row?.dataset.key;
+      const value = event.target.value;
+      if (!key || !value) return;
+
+      const [type, name] = value.split('\u001f');
+      excelSalesImportState.resolutions[key] = { type, name, key: normalizeExcelProductKey(name) };
+      await refreshExcelSalesImportPreview();
+    });
+  });
+
+  list.querySelectorAll('button[data-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.dataset.action;
+      const row = button.closest('.excel-import-unknown-row');
+      const key = row?.dataset.key;
+      const correctedName = row?.querySelector('input[data-action="corrected-name"]')?.value?.trim() || '';
+      if (!key) return;
+
+      if (action === 'match-corrected') {
+        const match = findExcelProductMatch(correctedName);
+        if (!match) {
+          showMessage('لم يتم العثور على منتج بهذا الاسم المصحح', 'error');
+          return;
+        }
+        excelSalesImportState.resolutions[key] = match;
+        await refreshExcelSalesImportPreview();
+        return;
+      }
+
+      if (action === 'add-fuel' || action === 'add-oil') {
+        await addExcelImportProduct(key, correctedName, action === 'add-fuel' ? 'fuel' : 'oil', button);
+      }
+    });
+  });
+}
+
+async function addExcelImportProduct(key, productName, productType, button) {
+  if (!productName) {
+    showMessage('يرجى إدخال اسم المنتج', 'error');
+    return;
+  }
+
+  const sourceRow = excelSalesImportState.rawRows.find((row) => normalizeExcelProductKey(row.rawProductName) === key);
+  const price = sourceRow?.price;
+  const startDate = sourceRow?.date;
+  if (!Number.isFinite(price) || price <= 0 || !startDate) {
+    showMessage('لا يمكن إضافة المنتج بدون سعر وتاريخ صحيح من Excel', 'error');
+    return;
+  }
+
+  try {
+    if (button) button.disabled = true;
+    const result = await ipcRenderer.invoke('add-excel-import-product', {
+      product_type: productType,
+      product_name: productName,
+      price,
+      start_date: startDate
+    });
+
+    if (!result?.success) {
+      throw new Error(result?.error || 'add_failed');
+    }
+
+    await loadExcelSalesImportProducts();
+    const match = findExcelProductMatch(productName) || { type: productType, name: productName, key: normalizeExcelProductKey(productName) };
+    excelSalesImportState.resolutions[key] = match;
+    showMessage('تم إضافة المنتج بنجاح', 'success');
+    await refreshExcelSalesImportPreview();
+  } catch (error) {
+    console.error('Error adding Excel import product:', error);
+    showMessage(error.message || 'حدث خطأ أثناء إضافة المنتج', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderExcelSalesPreview() {
+  const wrapper = document.getElementById('excel-sales-preview');
+  const body = document.getElementById('excel-sales-preview-body');
+  if (!wrapper || !body) return;
+
+  if (excelSalesImportState.parsedRows.length === 0) {
+    wrapper.style.display = 'none';
+    body.innerHTML = '';
+    updateExcelSalesImportButton();
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  body.innerHTML = excelSalesImportState.parsedRows.map((row) => {
+    const typeLabel = row.productType === 'fuel'
+      ? 'وقود'
+      : row.productType === 'oil'
+        ? 'زيت'
+        : row.productType === 'wash_lube'
+          ? 'غسيل و تشحيم'
+          : 'غير معروف';
+    const lineTotal = row.productType === 'fuel'
+      ? row.productName === 'غاز سيارات'
+        ? 0
+        : ((row.quantity || 0) - ((row.clients || 0) + (row.cars || 0))) * (row.price || 0)
+      : row.productType === 'oil'
+        ? ((row.quantity || 0) - ((row.clients || 0) + (row.open || 0))) * (row.price || 0)
+        : (row.quantity || 0);
+    return `
+      <tr class="${row.errors?.length ? 'excel-import-row-error' : ''}">
+        <td>${convertToArabicNumerals(row.sourceRowNumber || '')}</td>
+        <td>${escapeHtml(row.date || '')}</td>
+        <td>${escapeHtml(row.productName || row.rawProductName || '')}</td>
+        <td>${typeLabel}</td>
+        <td>${formatPrice(row.quantity || 0)}</td>
+        <td>${formatPrice(row.open || 0)}</td>
+        <td>${formatPrice(row.cars || 0)}</td>
+        <td>${formatPrice(row.clients || 0)}</td>
+        <td>${formatPrice(row.price || 0)}</td>
+        <td>${formatPrice(lineTotal)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  updateExcelSalesImportButton();
+}
+
+function updateExcelSalesImportButton() {
+  const button = document.getElementById('excel-sales-import-btn');
+  if (!button) return;
+
+  button.disabled =
+    excelSalesImportState.parsedRows.length === 0 ||
+    getExcelSalesUnknownKeys().length > 0 ||
+    excelSalesImportState.validationErrors.length > 0;
+}
+
+async function buildExcelSalesShiftPayloads() {
+  const shiftsByDate = new Map();
+
+  excelSalesImportState.parsedRows.forEach((row) => {
+    if (!row.product || !row.date) return;
+
+    if (!shiftsByDate.has(row.date)) {
+      shiftsByDate.set(row.date, {
+        date: row.date,
+        shift_number: 1,
+        fuelRows: new Map(),
+        oilRows: new Map(),
+        washLubeRevenue: 0
+      });
+    }
+
+    const shift = shiftsByDate.get(row.date);
+    if (row.product.type === 'wash_lube') {
+      shift.washLubeRevenue += Number.isFinite(row.quantity) ? row.quantity : 0;
+      return;
+    }
+
+    const targetMap = row.product.type === 'fuel' ? shift.fuelRows : shift.oilRows;
+    const key = normalizeExcelProductKey(row.product.name);
+    if (!targetMap.has(key)) {
+      targetMap.set(key, {
+        name: row.product.name,
+        quantity: 0,
+        open: 0,
+        cars: 0,
+        clients: 0,
+        price: row.price
+      });
+    }
+
+    const item = targetMap.get(key);
+    item.quantity += row.quantity || 0;
+    item.open += row.open || 0;
+    item.cars += row.cars || 0;
+    item.clients += row.clients || 0;
+  });
+
+  const payloads = [];
+
+  for (const shift of shiftsByDate.values()) {
+    const fuelData = {};
+    let fuelTotal = 0;
+    shift.fuelRows.forEach((item) => {
+      const isGasCars = item.name === 'غاز سيارات';
+      const cash = isGasCars ? 0 : (item.quantity - (item.clients + item.cars)) * item.price;
+      fuelTotal += cash;
+      const base = {
+        lastShift1: 0,
+        firstShift1: 0,
+        lastShift2: 0,
+        firstShift2: 0,
+        quantity1: 0,
+        quantity2: 0,
+        totalQuantity: item.quantity,
+        clients: item.clients,
+        cars: item.cars,
+        price: isGasCars ? 0 : item.price,
+        cash
+      };
+
+      if (item.name === 'سولار') {
+        base.lastShift3 = 0;
+        base.firstShift3 = 0;
+        base.lastShift4 = 0;
+        base.firstShift4 = 0;
+        base.quantity3 = 0;
+        base.quantity4 = 0;
+      }
+
+      fuelData[item.name] = base;
+    });
+
+    const oilData = {};
+    let oilTotal = 0;
+    shift.oilRows.forEach((item) => {
+      const revenue = (item.quantity - (item.clients + item.open)) * item.price;
+      oilTotal += revenue;
+      oilData[item.name] = {
+        initial: item.quantity,
+        added: 0,
+        total: item.quantity,
+        sold: item.quantity,
+        remaining: 0,
+        open: item.open,
+        customers: item.clients,
+        price: item.price,
+        revenue
+      };
+    });
+
+    const washLubeRevenue = shift.washLubeRevenue || 0;
+    let existingShift = null;
+    try {
+      existingShift = await ipcRenderer.invoke('get-saved-shift', { date: shift.date, shift_number: 1 });
+    } catch (error) {
+      console.warn('Unable to preserve existing shift details during Excel sales import:', shift.date, error);
+    }
+
+    const legacyData = parseShiftJsonValue(existingShift?.data, {});
+    const existingExpenseItems = normalizeExpenseItems(legacyData.expense_items);
+    const existingTotalExpenses = parseFloat(existingShift?.total_expenses ?? legacyData.total_expenses) || 0;
+    const effectiveExpenseItems = existingExpenseItems.length > 0
+      ? existingExpenseItems
+      : existingTotalExpenses > 0
+        ? [{ index: 1, description: LEGACY_AGGREGATED_EXPENSE_LABEL, amount: existingTotalExpenses }]
+        : [];
+    const revenueItems = normalizeRevenueItems(legacyData.revenue_items);
+    const customerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+    const extraRevenueTotal = revenueItems.reduce((sum, item) => sum + (parseFloat(item?.amount) || 0), 0);
+    const grandTotal = fuelTotal + oilTotal + washLubeRevenue + extraRevenueTotal - existingTotalExpenses;
+
+    payloads.push({
+      date: shift.date,
+      shift_number: 1,
+      fuel_data: JSON.stringify(fuelData),
+      fuel_total: fuelTotal,
+      oil_data: JSON.stringify(oilData),
+      oil_total: oilTotal,
+      customer_rows: customerRows,
+      revenue_items: revenueItems,
+      expense_items: effectiveExpenseItems,
+      wash_lube_revenue: washLubeRevenue,
+      total_expenses: existingTotalExpenses,
+      grand_total: grandTotal,
+      is_saved: 1
+    });
+  }
+
+  return payloads;
+}
+
+async function refreshViewsAfterExcelSalesImport() {
+  await Promise.allSettled([
+    loadHomeChart(),
+    loadTodayStats(),
+    loadSafeBookMovements()
+  ]);
+
+  if (currentScreen === 'sales-summary') {
+    await loadSalesSummary().catch((error) => {
+      console.warn('Unable to refresh sales summary after Excel import:', error);
+    });
+  }
+}
+
+async function importExcelSales() {
+  try {
+    await refreshExcelSalesImportPreview();
+    if (getExcelSalesUnknownKeys().length > 0) {
+      showMessage('راجع المنتجات غير الموجودة قبل الاستيراد', 'error');
+      return;
+    }
+
+    if (excelSalesImportState.validationErrors.length > 0) {
+      showMessage('يوجد أخطاء في بيانات Excel', 'error');
+      return;
+    }
+
+    const payloads = await buildExcelSalesShiftPayloads();
+    if (payloads.length === 0) {
+      showMessage('لا توجد بيانات صالحة للاستيراد', 'error');
+      return;
+    }
+
+    if (excelSalesImportState.conflicts.length > 0) {
+      const dates = excelSalesImportState.conflicts.join(', ');
+      const confirmed = confirm(`توجد مبيعات محفوظة بالفعل في وردية رقم 1 لهذه التواريخ:\n${dates}\n\nهل تريد الكتابة فوق بيانات المبيعات؟`);
+      if (!confirmed) return;
+    }
+
+    const button = document.getElementById('excel-sales-import-btn');
+    if (button) button.disabled = true;
+
+    let saved = 0;
+    for (const payload of payloads) {
+      const result = await ipcRenderer.invoke('save-shift', payload);
+      if (!result?.success) {
+        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+      }
+      saved += 1;
+    }
+
+    showMessage('تم استيراد مبيعات Excel بنجاح', 'success');
+    await refreshViewsAfterExcelSalesImport();
+    resetExcelSalesImport();
+    setExcelSalesImportStatus(`تم استيراد ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
+  } catch (error) {
+    console.error('Error importing Excel sales:', error);
+    showMessage(error.message || 'حدث خطأ أثناء استيراد مبيعات Excel', 'error');
+    updateExcelSalesImportButton();
+  }
+}
+
+function setExcelExpensesImportStatus(message, type = '') {
+  const status = document.getElementById('excel-expenses-import-status');
+  if (!status) return;
+
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+  status.textContent = message;
+}
+
+function openExcelExpensesFilePicker() {
+  const input = document.getElementById('excel-expenses-file-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function resetExcelExpensesImport() {
+  excelExpensesImportState = {
+    fileName: '',
+    rawRows: [],
+    parsedRows: [],
+    validationErrors: []
+  };
+
+  const fileInput = document.getElementById('excel-expenses-file-input');
+  if (fileInput) fileInput.value = '';
+
+  setExcelExpensesImportStatus('اختر ملف Excel يحتوي على الأعمدة: التاريخ، المصروف، المبلغ.');
+  renderExcelExpensesSummary();
+  renderExcelExpensesPreview();
+  updateExcelExpensesImportButton();
+}
+
+async function handleExcelExpensesFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!XLSX) {
+    setExcelExpensesImportStatus('مكتبة قراءة Excel غير متاحة. تأكد من تثبيت xlsx.', 'error');
+    return;
+  }
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new Error('empty_workbook');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+      header: 1,
+      raw: true,
+      defval: ''
+    });
+
+    const parsedRows = parseExcelExpensesRows(rows);
+    excelExpensesImportState.fileName = file.name;
+    excelExpensesImportState.rawRows = parsedRows;
+    await refreshExcelExpensesImportPreview();
+  } catch (error) {
+    console.error('Error reading Excel expenses file:', error);
+    setExcelExpensesImportStatus('تعذر قراءة ملف Excel. تأكد من وجود أعمدة التاريخ والمصروف والمبلغ.', 'error');
+    excelExpensesImportState.rawRows = [];
+    excelExpensesImportState.parsedRows = [];
+    renderExcelExpensesSummary();
+    renderExcelExpensesPreview();
+    updateExcelExpensesImportButton();
+  }
+}
+
+function parseExcelExpensesRows(rows) {
+  const headerRowIndex = rows.findIndex((row) => {
+    const headers = Array.isArray(row) ? row : [];
+    return getExcelHeaderIndex(headers, ['التاريخ', 'اليوم', 'date']) !== -1
+      && getExcelHeaderIndex(headers, ['المصروف', 'المصاريف', 'spesa', 'expense']) !== -1;
+  });
+
+  if (headerRowIndex === -1) {
+    throw new Error('missing_headers');
+  }
+
+  const headers = rows[headerRowIndex];
+  const indexes = {
+    date: getExcelHeaderIndex(headers, ['التاريخ', 'اليوم', 'date']),
+    description: getExcelHeaderIndex(headers, ['المصروف', 'المصاريف', 'spesa', 'expense']),
+    amount: getExcelHeaderIndex(headers, ['المبلغ', 'القيمة', 'importo', 'amount'])
+  };
+
+  const missingRequired = ['date', 'description', 'amount'].filter((key) => indexes[key] === -1);
+  if (missingRequired.length > 0) {
+    throw new Error(`missing_required_headers:${missingRequired.join(',')}`);
+  }
+
+  return rows.slice(headerRowIndex + 1).map((row, offset) => {
+    const sourceRowNumber = headerRowIndex + offset + 2;
+    const description = String(row[indexes.description] || '').trim();
+    const date = parseExcelSalesDate(row[indexes.date]);
+    const amount = parseExcelNumber(row[indexes.amount]);
+    const empty = !description && !date && amount === null;
+
+    return {
+      sourceRowNumber,
+      date,
+      description,
+      amount,
+      empty,
+      errors: []
+    };
+  }).filter((row) => !row.empty);
+}
+
+function validateExcelExpensesRows(rows) {
+  const errors = [];
+
+  rows.forEach((row) => {
+    row.errors = [];
+    if (!row.date) row.errors.push('تاريخ غير صالح');
+    if (!Number.isFinite(row.amount) || row.amount <= 0) row.errors.push('مبلغ غير صالح');
+
+    if (row.errors.length > 0) {
+      errors.push(`صف ${row.sourceRowNumber}: ${row.errors.join('، ')}`);
+    }
+  });
+
+  return errors;
+}
+
+async function refreshExcelExpensesImportPreview() {
+  excelExpensesImportState.parsedRows = excelExpensesImportState.rawRows.map((row) => ({ ...row }));
+  excelExpensesImportState.validationErrors = validateExcelExpensesRows(excelExpensesImportState.parsedRows);
+  renderExcelExpensesSummary();
+  renderExcelExpensesPreview();
+  updateExcelExpensesImportButton();
+}
+
+function renderExcelExpensesSummary() {
+  const container = document.getElementById('excel-expenses-summary');
+  if (!container) return;
+
+  if (excelExpensesImportState.rawRows.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const datesCount = new Set(excelExpensesImportState.parsedRows.map((row) => row.date).filter(Boolean)).size;
+  const totalAmount = excelExpensesImportState.parsedRows.reduce((sum, row) => (
+    sum + (Number.isFinite(row.amount) ? row.amount : 0)
+  ), 0);
+
+  container.style.display = 'grid';
+  container.innerHTML = `
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(excelExpensesImportState.rawRows.length)}</strong>صفوف مقروءة</div>
+    <div class="excel-import-summary-item"><strong>${convertToArabicNumerals(datesCount)}</strong>تواريخ</div>
+    <div class="excel-import-summary-item"><strong>${formatPrice(totalAmount)}</strong>إجمالي المصاريف</div>
+  `;
+
+  if (excelExpensesImportState.validationErrors.length > 0) {
+    setExcelExpensesImportStatus(excelExpensesImportState.validationErrors.slice(0, 4).join(' | '), 'error');
+  } else {
+    setExcelExpensesImportStatus(`تم تجهيز الملف: ${excelExpensesImportState.fileName}`, 'success');
+  }
+}
+
+function renderExcelExpensesPreview() {
+  const wrapper = document.getElementById('excel-expenses-preview');
+  const body = document.getElementById('excel-expenses-preview-body');
+  if (!wrapper || !body) return;
+
+  if (excelExpensesImportState.parsedRows.length === 0) {
+    wrapper.style.display = 'none';
+    body.innerHTML = '';
+    updateExcelExpensesImportButton();
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  body.innerHTML = excelExpensesImportState.parsedRows.map((row) => `
+    <tr class="${row.errors?.length ? 'excel-import-row-error' : ''}">
+      <td>${convertToArabicNumerals(row.sourceRowNumber || '')}</td>
+      <td>${escapeHtml(row.date || '')}</td>
+      <td>${escapeHtml(row.description || 'غير محدد')}</td>
+      <td>${formatPrice(row.amount || 0)}</td>
+    </tr>
+  `).join('');
+
+  updateExcelExpensesImportButton();
+}
+
+function updateExcelExpensesImportButton() {
+  const button = document.getElementById('excel-expenses-import-btn');
+  if (!button) return;
+
+  button.disabled =
+    excelExpensesImportState.parsedRows.length === 0 ||
+    excelExpensesImportState.validationErrors.length > 0;
+}
+
+function parseShiftJsonValue(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function groupExcelExpensesByDate() {
+  const grouped = new Map();
+
+  excelExpensesImportState.parsedRows.forEach((row) => {
+    if (!row.date || !Number.isFinite(row.amount) || row.amount <= 0) return;
+    if (!grouped.has(row.date)) {
+      grouped.set(row.date, []);
+    }
+    grouped.get(row.date).push({
+      index: grouped.get(row.date).length + 1,
+      description: row.description || 'غير محدد',
+      amount: row.amount
+    });
+  });
+
+  return grouped;
+}
+
+async function buildExcelExpenseShiftPayload(date, importedExpenseItems) {
+  const existingShift = await ipcRenderer.invoke('get-saved-shift', { date, shift_number: 1 });
+  const legacyData = parseShiftJsonValue(existingShift?.data, {});
+  const existingExpenses = normalizeExpenseItems(legacyData.expense_items);
+  const existingTotalExpenses = parseFloat(existingShift?.total_expenses ?? legacyData.total_expenses) || 0;
+
+  const preservedFuelData = existingShift
+    ? (existingShift.fuel_data || legacyData.fuel_data || '{}')
+    : '{}';
+  const preservedOilData = existingShift
+    ? (existingShift.oil_data || legacyData.oil_data || '{}')
+    : '{}';
+  const preservedFuelTotal = parseFloat(existingShift?.fuel_total ?? legacyData.fuel_total) || 0;
+  const preservedOilTotal = parseFloat(existingShift?.oil_total ?? legacyData.oil_total) || 0;
+  const preservedWashLubeRevenue = parseFloat(existingShift?.wash_lube_revenue ?? legacyData.wash_lube_revenue) || 0;
+  const preservedCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+  const preservedRevenueItems = Array.isArray(legacyData.revenue_items) ? legacyData.revenue_items : [];
+  const effectiveExistingExpenses = existingExpenses.length > 0
+    ? existingExpenses
+    : existingTotalExpenses > 0
+      ? [{ index: 1, description: LEGACY_AGGREGATED_EXPENSE_LABEL, amount: existingTotalExpenses }]
+      : [];
+
+  const baseIndex = effectiveExistingExpenses.length;
+  const mergedExpenseItems = [
+    ...effectiveExistingExpenses,
+    ...importedExpenseItems.map((item, index) => ({
+      index: baseIndex + index + 1,
+      description: item.description,
+      amount: item.amount
+    }))
+  ];
+  const importedTotalExpenses = importedExpenseItems.reduce((sum, item) => sum + item.amount, 0);
+  const totalExpenses = existingTotalExpenses + importedTotalExpenses;
+  const extraRevenueTotal = preservedRevenueItems.reduce((sum, item) => (
+    sum + (parseFloat(item?.amount) || 0)
+  ), 0);
+  const grandTotal = preservedFuelTotal + preservedOilTotal + preservedWashLubeRevenue + extraRevenueTotal - totalExpenses;
+
+  return {
+    date,
+    shift_number: 1,
+    fuel_data: typeof preservedFuelData === 'string' ? preservedFuelData : JSON.stringify(preservedFuelData),
+    fuel_total: preservedFuelTotal,
+    oil_data: typeof preservedOilData === 'string' ? preservedOilData : JSON.stringify(preservedOilData),
+    oil_total: preservedOilTotal,
+    customer_rows: preservedCustomerRows,
+    revenue_items: preservedRevenueItems,
+    expense_items: mergedExpenseItems,
+    wash_lube_revenue: preservedWashLubeRevenue,
+    total_expenses: totalExpenses,
+    grand_total: grandTotal,
+    is_saved: 1
+  };
+}
+
+async function refreshViewsAfterExcelExpensesImport() {
+  await Promise.allSettled([
+    loadSafeBookMovements(),
+    loadTodayStats()
+  ]);
+
+  if (currentScreen === 'expenses') {
+    await loadExpenseEntries().catch((error) => {
+      console.warn('Unable to refresh expenses after Excel import:', error);
+    });
+  }
+  if (currentScreen === 'profit') {
+    await loadProfitMonthlyData().catch((error) => {
+      console.warn('Unable to refresh profit after Excel expenses import:', error);
+    });
+  }
+}
+
+async function importExcelExpenses() {
+  try {
+    await refreshExcelExpensesImportPreview();
+    if (excelExpensesImportState.validationErrors.length > 0) {
+      showMessage('يوجد أخطاء في بيانات Excel', 'error');
+      return;
+    }
+
+    const grouped = groupExcelExpensesByDate();
+    if (grouped.size === 0) {
+      showMessage('لا توجد مصاريف صالحة للاستيراد', 'error');
+      return;
+    }
+
+    const button = document.getElementById('excel-expenses-import-btn');
+    if (button) button.disabled = true;
+
+    let saved = 0;
+    for (const [date, expenseItems] of grouped.entries()) {
+      const payload = await buildExcelExpenseShiftPayload(date, expenseItems);
+      const result = await ipcRenderer.invoke('save-shift', payload);
+      if (!result?.success) {
+        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+      }
+      saved += 1;
+    }
+
+    showMessage('تم استيراد مصاريف Excel بنجاح', 'success');
+    await refreshViewsAfterExcelExpensesImport();
+    resetExcelExpensesImport();
+    setExcelExpensesImportStatus(`تم استيراد المصاريف في ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
+  } catch (error) {
+    console.error('Error importing Excel expenses:', error);
+    showMessage(error.message || 'حدث خطأ أثناء استيراد مصاريف Excel', 'error');
+    updateExcelExpensesImportButton();
   }
 }
 
@@ -4686,15 +6593,22 @@ async function loadInvoicesList() {
           type: 'fuel',
           date: inv.date,
           invoice_number: inv.invoice_number,
+          invoice_total: 0,
+          items_subtotal: 0,
           items: []
         };
+      }
+      const invoiceTotal = parseFloat(inv.invoice_total);
+      if (Number.isFinite(invoiceTotal) && invoiceTotal > fuelInvoicesMap[inv.invoice_number].invoice_total) {
+        fuelInvoicesMap[inv.invoice_number].invoice_total = invoiceTotal;
       }
       fuelInvoicesMap[inv.invoice_number].items.push(inv);
     });
 
-    // Calculate totals for fuel invoices (sum of all items)
+    // Calculate totals for fuel invoices. The invoice total includes cash deposit.
     Object.values(fuelInvoicesMap).forEach(invoice => {
-      invoice.total = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
+      invoice.items_subtotal = invoice.items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+      invoice.total = invoice.invoice_total > 0 ? invoice.invoice_total : invoice.items_subtotal;
     });
 
     // Process oil invoices - group by invoice number and calculate total
@@ -4877,8 +6791,11 @@ async function showInvoiceDetails(type, invoiceNumber) {
     `;
   } else {
     // Fuel invoice summary
-    const itemsSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
-    const invoiceTotal = invoice.total || 0;
+    const itemsSubtotal = invoice.items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+    const invoiceTotalValue = parseFloat(invoice.invoice_total);
+    const invoiceTotal = Number.isFinite(invoiceTotalValue) && invoiceTotalValue > 0
+      ? invoiceTotalValue
+      : (parseFloat(invoice.total) || 0);
     const cashDeposit = invoiceTotal - itemsSubtotal;
 
     html += `
@@ -4903,6 +6820,30 @@ function closeInvoiceDetailsModal() {
 
 // Auto-update functionality
 let updateInfo = null;
+
+function isNetworkDisconnectedError(errorInfo) {
+  const message = String(errorInfo?.message || errorInfo || '');
+  return message.includes('ERR_INTERNET_DISCONNECTED') ||
+    message.includes('ENOTFOUND') ||
+    message.includes('EAI_AGAIN') ||
+    message.includes('ECONNREFUSED');
+}
+
+function setUpdateOfflineStatus() {
+  const statusEl = document.getElementById('update-status');
+  const downloadBtn = document.getElementById('download-update-btn');
+  const installBtn = document.getElementById('install-update-btn');
+  const changelogBtn = document.getElementById('view-changelog-btn');
+
+  if (statusEl) {
+    statusEl.textContent = 'لا يوجد اتصال بالإنترنت';
+    statusEl.style.color = '#c4291d';
+    statusEl.style.fontWeight = 'bold';
+  }
+  if (downloadBtn) downloadBtn.style.display = 'none';
+  if (installBtn) installBtn.style.display = 'none';
+  if (changelogBtn) changelogBtn.style.display = 'none';
+}
 
 ipcRenderer.on('update-available', (event, info) => {
   updateInfo = info;
@@ -4932,6 +6873,11 @@ ipcRenderer.on('update-downloaded', (event, info) => {
 });
 
 ipcRenderer.on('update-error', (event, errorInfo) => {
+  if (!isOnline && isNetworkDisconnectedError(errorInfo)) {
+    setUpdateOfflineStatus();
+    return;
+  }
+
   console.error('Update error:', errorInfo);
   
   // Create a more user-friendly error message
@@ -5144,6 +7090,12 @@ function checkForUpdatesManually() {
   const statusEl = document.getElementById('update-status');
   const checkBtn = document.querySelector('.update-actions-group .btn-primary');
 
+  if (!isOnline) {
+    setUpdateOfflineStatus();
+    showMessage('لا يوجد اتصال بالإنترنت', 'warning');
+    return;
+  }
+
   if (statusEl) statusEl.textContent = 'جاري الفحص...';
   if (checkBtn) checkBtn.disabled = true;
 
@@ -5171,6 +7123,17 @@ function checkForUpdatesManually() {
 ipcRenderer.on('update-check-result', (event, result) => {
   const statusEl = document.getElementById('update-status');
   const changelogBtn = document.getElementById('view-changelog-btn');
+
+  if (result.offline) {
+    setUpdateOfflineStatus();
+    return;
+  }
+
+  if (result.error) {
+    if (statusEl) statusEl.textContent = result.error;
+    if (changelogBtn) changelogBtn.style.display = 'none';
+    return;
+  }
 
   if (result.available) {
     if (statusEl) statusEl.textContent = `تحديث متاح: الإصدار ${result.version}`;
@@ -5289,11 +7252,14 @@ let currentShiftData = {
   hasUnsavedChanges: false,
   draftCleanupQueue: []
 };
-let shiftViewMode = 'edit'; // 'edit' | 'history'
+let shiftViewMode = 'edit'; // 'edit' | 'history' | 'correction'
 const SHIFT_DRAFT_AUTOSAVE_DELAY_MS = 900;
 let shiftDraftAutoSaveTimer = null;
 let shiftDraftAutoSaveInFlight = false;
 let shiftDraftAutoSaveQueued = false;
+let shiftDraftAutoSavePromise = null;
+let summaryRevenueRowCounter = 0;
+let summaryExpenseRowCounter = 0;
 const SHIFT_DRAFT_STATUS_MESSAGES = {
   idle: 'جاهز',
   dirty: 'تغييرات غير محفوظة',
@@ -5314,9 +7280,20 @@ let profitRowsCache = [];
 let profitDefaultRange = null;
 let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
+let profitLoadRequestId = 0;
 let expenseEntriesCache = [];
 let expenseDefaultRange = null;
 let expenseFilterDebounceTimer = null;
+const EXPENSE_ROW_ORDER_KEY = 'expenses-row-order';
+const DEFAULT_EXPENSE_ROW_ORDER = [
+  'اكرامية مواد',
+  'مجارى',
+  'مياة للمحطة',
+  'كهرباء للمحطة',
+  'سولار للديزل',
+  'رسوم البوسطة',
+  'تامينات'
+];
 
 function getCurrentShiftIdentifier() {
   const date = document.getElementById('shift-date')?.value || '';
@@ -5422,9 +7399,10 @@ async function persistCurrentShiftDraftToDatabase() {
     oil_data: JSON.stringify(collectOilData()),
     oil_total: calculateOilTotal(),
     customer_rows: collectCustomerRowsData(),
+    revenue_items: collectRevenueItems(),
     expense_items: collectExpenseItems(),
-    wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
-    total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
+    wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
+    total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
     grand_total: calculateGrandTotal(),
     is_saved: 0
   };
@@ -5443,7 +7421,7 @@ async function persistCurrentShiftDraftToDatabase() {
 
 function canAutoSaveShiftDraft() {
   if (currentScreen !== 'shift-entry') return false;
-  if (shiftViewMode === 'history') return false;
+  if (shiftViewMode !== 'edit') return false;
   if (currentShiftData.isSaved) return false;
   const { date, shiftNumber } = getCurrentShiftIdentifier();
   return Boolean(date && shiftNumber);
@@ -5451,13 +7429,6 @@ function canAutoSaveShiftDraft() {
 
 async function runShiftDraftAutoSave() {
   if (!canAutoSaveShiftDraft() || !currentShiftData.hasUnsavedChanges) {
-    return;
-  }
-
-  const validationErrors = validateShiftData();
-  if (validationErrors.length > 0) {
-    // Never persist invalid shifts as drafts.
-    setShiftDraftStatus('dirty');
     return;
   }
 
@@ -5491,6 +7462,17 @@ async function runShiftDraftAutoSave() {
   }
 }
 
+function startShiftDraftAutoSave() {
+  const promise = runShiftDraftAutoSave();
+  shiftDraftAutoSavePromise = promise;
+  promise.finally(() => {
+    if (shiftDraftAutoSavePromise === promise) {
+      shiftDraftAutoSavePromise = null;
+    }
+  });
+  return promise;
+}
+
 function scheduleShiftDraftAutoSave() {
   if (!canAutoSaveShiftDraft()) return;
 
@@ -5502,8 +7484,19 @@ function scheduleShiftDraftAutoSave() {
 
   shiftDraftAutoSaveTimer = setTimeout(() => {
     shiftDraftAutoSaveTimer = null;
-    runShiftDraftAutoSave();
+    startShiftDraftAutoSave();
   }, SHIFT_DRAFT_AUTOSAVE_DELAY_MS);
+}
+
+function markShiftDraftDirty() {
+  if (shiftViewMode === 'history') return;
+
+  currentShiftData.hasUnsavedChanges = true;
+  if (shiftViewMode === 'correction') {
+    setShiftDraftStatus('dirty', 'تصحيح غير محفوظ');
+    return;
+  }
+  scheduleShiftDraftAutoSave();
 }
 
 function isShiftAutoFilledField(target) {
@@ -5523,7 +7516,6 @@ function isShiftAutoFilledField(target) {
     /-cash$/.test(id) ||
     /-quantity-\d+$/.test(id) ||
     /-total-qty$/.test(id) ||
-    /^total-/.test(id) ||
     id === 'final-net-total' ||
     // Oil derived fields (الإجمالى بعد وارد + المباع + اجمالى النقدى)
     /^oil-.+-total$/.test(id) ||
@@ -5536,20 +7528,213 @@ function getShiftNavigableFields(container) {
   if (!container) return [];
 
   const elements = Array.from(container.querySelectorAll('input, textarea, select'));
-  return elements.filter((el) => {
-    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
-      return false;
-    }
+  return elements.filter(isShiftNavigationField);
+}
 
-    if (el.disabled || el.readOnly) return false;
-    if (!el.id || el.id === 'shift-date' || el.id === 'shift-number') return false;
-    if (el instanceof HTMLInputElement) {
-      if (el.type === 'hidden' || el.type === 'button' || el.type === 'submit') return false;
-    }
+function normalizeShiftNumericText(value) {
+  const digitMap = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+    '۰': '0',
+    '۱': '1',
+    '۲': '2',
+    '۳': '3',
+    '۴': '4',
+    '۵': '5',
+    '۶': '6',
+    '۷': '7',
+    '۸': '8',
+    '۹': '9'
+  };
 
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+  return String(value ?? '')
+    .replace(/[٠-٩۰-۹]/g, (digit) => digitMap[digit] || digit)
+    .replace(/[٫،,]/g, '.')
+    .replace(/٬/g, '');
+}
+
+function hasShiftArabicNumericText(value) {
+  return /[٠-٩۰-۹٫٬،]/.test(String(value ?? ''));
+}
+
+function isShiftNumericInputTarget(target) {
+  if (!(target instanceof HTMLInputElement)) return false;
+  if (target.disabled || target.readOnly) return false;
+
+  return target.type === 'number'
+    || target.inputMode === 'decimal'
+    || target.classList.contains('fuel-table-input')
+    || target.classList.contains('customer-fuel-input')
+    || target.classList.contains('summary-numeric-input')
+    || target.classList.contains('shift-revenue-amount')
+    || target.classList.contains('shift-expense-amount');
+}
+
+function getShiftInputSelection(input) {
+  try {
+    const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+    const end = Number.isFinite(input.selectionEnd) ? input.selectionEnd : start;
+    return { start, end };
+  } catch (_error) {
+    return { start: input.value.length, end: input.value.length };
+  }
+}
+
+function setShiftInputSelection(input, position) {
+  try {
+    input.setSelectionRange(position, position);
+  } catch (_error) {
+    // Number inputs do not expose selection APIs in all browsers.
+  }
+}
+
+function insertShiftNormalizedNumericText(input, text) {
+  const normalized = normalizeShiftNumericText(text);
+  const { start, end } = getShiftInputSelection(input);
+  const currentValue = String(input.value ?? '');
+  input.value = `${currentValue.slice(0, start)}${normalized}${currentValue.slice(end)}`;
+  setShiftInputSelection(input, start + normalized.length);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function normalizeShiftNumericInputValue(input) {
+  const normalized = normalizeShiftNumericText(input.value);
+  if (normalized !== input.value) {
+    input.value = normalized;
+  }
+}
+
+function getShiftNavigationScope(currentField, fallbackContainer) {
+  if (!(currentField instanceof Element)) return fallbackContainer;
+
+  return currentField.closest('.shift-summary-sidebar')
+    || currentField.closest('.customers-table-container')
+    || currentField.closest('.fuel-tables-left')
+    || currentField.closest('.shift-oil-table-container')
+    || currentField.closest('.shift-tab-section.active')
+    || fallbackContainer;
+}
+
+function isShiftNavigationField(el) {
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  if (el.disabled || el.readOnly) return false;
+  if (el.id === 'shift-date' || el.id === 'shift-number') return false;
+  if (el instanceof HTMLInputElement) {
+    if (el.type === 'hidden' || el.type === 'button' || el.type === 'submit') return false;
+  }
+
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function getShiftTableNavigationEntries(container) {
+  if (!container) return [];
+
+  const entries = [];
+  const rows = Array.from(container.querySelectorAll('tr'));
+  rows.forEach((row, rowIndex) => {
+    let colIndex = 0;
+    Array.from(row.children).forEach((cell) => {
+      const colspan = parseInt(cell.getAttribute('colspan') || '1', 10);
+      const width = Number.isFinite(colspan) && colspan > 0 ? colspan : 1;
+      const fields = Array.from(cell.querySelectorAll('input, textarea, select')).filter(isShiftNavigationField);
+
+      fields.forEach((field, fieldIndex) => {
+        entries.push({
+          field,
+          rowIndex,
+          startCol: colIndex,
+          endCol: colIndex + width - 1,
+          centerCol: colIndex + ((width - 1) / 2),
+          fieldIndex
+        });
+      });
+
+      colIndex += width;
+    });
   });
+
+  return entries;
+}
+
+function pickShiftVerticalTableField(currentEntry, candidates) {
+  if (!currentEntry || candidates.length === 0) return null;
+
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  candidates.forEach((entry) => {
+    const overlaps = entry.startCol <= currentEntry.endCol && entry.endCol >= currentEntry.startCol;
+    const columnDistance = overlaps
+      ? 0
+      : Math.min(
+          Math.abs(entry.startCol - currentEntry.centerCol),
+          Math.abs(entry.endCol - currentEntry.centerCol),
+          Math.abs(entry.centerCol - currentEntry.centerCol)
+        );
+    const score = (columnDistance * 100) + entry.fieldIndex;
+    if (score < bestScore) {
+      bestScore = score;
+      best = entry;
+    }
+  });
+
+  return best?.field || null;
+}
+
+function findAdjacentShiftTableField(currentField, direction) {
+  const table = currentField?.closest?.('.shift-fuel-table, .shift-oil-table');
+  if (!table) {
+    return { handled: false, field: null };
+  }
+
+  const navigationContainer = table.classList.contains('shift-fuel-table')
+    ? (table.closest('.fuel-tables-left') || table)
+    : table;
+  const entries = getShiftTableNavigationEntries(navigationContainer);
+  const currentEntry = entries.find((entry) => entry.field === currentField);
+  if (!currentEntry) {
+    return { handled: true, field: null };
+  }
+
+  if (direction === 'ArrowLeft' || direction === 'ArrowRight') {
+    const sameRow = entries
+      .filter((entry) => entry.rowIndex === currentEntry.rowIndex && entry.field !== currentField)
+      .sort((a, b) => a.startCol - b.startCol || a.fieldIndex - b.fieldIndex);
+
+    const nextEntry = direction === 'ArrowLeft'
+      ? sameRow.find((entry) => entry.startCol > currentEntry.startCol)
+      : [...sameRow].reverse().find((entry) => entry.endCol < currentEntry.endCol);
+
+    return { handled: true, field: nextEntry?.field || null };
+  }
+
+  if (direction === 'ArrowDown' || direction === 'ArrowUp') {
+    const rowIndexes = Array.from(new Set(entries.map((entry) => entry.rowIndex))).sort((a, b) => a - b);
+    const targetRows = direction === 'ArrowDown'
+      ? rowIndexes.filter((rowIndex) => rowIndex > currentEntry.rowIndex)
+      : rowIndexes.filter((rowIndex) => rowIndex < currentEntry.rowIndex).reverse();
+
+    for (const rowIndex of targetRows) {
+      const rowCandidates = entries.filter((entry) => entry.rowIndex === rowIndex);
+      const field = pickShiftVerticalTableField(currentEntry, rowCandidates);
+      if (field) {
+        return { handled: true, field };
+      }
+    }
+  }
+
+  return { handled: true, field: null };
 }
 
 function findAdjacentShiftField(currentField, fields, direction) {
@@ -5609,8 +7794,9 @@ function flushShiftDraftAutoSave() {
     shiftDraftAutoSaveTimer = null;
   }
   if (currentShiftData.hasUnsavedChanges) {
-    runShiftDraftAutoSave();
+    return startShiftDraftAutoSave();
   }
+  return shiftDraftAutoSavePromise || Promise.resolve();
 }
 const PROFIT_TABLE_ROWS = [
   { key: 'fuel_diesel', label: 'سولار', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
@@ -5739,48 +7925,53 @@ async function loadSalesSummary() {
       ipcRenderer.invoke('get-oil-prices')
     ]);
 
-    let sales = [];
+    let salesReportRows = [];
     try {
       const salesReport = await ipcRenderer.invoke('get-sales-report', { startDate: startDateStr, endDate: endDateStr });
-      sales = Array.isArray(salesReport) ? salesReport : [];
+      salesReportRows = Array.isArray(salesReport) ? salesReport : [];
     } catch (error) {
-      console.warn('Sales report unavailable, trying shift sales fallback:', error);
-      sales = [];
+      console.warn('Sales report unavailable, using shift sales:', error);
     }
 
-    if (sales.length === 0) {
-      try {
-        const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
-          ipcRenderer.invoke('get-shift-fuel-sales'),
-          ipcRenderer.invoke('get-shift-oil-sales')
-        ]);
+    let shiftFuelRows = [];
+    let shiftOilRows = [];
+    try {
+      const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
+        ipcRenderer.invoke('get-shift-fuel-sales'),
+        ipcRenderer.invoke('get-shift-oil-sales')
+      ]);
 
-        const shiftFuelSales = Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [];
-        const shiftOilSales = Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [];
+      shiftFuelRows = (Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [])
+        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+        .map((entry) => ({
+          date: entry.date,
+          fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
+          quantity: parseFloat(entry.quantity) || 0,
+          total_amount: 0
+        }));
 
-        const fallbackFuelRows = shiftFuelSales
-          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-          .map((entry) => ({
-            date: entry.date,
-            fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
-            quantity: parseFloat(entry.quantity) || 0,
-            total_amount: 0
-          }));
-
-        const fallbackOilRows = shiftOilSales
-          .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-          .map((entry) => ({
-            date: entry.date,
-            fuel_type: String(entry.product_name || '').trim(),
-            quantity: parseFloat(entry.quantity) || 0,
-            total_amount: 0
-          }));
-
-        sales = [...fallbackFuelRows, ...fallbackOilRows];
-      } catch (error) {
-        console.warn('Shift sales fallback unavailable:', error);
-      }
+      shiftOilRows = (Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [])
+        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
+        .map((entry) => ({
+          date: entry.date,
+          fuel_type: String(entry.product_name || '').trim(),
+          quantity: parseFloat(entry.quantity) || 0,
+          total_amount: 0
+        }));
+    } catch (error) {
+      console.warn('Shift sales unavailable:', error);
     }
+
+    const configuredFuelNames = new Set((fuelProducts || []).map((product) => (
+      normalizeFuelTypeForHomeChart(product.fuel_type)
+    )).filter(Boolean));
+    const nonFuelReportRows = salesReportRows.filter((row) => {
+      const productName = normalizeFuelTypeForHomeChart(row.fuel_type);
+      return productName && !configuredFuelNames.has(productName);
+    });
+    const sales = shiftFuelRows.length > 0 || shiftOilRows.length > 0
+      ? [...shiftFuelRows, ...shiftOilRows, ...nonFuelReportRows]
+      : salesReportRows;
 
     // Build list of months in range (YYYY-MM)
     const months = [];
@@ -6308,13 +8499,13 @@ function populateProfitFilterOptions(availableMonths, defaultRange) {
   fillSelect(startYearSel, yearOptions, safeDefault.fromMonth.slice(0, 4));
   fillSelect(endYearSel, yearOptions, safeDefault.toMonth.slice(0, 4));
 
-  const filterBtn = document.getElementById('profit-filter-btn');
-  if (filterBtn && !filterBtn.dataset.bound) {
-    filterBtn.addEventListener('click', () => {
+  [startMonthSel, startYearSel, endMonthSel, endYearSel].forEach((select) => {
+    if (select.dataset.profitAutoBound === 'true') return;
+    select.addEventListener('change', () => {
       loadProfitMonthlyData();
     });
-    filterBtn.dataset.bound = 'true';
-  }
+    select.dataset.profitAutoBound = 'true';
+  });
 
   const clearBtn = document.getElementById('profit-clear-filter-btn');
   if (clearBtn && !clearBtn.dataset.bound) {
@@ -6328,7 +8519,7 @@ function populateProfitFilterOptions(availableMonths, defaultRange) {
         endMonthSel.value = profitDefaultRange.toMonth.slice(5, 7);
         endYearSel.value = profitDefaultRange.toMonth.slice(0, 4);
       }
-      loadProfitMonthlyData();
+      loadProfitMonthlyData(profitDefaultRange);
     });
     clearBtn.dataset.bound = 'true';
   }
@@ -6366,7 +8557,7 @@ async function initializeProfitDashboard() {
     populateProfitFilterOptions(availableMonths, profitDefaultRange);
     bindProfitRowActionButtons();
     setProfitSaveStatus('idle');
-    await loadProfitMonthlyData();
+    await loadProfitMonthlyData(profitDefaultRange);
   } catch (error) {
     console.error('Error initializing profit dashboard:', error);
     setProfitSaveStatus('error');
@@ -6823,8 +9014,18 @@ async function deleteProfitCustomRowByKey(rowKey) {
   }
 }
 
-async function loadProfitMonthlyData() {
-  const range = getProfitFiltersRange();
+async function loadProfitMonthlyData(explicitRange = null) {
+  const explicitFromMonth = normalizeMonthKey(explicitRange?.fromMonth);
+  const explicitToMonth = normalizeMonthKey(explicitRange?.toMonth);
+  const range = explicitFromMonth && explicitToMonth
+    ? {
+        valid: explicitFromMonth <= explicitToMonth,
+        fromMonth: explicitFromMonth,
+        toMonth: explicitToMonth,
+        message: explicitFromMonth <= explicitToMonth ? '' : 'فترة زمنية غير صحيحة'
+      }
+    : getProfitFiltersRange();
+  const requestId = ++profitLoadRequestId;
   const tbody = document.getElementById('profit-monthly-body');
   const emptyState = document.getElementById('profit-empty');
   if (!tbody) return;
@@ -6849,6 +9050,10 @@ async function loadProfitMonthlyData() {
       })
     ]);
 
+    if (requestId !== profitLoadRequestId) {
+      return;
+    }
+
     profitCustomRowsCache = (Array.isArray(customRows) ? customRows : [])
       .map((row) => normalizeProfitCustomRow(row))
       .filter(Boolean);
@@ -6870,6 +9075,9 @@ async function loadProfitMonthlyData() {
       setProfitSaveStatus('idle');
     }
   } catch (error) {
+    if (requestId !== profitLoadRequestId) {
+      return;
+    }
     console.error('Error loading monthly profit data:', error);
     profitRowsCache = [];
     profitCustomRowsCache = [];
@@ -7098,6 +9306,73 @@ function renderExpenseTableMessage(message, tone = 'neutral', months = []) {
   `;
 }
 
+function normalizeExpenseDescriptionForOrder(description) {
+  return normalizeExcelText(description).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function getSavedExpenseRowOrder() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPENSE_ROW_ORDER_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveExpenseRowOrder(descriptions) {
+  const normalized = [];
+  const seen = new Set();
+  (Array.isArray(descriptions) ? descriptions : []).forEach((description) => {
+    const clean = String(description || '').trim();
+    const key = normalizeExpenseDescriptionForOrder(clean);
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    normalized.push(clean);
+  });
+  localStorage.setItem(EXPENSE_ROW_ORDER_KEY, JSON.stringify(normalized));
+}
+
+function getExpenseDefaultOrderRank(description) {
+  const key = normalizeExpenseDescriptionForOrder(description);
+  return DEFAULT_EXPENSE_ROW_ORDER
+    .map(normalizeExpenseDescriptionForOrder)
+    .indexOf(key);
+}
+
+function getExpenseManualOrderRank(description) {
+  const key = normalizeExpenseDescriptionForOrder(description);
+  return getSavedExpenseRowOrder()
+    .map(normalizeExpenseDescriptionForOrder)
+    .indexOf(key);
+}
+
+function sortExpenseDescriptions(descriptions, rowMap) {
+  return [...descriptions].sort((a, b) => {
+    const manualA = getExpenseManualOrderRank(a);
+    const manualB = getExpenseManualOrderRank(b);
+    if (manualA !== -1 || manualB !== -1) {
+      if (manualA === -1) return 1;
+      if (manualB === -1) return -1;
+      return manualA - manualB;
+    }
+
+    const defaultA = getExpenseDefaultOrderRank(a);
+    const defaultB = getExpenseDefaultOrderRank(b);
+    if (defaultA !== -1 || defaultB !== -1) {
+      if (defaultA === -1) return 1;
+      if (defaultB === -1) return -1;
+      return defaultA - defaultB;
+    }
+
+    const totalA = rowMap.get(a)?.total || 0;
+    const totalB = rowMap.get(b)?.total || 0;
+    if (Math.abs(totalB - totalA) > 0.0001) {
+      return totalB - totalA;
+    }
+    return a.localeCompare(b, 'ar');
+  });
+}
+
 function renderExpenseTableRows(entries, months = []) {
   const headRow = document.getElementById('expenses-summary-head');
   const tbody = document.getElementById('expenses-table-body');
@@ -7145,14 +9420,7 @@ function renderExpenseTableRows(entries, months = []) {
     row.byMonth.set(monthKey, (row.byMonth.get(monthKey) || 0) + amount);
   });
 
-  const descriptions = Array.from(rowMap.keys()).sort((a, b) => {
-    const totalA = rowMap.get(a)?.total || 0;
-    const totalB = rowMap.get(b)?.total || 0;
-    if (Math.abs(totalB - totalA) > 0.0001) {
-      return totalB - totalA;
-    }
-    return a.localeCompare(b, 'ar');
-  });
+  const descriptions = sortExpenseDescriptions(Array.from(rowMap.keys()), rowMap);
 
   if (descriptions.length === 0) {
     renderExpenseTableMessage('لا توجد مصروفات في الفترة المحددة', 'neutral', safeMonths);
@@ -7174,13 +9442,69 @@ function renderExpenseTableRows(entries, months = []) {
     }).join('');
 
     return `
-      <tr>
-        <td class="oil-name-cell"><strong>${escapeHtml(description)}</strong></td>
+      <tr draggable="true" class="draggable-oil-row draggable-expense-row" data-expense-description="${escapeHtml(description)}">
+        <td class="oil-name-cell expenses-name-cell">
+          <div class="expenses-row-cell">
+            <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
+            <strong>${escapeHtml(description)}</strong>
+          </div>
+        </td>
         ${monthCells}
         <td class="cell-total expenses-total-cell">${formatArabicNumber(row.total)}</td>
       </tr>
     `;
   }).join('');
+
+  enableExpenseRowDragDrop();
+}
+
+function enableExpenseRowDragDrop() {
+  const tableBody = document.getElementById('expenses-table-body');
+  if (!tableBody) return;
+
+  let draggedRow = null;
+  const rows = tableBody.querySelectorAll('.draggable-expense-row');
+
+  rows.forEach((row) => {
+    row.addEventListener('dragstart', function(e) {
+      draggedRow = this;
+      this.style.opacity = '0.5';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    row.addEventListener('dragend', function() {
+      this.style.opacity = '1';
+      draggedRow = null;
+      saveExpenseRowOrderFromTable();
+    });
+
+    row.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      if (draggedRow && draggedRow !== this) {
+        const rect = this.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+
+        if (e.clientY < midpoint) {
+          tableBody.insertBefore(draggedRow, this);
+        } else {
+          tableBody.insertBefore(draggedRow, this.nextSibling);
+        }
+      }
+    });
+  });
+}
+
+function saveExpenseRowOrderFromTable() {
+  const tableBody = document.getElementById('expenses-table-body');
+  if (!tableBody) return;
+
+  const order = Array.from(tableBody.querySelectorAll('.draggable-expense-row'))
+    .map((row) => row.dataset.expenseDescription)
+    .filter(Boolean);
+
+  saveExpenseRowOrder(order);
 }
 
 async function loadExpenseEntries() {
@@ -7236,6 +9560,9 @@ const fuelIdMap = {
 // Calculate fuel quantity sold (first shift - last shift counter) - 2 counters for gasoline
 function calculateFuelQuantity(fuelType) {
   const fuelId = fuelIdMap[fuelType];
+  if (fuelId === 'gas') {
+    applyNightShiftGasAutoClose(false);
+  }
   let totalQuantity = 0;
 
   // Calculate quantity for each counter individually (2 counters)
@@ -7365,6 +9692,61 @@ function recalculateFuelDerivedRows() {
   calculateFuelTotal();
 }
 
+function getSelectedShiftNumberValue() {
+  const shiftNumberValue = document.getElementById('shift-number')?.value
+    || currentShiftData.shiftNumber
+    || '';
+  const shiftNumber = parseInt(shiftNumberValue, 10);
+  return Number.isFinite(shiftNumber) ? shiftNumber : null;
+}
+
+function shouldAutoCloseGasForNightShift() {
+  return shiftViewMode === 'edit'
+    && !currentShiftData.isSaved
+    && getSelectedShiftNumberValue() === 2;
+}
+
+function applyNightShiftGasAutoClose(recalculate = true) {
+  if (!shouldAutoCloseGasForNightShift()) return false;
+
+  let changed = false;
+  for (let i = 1; i <= 2; i += 1) {
+    const firstShiftInput = document.getElementById(`fuel-gas-first-${i}`);
+    const lastShiftInput = document.getElementById(`fuel-gas-last-${i}`);
+    if (!firstShiftInput || !lastShiftInput) continue;
+
+    const firstValue = getShiftInputDisplayValue(firstShiftInput.value);
+    if (lastShiftInput.value !== firstValue) {
+      lastShiftInput.value = firstValue;
+      changed = true;
+    }
+  }
+
+  if (changed && recalculate) {
+    calculateFuelQuantity('غاز سيارات');
+  }
+
+  return changed;
+}
+
+function clearGasLastShiftCounters(recalculate = true) {
+  let changed = false;
+
+  for (let i = 1; i <= 2; i += 1) {
+    const lastShiftInput = document.getElementById(`fuel-gas-last-${i}`);
+    if (lastShiftInput && lastShiftInput.value !== '') {
+      lastShiftInput.value = '';
+      changed = true;
+    }
+  }
+
+  if (changed && recalculate) {
+    calculateFuelQuantity('غاز سيارات');
+  }
+
+  return changed;
+}
+
 function normalizeOilName(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -7422,6 +9804,106 @@ function roundOilQuantity(value) {
 
 function isOilInitialEditable(oilName) {
   return normalizeOilName(oilName) === EDITABLE_OIL_INITIAL_NAME;
+}
+
+function parseShiftJsonObject(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function renderSavedShiftOilRows(oilData = {}) {
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody) return;
+
+  const entries = Object.entries(oilData || {});
+  tableBody.innerHTML = '';
+
+  if (entries.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="11" style="text-align: center; padding: 2rem; color: #999;">
+          لا توجد بيانات زيوت محفوظة لهذه الوردية
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  entries.forEach(([oilName], index) => {
+    const oilId = `saved-${index}`;
+    const row = document.createElement('tr');
+    row.setAttribute('data-oil-id', oilId);
+    row.setAttribute('data-oil-name', oilName);
+    row.innerHTML = `
+      <td class="oil-name-cell">
+        <div class="oil-cell-center oil-name-content">
+          <strong>${escapeHtml(oilName)}</strong>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-initial" data-oil="${escapeHtml(oilName)}" data-field="initial" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-added" data-oil="${escapeHtml(oilName)}" data-field="added">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-total" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-sold" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-remaining" data-oil="${escapeHtml(oilName)}" data-field="remaining">
+        </div>
+      </td>
+      <td class="spacer-cell"></td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-open" data-oil="${escapeHtml(oilName)}" data-field="open">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control shift-oil-input"
+                 id="oil-${oilId}-customers" data-oil="${escapeHtml(oilName)}" data-field="customers">
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-price" readonly>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="number" step="0.01" class="form-control auto-calculated"
+                 id="oil-${oilId}-revenue" readonly>
+        </div>
+      </td>
+    `;
+    tableBody.appendChild(row);
+  });
 }
 
 // Load active oils and populate oil table
@@ -8205,6 +10687,176 @@ function calculateGrandTotal() {
 
 // ============= TOTALS PAGE FUNCTIONS =============
 
+function sanitizeSummaryNumericInput(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.classList.contains('summary-numeric-input')) return;
+
+  let value = String(input.value || '').replace(/,/g, '.');
+  value = value.replace(/[^\d.]/g, '');
+
+  const firstDotIndex = value.indexOf('.');
+  if (firstDotIndex !== -1) {
+    value = value.slice(0, firstDotIndex + 1) + value.slice(firstDotIndex + 1).replace(/\./g, '');
+  }
+
+  input.value = value;
+}
+
+function parseSummaryNumber(value) {
+  const amount = parseFloat(String(value || '').replace(/,/g, '.'));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function getSummaryRowItems(containerId, descSelector, amountSelector) {
+  const container = document.getElementById(containerId);
+  if (!container) return [];
+
+  return Array.from(container.querySelectorAll('.summary-dynamic-row'))
+    .map((row, fallbackIndex) => {
+      const description = String(row.querySelector(descSelector)?.value || '').trim();
+      const amount = parseSummaryNumber(row.querySelector(amountSelector)?.value);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+
+      const index = parseInt(row.getAttribute('data-index'), 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description,
+        amount
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeRevenueItems(items) {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') return null;
+      const amount = parseFloat(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function createSummaryDynamicRow(type, index, item = {}) {
+  const isRevenue = type === 'revenue';
+  const row = document.createElement('div');
+  row.className = `total-row summary-dynamic-row ${isRevenue ? 'summary-revenue-row' : 'summary-expense-row'}`;
+  row.setAttribute('data-index', index);
+
+  const descId = isRevenue ? `revenue-desc-${index}` : `expense-desc-${index}`;
+  const amountId = isRevenue ? `revenue-amount-${index}` : `expense-amount-${index}`;
+  const descClass = isRevenue
+    ? 'total-description-input shift-revenue-desc'
+    : 'total-description-input shift-expense-input shift-expense-desc';
+  const amountClass = isRevenue
+    ? 'total-input shift-revenue-amount'
+    : 'total-input shift-expense-input shift-expense-amount';
+  const placeholder = isRevenue ? 'وصف الإيراد' : 'وصف المصروف';
+  const handler = isRevenue ? 'handleSummaryRevenueInput' : 'handleSummaryExpenseInput';
+
+  row.innerHTML = `
+    <input type="text" class="${descClass}" id="${descId}" placeholder="${placeholder}" value="${escapeHtml(item.description || '')}" oninput="${handler}(this)">
+    <input type="text" inputmode="decimal" autocomplete="off" class="${amountClass} summary-numeric-input" id="${amountId}" value="${Number.isFinite(parseFloat(item.amount)) ? formatPrice(item.amount) : ''}" oninput="${handler}(this)">
+  `;
+
+  return row;
+}
+
+function renderRevenueItems(items = []) {
+  const container = document.getElementById('shift-revenue-extra-rows');
+  if (!container) return;
+
+  const normalized = normalizeRevenueItems(items);
+  container.innerHTML = '';
+  summaryRevenueRowCounter = 0;
+
+  normalized.forEach((item) => {
+    const index = item.index || (summaryRevenueRowCounter + 1);
+    summaryRevenueRowCounter = Math.max(summaryRevenueRowCounter, index);
+    container.appendChild(createSummaryDynamicRow('revenue', index, item));
+  });
+
+  summaryRevenueRowCounter += 1;
+  container.appendChild(createSummaryDynamicRow('revenue', summaryRevenueRowCounter));
+}
+
+function renderExpenseItems(items = []) {
+  const container = document.getElementById('shift-expense-rows');
+  if (!container) return;
+
+  const normalized = normalizeExpenseItems(items);
+  container.innerHTML = '';
+  summaryExpenseRowCounter = 0;
+
+  normalized.forEach((item) => {
+    const index = item.index || (summaryExpenseRowCounter + 1);
+    summaryExpenseRowCounter = Math.max(summaryExpenseRowCounter, index);
+    container.appendChild(createSummaryDynamicRow('expense', index, item));
+  });
+
+  summaryExpenseRowCounter += 1;
+  container.appendChild(createSummaryDynamicRow('expense', summaryExpenseRowCounter));
+}
+
+function ensureBlankSummaryRow(type) {
+  const isRevenue = type === 'revenue';
+  const container = document.getElementById(isRevenue ? 'shift-revenue-extra-rows' : 'shift-expense-rows');
+  if (!container) return;
+
+  const rows = Array.from(container.querySelectorAll('.summary-dynamic-row'));
+  const hasBlank = rows.some((row) => {
+    const descSelector = isRevenue ? '.shift-revenue-desc' : '.shift-expense-desc';
+    const amountSelector = isRevenue ? '.shift-revenue-amount' : '.shift-expense-amount';
+    const description = String(row.querySelector(descSelector)?.value || '').trim();
+    const amount = String(row.querySelector(amountSelector)?.value || '').trim();
+    return !description && !amount;
+  });
+
+  if (hasBlank) return;
+
+  if (isRevenue) {
+    summaryRevenueRowCounter += 1;
+    container.appendChild(createSummaryDynamicRow('revenue', summaryRevenueRowCounter));
+  } else {
+    summaryExpenseRowCounter += 1;
+    container.appendChild(createSummaryDynamicRow('expense', summaryExpenseRowCounter));
+  }
+}
+
+function handleSummaryFixedRevenueInput(input) {
+  sanitizeSummaryNumericInput(input);
+  calculateGrandTotal();
+  markShiftDraftDirty();
+}
+
+function handleSummaryRevenueInput(input) {
+  sanitizeSummaryNumericInput(input);
+  ensureBlankSummaryRow('revenue');
+  calculateGrandTotal();
+  markShiftDraftDirty();
+}
+
+function handleSummaryExpenseInput(input) {
+  sanitizeSummaryNumericInput(input);
+  ensureBlankSummaryRow('expense');
+  calculateTotalExpenses();
+  markShiftDraftDirty();
+}
+
+function initializeShiftSummaryRows() {
+  renderRevenueItems([]);
+  renderExpenseItems([]);
+}
+
 // Populate totals page with cash values from fuel and oil tabs
 function updateTotalsPage() {
   // Populate individual fuel cash values
@@ -8244,21 +10896,20 @@ function updateTotalsPage() {
 // Calculate total revenue (fuel + oil + extra fields)
 function calculateTotalRevenue() {
   // Calculate total fuel cash from individual fuel values
-  const dieselCash = parseFloat(document.getElementById('total-diesel-cash')?.value) || 0;
-  const cash80 = parseFloat(document.getElementById('total-80-cash')?.value) || 0;
-  const cash92 = parseFloat(document.getElementById('total-92-cash')?.value) || 0;
-  const cash95 = parseFloat(document.getElementById('total-95-cash')?.value) || 0;
+  const dieselCash = parseSummaryNumber(document.getElementById('total-diesel-cash')?.value);
+  const cash80 = parseSummaryNumber(document.getElementById('total-80-cash')?.value);
+  const cash92 = parseSummaryNumber(document.getElementById('total-92-cash')?.value);
+  const cash95 = parseSummaryNumber(document.getElementById('total-95-cash')?.value);
   const totalFuelCash = dieselCash + cash80 + cash92 + cash95;
 
-  const totalOilRevenue = parseFloat(document.getElementById('total-oil-revenue')?.value) || 0;
-  const washLubeRevenue = parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0;
+  const totalOilRevenue = parseSummaryNumber(document.getElementById('total-oil-revenue')?.value);
+  const washLubeRevenue = parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value);
 
   // Add extra revenue fields
   let extraRevenue = 0;
-  for (let i = 1; i <= 5; i++) {
-    const amount = parseFloat(document.getElementById(`revenue-amount-${i}`)?.value) || 0;
-    extraRevenue += amount;
-  }
+  collectRevenueItems().forEach((item) => {
+    extraRevenue += item.amount;
+  });
 
   const totalRevenue = totalFuelCash + totalOilRevenue + washLubeRevenue + extraRevenue;
   document.getElementById('total-revenue').value = formatPrice(totalRevenue);
@@ -8271,10 +10922,9 @@ function calculateTotalRevenue() {
 function calculateTotalExpenses() {
   let totalExpenses = 0;
 
-  for (let i = 1; i <= 10; i++) {
-    const amount = parseFloat(document.getElementById(`expense-amount-${i}`)?.value) || 0;
-    totalExpenses += amount;
-  }
+  collectExpenseItems().forEach((item) => {
+    totalExpenses += item.amount;
+  });
 
   document.getElementById('total-expenses').value = formatPrice(totalExpenses);
 
@@ -8284,8 +10934,8 @@ function calculateTotalExpenses() {
 
 // Calculate net total (revenue - expenses)
 function calculateNetTotal() {
-  const totalRevenue = parseFloat(document.getElementById('total-revenue')?.value) || 0;
-  const totalExpenses = parseFloat(document.getElementById('total-expenses')?.value) || 0;
+  const totalRevenue = parseSummaryNumber(document.getElementById('total-revenue')?.value);
+  const totalExpenses = parseSummaryNumber(document.getElementById('total-expenses')?.value);
 
   const netTotal = totalRevenue - totalExpenses;
   document.getElementById('final-net-total').value = formatPrice(netTotal);
@@ -8380,24 +11030,11 @@ function collectOilData() {
 }
 
 function collectExpenseItems() {
-  const items = [];
+  return getSummaryRowItems('shift-expense-rows', '.shift-expense-desc', '.shift-expense-amount');
+}
 
-  for (let i = 1; i <= 10; i += 1) {
-    const description = String(document.getElementById(`expense-desc-${i}`)?.value || '').trim();
-    const amount = parseFloat(document.getElementById(`expense-amount-${i}`)?.value);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      continue;
-    }
-
-    items.push({
-      index: i,
-      description,
-      amount
-    });
-  }
-
-  return items;
+function collectRevenueItems() {
+  return getSummaryRowItems('shift-revenue-extra-rows', '.shift-revenue-desc', '.shift-revenue-amount');
 }
 
 function normalizeExpenseItems(items) {
@@ -8424,27 +11061,24 @@ function normalizeExpenseItems(items) {
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.index - b.index)
-    .slice(0, 10);
+    .sort((a, b) => a.index - b.index);
 }
 
 function clearShiftExpenseInputs() {
-  for (let i = 1; i <= 10; i += 1) {
-    const descriptionInput = document.getElementById(`expense-desc-${i}`);
-    const amountInput = document.getElementById(`expense-amount-${i}`);
-
-    if (descriptionInput) {
-      descriptionInput.value = '';
-    }
-
-    if (amountInput) {
-      amountInput.value = '';
-    }
-  }
+  renderExpenseItems([]);
 
   const totalExpensesInput = document.getElementById('total-expenses');
   if (totalExpensesInput) {
     totalExpensesInput.value = '';
+  }
+}
+
+function clearShiftRevenueInputs() {
+  renderRevenueItems([]);
+
+  const washLubeInput = document.getElementById('total-wash-lube-revenue');
+  if (washLubeInput) {
+    washLubeInput.value = '';
   }
 }
 
@@ -8518,9 +11152,34 @@ function validateShiftData() {
   return errors;
 }
 
+function buildCurrentShiftPayload(date, shiftNumber, isSaved = 1) {
+  return {
+    date,
+    shift_number: shiftNumber,
+    fuel_data: JSON.stringify(collectFuelData()),
+    fuel_total: calculateFuelTotal(),
+    oil_data: JSON.stringify(collectOilData()),
+    oil_total: calculateOilTotal(),
+    customer_rows: collectCustomerRowsData(),
+    revenue_items: collectRevenueItems(),
+    expense_items: collectExpenseItems(),
+    wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
+    total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
+    grand_total: calculateGrandTotal(),
+    is_saved: isSaved
+  };
+}
+
 // Save shift
 async function saveShift() {
   try {
+    if (shiftViewMode === 'correction') {
+      await saveShiftCorrection();
+      return;
+    }
+
+    applyNightShiftGasAutoClose();
+
     // Validate data
     const errors = validateShiftData();
     if (errors.length > 0) {
@@ -8551,20 +11210,7 @@ async function saveShift() {
       }
     }
 
-    const shiftData = {
-      date: date,
-      shift_number: shiftNumber,
-      fuel_data: JSON.stringify(collectFuelData()),
-      fuel_total: calculateFuelTotal(),
-      oil_data: JSON.stringify(collectOilData()),
-      oil_total: calculateOilTotal(),
-      customer_rows: collectCustomerRowsData(),
-      expense_items: collectExpenseItems(),
-      wash_lube_revenue: parseFloat(document.getElementById('total-wash-lube-revenue')?.value) || 0,
-      total_expenses: parseFloat(document.getElementById('total-expenses')?.value) || 0,
-      grand_total: calculateGrandTotal(),
-      is_saved: 1
-    };
+    const shiftData = buildCurrentShiftPayload(date, shiftNumber, 1);
 
     // Save to database
     const result = await ipcRenderer.invoke('save-shift', shiftData);
@@ -8592,6 +11238,7 @@ async function saveShift() {
 
       // Clear specific fields after save and carry oil remaining -> next initial balance
       clearFieldsAfterSave(oilRemainingValues);
+      applyNightShiftGasAutoClose();
 
       // Recompute fuel rows for the new shift from fresh prices + cleared clients/customers.
       await refreshFuelRowsAfterShiftSave();
@@ -8788,6 +11435,7 @@ function clearFieldsAfterSave(oilRemainingValues = {}) {
     });
   }
 
+  clearShiftRevenueInputs();
   clearShiftExpenseInputs();
   calculateOilTotal();
   calculateNetTotal();
@@ -8824,6 +11472,10 @@ function setShiftEntryInputsDisabled(disabled) {
     if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) {
       return;
     }
+    if (disabled && (field.id === 'shift-date' || field.id === 'shift-number')) {
+      field.disabled = false;
+      return;
+    }
     field.disabled = disabled;
   });
 }
@@ -8858,11 +11510,15 @@ function disableReadOnlyMode() {
   // Show save button only in edit mode
   const saveBtn = document.getElementById('save-shift-btn');
   if (saveBtn) {
-    saveBtn.style.display = 'inline-flex';
-    if (shiftViewMode === 'history') {
-      saveBtn.style.display = 'none';
-    }
+    saveBtn.style.display = shiftViewMode === 'edit' ? 'inline-flex' : 'none';
   }
+}
+
+function setShiftIdentifierFieldsLocked(locked) {
+  const dateInput = document.getElementById('shift-date');
+  const shiftNumberSelect = document.getElementById('shift-number');
+  if (dateInput) dateInput.disabled = Boolean(locked);
+  if (shiftNumberSelect) shiftNumberSelect.disabled = Boolean(locked);
 }
 
 // Get last shift (by ID - most recent)
@@ -8872,6 +11528,24 @@ async function getLastShift() {
     return lastShift;
   } catch (error) {
     console.error('Error getting last shift:', error);
+    return null;
+  }
+}
+
+async function getLastDraftShift() {
+  try {
+    return await ipcRenderer.invoke('get-last-draft-shift');
+  } catch (error) {
+    console.error('Error getting last draft shift:', error);
+    return null;
+  }
+}
+
+async function getLastSavedShift() {
+  try {
+    return await ipcRenderer.invoke('get-last-saved-shift');
+  } catch (error) {
+    console.error('Error getting last saved shift:', error);
     return null;
   }
 }
@@ -8906,22 +11580,68 @@ function calculateNextShift(lastShift) {
   }
 }
 
+function loadPreviousShiftOilBalances(previousShift) {
+  const legacyData = parseShiftJsonObject(previousShift?.data, {});
+  const oilData = parseShiftJsonObject(previousShift?.oil_data || legacyData.oil_data, {});
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody || Object.keys(oilData).length === 0) return;
+
+  const oilDataByName = new Map(
+    Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(oilName), data])
+  );
+
+  tableBody.querySelectorAll('tr[data-oil-id]').forEach((row) => {
+    const oilId = row.getAttribute('data-oil-id');
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+    const previousOilData = oilDataByName.get(normalizeOilName(oilName));
+    if (!oilId || !previousOilData) return;
+
+    const carriedInitial = getShiftInputDisplayValue(previousOilData.remaining);
+    const initialInput = document.getElementById(`oil-${oilId}-initial`);
+    const addedInput = document.getElementById(`oil-${oilId}-added`);
+    const totalInput = document.getElementById(`oil-${oilId}-total`);
+    const soldInput = document.getElementById(`oil-${oilId}-sold`);
+    const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+    const openInput = document.getElementById(`oil-${oilId}-open`);
+    const customersInput = document.getElementById(`oil-${oilId}-customers`);
+    const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+
+    if (initialInput) initialInput.value = carriedInitial;
+    if (addedInput) addedInput.value = '';
+    if (totalInput) totalInput.value = carriedInitial;
+    if (soldInput) soldInput.value = '';
+    if (remainingInput) remainingInput.value = '';
+    if (openInput) openInput.value = '';
+    if (customersInput) customersInput.value = '';
+    if (revenueInput) revenueInput.value = '';
+  });
+
+  calculateOilTotal();
+  calculateNetTotal();
+}
+
 // Load next shift automatically with pre-populated initial values
 async function loadNextShift() {
   try {
-    // Get last shift
-    const lastShift = await getLastShift();
+    if (shiftDraftAutoSavePromise) {
+      await shiftDraftAutoSavePromise;
+    }
 
-    // If there is a draft shift (not saved), resume it directly
-    if (lastShift && parseInt(lastShift.is_saved, 10) !== 1) {
+    const lastDraftShift = await getLastDraftShift();
+
+    // If there is a draft shift (not saved), resume it directly.
+    if (lastDraftShift) {
       const dateInput = document.getElementById('shift-date');
       const shiftNumberSelect = document.getElementById('shift-number');
-      if (dateInput) dateInput.value = lastShift.date;
-      if (shiftNumberSelect) shiftNumberSelect.value = lastShift.shift_number;
-      await loadShiftData(lastShift.date, lastShift.shift_number);
+      if (dateInput) dateInput.value = lastDraftShift.date;
+      if (shiftNumberSelect) shiftNumberSelect.value = lastDraftShift.shift_number;
+      await loadShiftData(lastDraftShift.date, lastDraftShift.shift_number);
       disableReadOnlyMode();
       return;
     }
+
+    // Get last saved shift for next-shift calculation.
+    const lastShift = await getLastSavedShift();
 
     // Calculate next shift
     const nextShift = calculateNextShift(lastShift);
@@ -8992,12 +11712,15 @@ async function loadPreviousShiftEndValues(previousShift) {
       }
     });
 
+    applyNightShiftGasAutoClose();
+
     // Trigger quantity calculations for all fuels
     calculateDieselQuantity();
     calculateFuelQuantity('بنزين ٩٥');
     calculateFuelQuantity('بنزين ٩٢');
     calculateFuelQuantity('بنزين ٨٠');
     calculateFuelQuantity('غاز سيارات');
+    loadPreviousShiftOilBalances(previousShift);
   } catch (error) {
     console.error('Error loading previous shift end values:', error);
   }
@@ -9018,17 +11741,18 @@ async function loadShiftData(date, shiftNumber) {
       clearShiftForm();
       setCustomerRowsData([]);
 
-      // Load last shift data (by ID) to populate "first shift" fields
-      const lastShift = await getLastShift();
-      if (lastShift) {
-        await loadPreviousShiftEndValues(lastShift);
-      }
-
       currentShiftData.date = date;
       currentShiftData.shiftNumber = shiftNumber;
       currentShiftData.isSaved = false;
       currentShiftData.hasUnsavedChanges = false;
       currentShiftData.draftCleanupQueue = [];
+
+      // Load last shift data (by ID) to populate "first shift" fields
+      const lastShift = await getLastSavedShift();
+      if (lastShift) {
+        await loadPreviousShiftEndValues(lastShift);
+      }
+
       setShiftDraftStatus('idle');
       disableReadOnlyMode();
       return;
@@ -9049,6 +11773,7 @@ async function loadShiftData(date, shiftNumber) {
     const fuelData = parseJsonObject(shift.fuel_data || legacyData.fuel_data, {});
     const oilData = parseJsonObject(shift.oil_data || legacyData.oil_data, {});
     const customerRows = normalizeCustomerRowsData(legacyData.customer_rows);
+    const revenueItems = normalizeRevenueItems(legacyData.revenue_items);
     const washLubeRevenue = parseFloat(
       shift.wash_lube_revenue ?? legacyData.wash_lube_revenue ?? 0
     ) || 0;
@@ -9057,7 +11782,8 @@ async function loadShiftData(date, shiftNumber) {
     ) || 0;
     const expenseItems = normalizeExpenseItems(legacyData.expense_items);
 
-    clearShiftExpenseInputs();
+    renderRevenueItems(revenueItems);
+    renderExpenseItems(expenseItems);
 
     // Populate fuel data
     Object.entries(fuelData).forEach(([fuelType, data]) => {
@@ -9153,24 +11879,6 @@ async function loadShiftData(date, shiftNumber) {
       washLubeInput.value = Math.abs(washLubeRevenue) > 0.0001 ? formatPrice(washLubeRevenue) : '';
     }
 
-    expenseItems.forEach((item) => {
-      const rowIndex = item.index;
-      if (!Number.isFinite(rowIndex) || rowIndex < 1 || rowIndex > 10) {
-        return;
-      }
-
-      const descriptionInput = document.getElementById(`expense-desc-${rowIndex}`);
-      const amountInput = document.getElementById(`expense-amount-${rowIndex}`);
-
-      if (descriptionInput) {
-        descriptionInput.value = item.description;
-      }
-
-      if (amountInput) {
-        amountInput.value = formatPrice(item.amount);
-      }
-    });
-
     setCustomerRowsData(customerRows);
 
     // Recalculate totals
@@ -9195,6 +11903,10 @@ async function loadShiftData(date, shiftNumber) {
     currentShiftData.hasUnsavedChanges = false;
     currentShiftData.draftCleanupQueue = [];
     setShiftDraftStatus('idle');
+    if (applyNightShiftGasAutoClose()) {
+      calculateGrandTotal();
+      currentShiftData.hasUnsavedChanges = false;
+    }
 
     // If saved, enable read-only mode
     if (shift.is_saved === 1) {
@@ -9292,11 +12004,7 @@ function clearShiftForm() {
     });
   }
 
-  const washLubeInput = document.getElementById('total-wash-lube-revenue');
-  if (washLubeInput) {
-    washLubeInput.value = '';
-  }
-
+  clearShiftRevenueInputs();
   clearShiftExpenseInputs();
 
   // Reset totals
@@ -9318,7 +12026,33 @@ async function handleShiftIdentifierChange() {
 
   const date = dateInput.value;
   const shiftNumber = parseInt(shiftNumberSelect.value);
-  const isDraftMode = shiftViewMode !== 'history' && !currentShiftData.isSaved;
+  const isDraftMode = shiftViewMode === 'edit' && !currentShiftData.isSaved;
+
+  if (shiftViewMode === 'correction') {
+    return;
+  }
+
+  if (shiftViewMode === 'history') {
+    const previousDate = currentShiftData.date;
+    const previousShift = currentShiftData.shiftNumber;
+    const previousKey = getShiftIdentifierKey(previousDate, previousShift);
+    const nextKey = getShiftIdentifierKey(date, shiftNumber);
+
+    if (previousKey === nextKey) {
+      return;
+    }
+
+    const loaded = await loadShiftHistory(date, shiftNumber, null);
+    if (!loaded) {
+      showMessage('لا توجد وردية محفوظة لهذه البيانات', 'info');
+      if (previousDate) dateInput.value = previousDate;
+      if (previousShift) shiftNumberSelect.value = previousShift.toString();
+      if (previousDate && previousShift) {
+        updateHistoryChip(previousDate, previousShift);
+      }
+    }
+    return;
+  }
 
   // In draft mode, changing date/shift should only re-associate the current form data,
   // not reload another shift and wipe current inputs.
@@ -9337,6 +12071,12 @@ async function handleShiftIdentifierChange() {
     currentShiftData.date = date;
     currentShiftData.shiftNumber = shiftNumber;
     currentShiftData.hasUnsavedChanges = true;
+    const previousShiftNumber = parseInt(previousShift, 10);
+    if (previousShiftNumber === 2 && shiftNumber === 1) {
+      clearGasLastShiftCounters();
+    } else {
+      applyNightShiftGasAutoClose();
+    }
     setShiftDraftStatus('dirty');
     scheduleShiftDraftAutoSave();
     return;
@@ -9415,45 +12155,173 @@ async function loadShiftHistory(date, shiftNumber, messageEl) {
 
     if (!existingShift) {
       if (messageEl) messageEl.textContent = 'لا توجد وردية محفوظة لهذه البيانات';
-      return;
+      return false;
     }
 
     shiftViewMode = 'history';
+    currentShiftData.hasUnsavedChanges = false;
     const dateField = document.getElementById('shift-date');
-  const shiftField = document.getElementById('shift-number');
-  if (dateField) dateField.value = date;
-  if (shiftField) shiftField.value = shiftNumber.toString();
+    const shiftField = document.getElementById('shift-number');
+    if (dateField) dateField.value = date;
+    if (shiftField) shiftField.value = shiftNumber.toString();
 
+    bindShiftIdentifierListeners();
     showScreen('shift-entry', 'home');
+    const legacyData = parseShiftJsonObject(existingShift.data, {});
+    const oilData = parseShiftJsonObject(existingShift.oil_data || legacyData.oil_data, {});
+    renderSavedShiftOilRows(oilData);
     await loadShiftData(date, shiftNumber);
+    initializeShiftHorizontalScrollControls();
     enableReadOnlyMode();
+    setShiftIdentifierFieldsLocked(false);
     updateShiftTitle();
     toggleHistoryBar(true);
     updateHistoryChip(date, shiftNumber);
 
     if (messageEl) messageEl.textContent = '';
     closeShiftHistoryModal();
+    return true;
   } catch (error) {
     console.error('Error loading shift from history:', error);
     if (messageEl) messageEl.textContent = 'حدث خطأ أثناء تحميل الوردية';
+    return false;
+  }
+}
+
+function startShiftCorrection() {
+  if (shiftViewMode !== 'history' || !currentShiftData.isSaved) {
+    showMessage('افتح وردية محفوظة أولاً قبل التصحيح', 'error');
+    return;
+  }
+
+  shiftViewMode = 'correction';
+  currentShiftData.hasUnsavedChanges = false;
+  disableReadOnlyMode();
+  setShiftIdentifierFieldsLocked(true);
+  updateShiftTitle();
+  toggleHistoryBar(true);
+  setShiftDraftStatus('idle', 'وضع تصحيح الوردية');
+}
+
+async function cancelShiftCorrection() {
+  if (shiftViewMode !== 'correction') return;
+
+  if (currentShiftData.hasUnsavedChanges) {
+    const confirmed = confirm('لديك تصحيح غير محفوظ. هل تريد إلغاء التصحيح؟');
+    if (!confirmed) return;
+  }
+
+  const date = currentShiftData.date || document.getElementById('shift-date')?.value;
+  const shiftNumber = parseInt(
+    currentShiftData.shiftNumber || document.getElementById('shift-number')?.value || '0',
+    10
+  );
+
+  if (date && Number.isFinite(shiftNumber)) {
+    await loadShiftHistory(date, shiftNumber, null);
+  } else {
+    shiftViewMode = 'history';
+    enableReadOnlyMode();
+    setShiftIdentifierFieldsLocked(false);
+    updateShiftTitle();
+    toggleHistoryBar(true);
+  }
+}
+
+async function saveShiftCorrection() {
+  if (shiftViewMode !== 'correction') return;
+
+  try {
+    const errors = validateShiftData();
+    if (errors.length > 0) {
+      alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
+      return;
+    }
+
+    const date = currentShiftData.date || document.getElementById('shift-date')?.value;
+    const shiftNumber = parseInt(
+      currentShiftData.shiftNumber || document.getElementById('shift-number')?.value || '0',
+      10
+    );
+    if (!date || !Number.isFinite(shiftNumber)) {
+      showToast('لا يمكن حفظ التصحيح بدون تاريخ ورقم وردية', 'error');
+      return;
+    }
+
+    const saveButton = document.getElementById('save-shift-correction-btn');
+    if (saveButton) saveButton.disabled = true;
+
+    const result = await ipcRenderer.invoke(
+      'correct-saved-shift',
+      buildCurrentShiftPayload(date, shiftNumber, 1)
+    );
+
+    if (!result?.success) {
+      if (result?.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
+        alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
+        return;
+      }
+      showToast('خطأ في حفظ التصحيح: ' + (result?.error || 'خطأ غير معروف'), 'error');
+      return;
+    }
+
+    currentShiftData.hasUnsavedChanges = false;
+    showToast('تم حفظ التصحيح بنجاح', 'success');
+    await Promise.allSettled([
+      loadHomeChart(),
+      loadTodayStats(),
+      loadSafeBookMovements()
+    ]);
+    await loadShiftHistory(date, shiftNumber, null);
+  } catch (error) {
+    console.error('Error saving shift correction:', error);
+    showToast('خطأ في حفظ التصحيح', 'error');
+  } finally {
+    const saveButton = document.getElementById('save-shift-correction-btn');
+    if (saveButton) saveButton.disabled = false;
   }
 }
 
 function updateShiftTitle() {
   const title = document.getElementById('shift-entry-title');
   if (!title) return;
-  title.textContent = shiftViewMode === 'history' ? 'عرض الوردية' : 'إدخال وردية جديدة';
+  if (shiftViewMode === 'correction') {
+    title.textContent = 'تصحيح الوردية';
+  } else if (shiftViewMode === 'history') {
+    title.textContent = 'عرض الوردية';
+  } else {
+    title.textContent = 'إدخال وردية جديدة';
+  }
 }
 
 function toggleHistoryBar(show) {
   const bar = document.getElementById('shift-history-bar');
   if (!bar) return;
   bar.style.display = show ? 'flex' : 'none';
+  bar.classList.toggle('correction-mode', shiftViewMode === 'correction');
 
   const saveBtn = document.getElementById('save-shift-btn');
   const menuWrap = document.querySelector('.shift-menu-wrapper');
+  const navButtons = bar.querySelectorAll('.shift-history-nav-btn');
+  const startCorrectionBtn = document.getElementById('start-shift-correction-btn');
+  const saveCorrectionBtn = document.getElementById('save-shift-correction-btn');
+  const cancelCorrectionBtn = document.getElementById('cancel-shift-correction-btn');
+
   if (saveBtn) saveBtn.style.display = show ? 'none' : 'inline-flex';
   if (menuWrap) menuWrap.style.display = show ? 'none' : 'inline-block';
+
+  navButtons.forEach((button) => {
+    button.style.display = show && shiftViewMode !== 'correction' ? 'inline-flex' : 'none';
+  });
+  if (startCorrectionBtn) {
+    startCorrectionBtn.style.display = show && shiftViewMode === 'history' ? 'inline-flex' : 'none';
+  }
+  if (saveCorrectionBtn) {
+    saveCorrectionBtn.style.display = show && shiftViewMode === 'correction' ? 'inline-flex' : 'none';
+  }
+  if (cancelCorrectionBtn) {
+    cancelCorrectionBtn.style.display = show && shiftViewMode === 'correction' ? 'inline-flex' : 'none';
+  }
 }
 
 function updateHistoryChip(date, shiftNumber) {
@@ -9488,14 +12356,69 @@ function getAdjacentShift(dateStr, shiftNumber, direction) {
   }
 }
 
+function isMissingIpcHandlerError(error) {
+  return String(error?.message || error || '').includes('No handler registered');
+}
+
+async function findAdjacentSavedShiftFallback(date, shiftNumber, direction) {
+  let cursor = getAdjacentShift(date, shiftNumber, direction);
+  const maxAttempts = 1460;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const savedShift = await ipcRenderer.invoke('get-saved-shift', {
+      date: cursor.date,
+      shift_number: cursor.shiftNumber
+    });
+
+    if (savedShift) {
+      return savedShift;
+    }
+
+    cursor = getAdjacentShift(cursor.date, cursor.shiftNumber, direction);
+  }
+
+  return null;
+}
+
 async function navigateShiftHistory(direction) {
   if (shiftViewMode !== 'history') return;
-  const currentDate = currentShiftData.date;
-  const currentShiftNumber = currentShiftData.shiftNumber;
+  const currentDate = currentShiftData.date || document.getElementById('shift-date')?.value;
+  const currentShiftNumber = parseInt(
+    currentShiftData.shiftNumber || document.getElementById('shift-number')?.value || '0',
+    10
+  );
   if (!currentDate || !currentShiftNumber) return;
 
-  const { date, shiftNumber } = getAdjacentShift(currentDate, currentShiftNumber, direction);
-  await loadShiftHistory(date, shiftNumber, null);
+  try {
+    let adjacentShift = null;
+
+    try {
+      adjacentShift = await ipcRenderer.invoke('get-adjacent-saved-shift', {
+        date: currentDate,
+        shift_number: currentShiftNumber,
+        direction
+      });
+    } catch (error) {
+      if (!isMissingIpcHandlerError(error)) {
+        throw error;
+      }
+
+      adjacentShift = await findAdjacentSavedShiftFallback(currentDate, currentShiftNumber, direction);
+    }
+
+    if (!adjacentShift) {
+      showMessage(
+        direction === 'next' ? 'لا توجد وردية محفوظة تالية' : 'لا توجد وردية محفوظة سابقة',
+        'info'
+      );
+      return;
+    }
+
+    await loadShiftHistory(adjacentShift.date, parseInt(adjacentShift.shift_number, 10), null);
+  } catch (error) {
+    console.error('Error navigating shift history:', error);
+    showMessage('حدث خطأ أثناء التنقل بين الورديات', 'error');
+  }
 }
 
 // Shift quick menu and reset counters
@@ -9505,7 +12428,7 @@ function toggleShiftMenu(event) {
   if (!menu) return;
   const isShown = menu.classList.contains('show');
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
-  if (!isShown && shiftViewMode !== 'history') {
+  if (!isShown && shiftViewMode === 'edit') {
     menu.classList.add('show');
   }
 }
@@ -9578,6 +12501,17 @@ function getFuelTypeByFirstShiftInputId(inputId = '') {
   return '';
 }
 
+function getFuelCounterIndexByFirstShiftInputId(inputId = '') {
+  const match = inputId.match(/first-(\d+)$/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function getOilNameByInitialInput(input) {
+  if (!input) return '';
+  const row = input.closest('tr[data-oil-name]');
+  return row?.getAttribute('data-oil-name') || input.getAttribute('data-oil') || '';
+}
+
 function recalculateFuelAfterFirstShiftChange(inputId = '') {
   const fuelType = getFuelTypeByFirstShiftInputId(inputId);
   if (!fuelType) return;
@@ -9592,6 +12526,11 @@ function recalculateFuelAfterFirstShiftChange(inputId = '') {
 
 async function handleFuelInlineResetFieldChange(input) {
   if (!input || !fuelInlineResetMode) return;
+
+  const oldValue = input.dataset.balanceHistoryOldValue ?? '';
+  const newValue = input.value;
+  const fuelType = getFuelTypeByFirstShiftInputId(input.id);
+  const counterIndex = getFuelCounterIndexByFirstShiftInputId(input.id);
 
   recalculateFuelAfterFirstShiftChange(input.id);
   input.readOnly = true;
@@ -9608,11 +12547,22 @@ async function handleFuelInlineResetFieldChange(input) {
 
   currentShiftData.hasUnsavedChanges = false;
   setShiftDraftStatus('saved');
+  await recordShiftBalanceChanges([{
+    item_type: 'fuel',
+    item_name: counterIndex ? `${fuelType} - عداد ${convertToArabicNumerals(counterIndex)}` : fuelType,
+    field_name: 'أول الوردية',
+    old_value: oldValue,
+    new_value: newValue
+  }]);
+  input.dataset.balanceHistoryOldValue = input.value;
 }
 
 async function handleOilInlineResetFieldChange(input) {
   if (!input || !oilInlineResetMode) return;
 
+  const oldValue = input.dataset.balanceHistoryOldValue ?? '';
+  const newValue = input.value;
+  const oilName = getOilNameByInitialInput(input);
   const match = input.id.match(/^oil-(.+)-initial$/);
   const oilId = match ? match[1] : null;
   if (!oilId) return;
@@ -9632,11 +12582,19 @@ async function handleOilInlineResetFieldChange(input) {
 
   currentShiftData.hasUnsavedChanges = false;
   setShiftDraftStatus('saved');
+  await recordShiftBalanceChanges([{
+    item_type: 'oil',
+    item_name: oilName,
+    field_name: 'رصيد',
+    old_value: oldValue,
+    new_value: newValue
+  }]);
+  input.dataset.balanceHistoryOldValue = input.value;
 }
 
 function openResetCountersModal() {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
-  if (shiftViewMode === 'history') return;
+  if (shiftViewMode !== 'edit') return;
 
   lockResetInlineFields();
   switchShiftTab('fuel');
@@ -9644,6 +12602,7 @@ function openResetCountersModal() {
 
   const inputs = getFuelFirstShiftInputs();
   inputs.forEach((input) => {
+    input.dataset.balanceHistoryOldValue = input.value;
     input.readOnly = false;
     input.classList.add(INLINE_RESET_ACTIVE_CLASS);
 
@@ -9671,7 +12630,7 @@ function closeResetCountersModal() {
 
 function openResetOilBalancesModal() {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
-  if (shiftViewMode === 'history') return;
+  if (shiftViewMode !== 'edit') return;
 
   lockResetInlineFields();
   switchShiftTab('oil');
@@ -9679,6 +12638,7 @@ function openResetOilBalancesModal() {
 
   const inputs = getOilInitialInputs();
   inputs.forEach((input) => {
+    input.dataset.balanceHistoryOldValue = input.value;
     input.readOnly = false;
     input.classList.add(INLINE_RESET_ACTIVE_CLASS);
 
@@ -9737,6 +12697,7 @@ async function applyResetOilBalances() {
   const tableBody = document.getElementById('shift-oil-table-body');
   const rows = tableBody ? Array.from(tableBody.querySelectorAll('tr[data-oil-id]')) : [];
   let hasChanges = false;
+  const historyChanges = [];
 
   if (rows.length === 0) {
     if (msg) msg.textContent = 'لا توجد زيوت نشطة';
@@ -9748,6 +12709,7 @@ async function applyResetOilBalances() {
     const sourceInput = document.getElementById(`reset-oil-balance-${oilId}`);
     const targetInput = document.getElementById(`oil-${oilId}-initial`);
     const rawValue = String(sourceInput?.value ?? '').trim();
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
 
     if (!targetInput || rawValue === '') {
       continue;
@@ -9757,8 +12719,16 @@ async function applyResetOilBalances() {
 
     if (Number.isFinite(numericValue) && numericValue >= 0) {
       const nextValue = String(numericValue);
+      const oldValue = targetInput.value;
       if (targetInput.value !== nextValue) {
         hasChanges = true;
+        historyChanges.push({
+          item_type: 'oil',
+          item_name: oilName,
+          field_name: 'رصيد',
+          old_value: oldValue,
+          new_value: nextValue
+        });
       }
       targetInput.value = nextValue;
       await calculateOilRow(oilId);
@@ -9772,6 +12742,7 @@ async function applyResetOilBalances() {
       if (msg) msg.textContent = 'تعذر حفظ التغييرات في قاعدة البيانات';
       return;
     }
+    await recordShiftBalanceChanges(historyChanges);
   }
   if (msg) msg.textContent = '';
   closeResetOilBalancesModal();
@@ -9825,6 +12796,7 @@ function renderResetCounterFields(fuel) {
 async function applyResetCounters() {
   const fuel = document.getElementById('reset-fuel-type')?.value;
   const msg = document.getElementById('reset-counters-message');
+  const historyChanges = [];
   if (!fuel) {
     if (msg) msg.textContent = 'يرجى اختيار نوع الوقود';
     return;
@@ -9857,8 +12829,17 @@ async function applyResetCounters() {
 
     const targetEl = targetId ? document.getElementById(targetId) : null;
     const nextValue = String(val);
+    const oldValue = targetEl?.value ?? '';
     if (targetEl?.value !== nextValue) {
       hasChanges = true;
+      const fuelType = getFuelTypeByFirstShiftInputId(targetId);
+      historyChanges.push({
+        item_type: 'fuel',
+        item_name: `${fuelType} - عداد ${convertToArabicNumerals(i)}`,
+        field_name: 'أول الوردية',
+        old_value: oldValue,
+        new_value: nextValue
+      });
     }
     setValue(targetId, nextValue);
   }
@@ -9882,6 +12863,7 @@ async function applyResetCounters() {
       if (msg) msg.textContent = 'تعذر حفظ التغييرات في قاعدة البيانات';
       return;
     }
+    await recordShiftBalanceChanges(historyChanges);
   }
   if (msg) msg.textContent = '';
   closeResetCountersModal();
@@ -9923,6 +12905,152 @@ async function loadFuelPricesForDate(date) {
 
 // Track if shift listeners are already set up
 let shiftListenersInitialized = false;
+let shiftIdentifierListenersInitialized = false;
+let shiftScrollControlsResizeObserver = null;
+let shiftScrollControlsResizeListenerBound = false;
+
+function getShiftScrollContainers() {
+  return Array.from(document.querySelectorAll(
+    '#shift-entry-screen .fuel-tables-wrapper, #shift-entry-screen .shift-oil-table-container'
+  ));
+}
+
+function getShiftScrollState(scroller) {
+  const maxScroll = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const rawScrollLeft = scroller.scrollLeft;
+  const isRtl = getComputedStyle(scroller).direction === 'rtl';
+  const tolerance = 2;
+
+  if (maxScroll <= tolerance) {
+    return { canScrollLeft: false, canScrollRight: false };
+  }
+
+  if (isRtl) {
+    return {
+      canScrollLeft: rawScrollLeft > -maxScroll + tolerance,
+      canScrollRight: rawScrollLeft < -tolerance
+    };
+  }
+
+  return {
+    canScrollLeft: rawScrollLeft > tolerance,
+    canScrollRight: rawScrollLeft < maxScroll - tolerance
+  };
+}
+
+function updateShiftScrollButtons(scroller) {
+  const shell = scroller.closest('.shift-scroll-control-shell');
+  if (!shell) return;
+
+  const leftButton = shell.querySelector('.shift-scroll-button.scroll-left');
+  const rightButton = shell.querySelector('.shift-scroll-button.scroll-right');
+  if (!leftButton || !rightButton) return;
+
+  const isVisible = !!(scroller.offsetWidth || scroller.offsetHeight || scroller.getClientRects().length);
+  const state = isVisible
+    ? getShiftScrollState(scroller)
+    : { canScrollLeft: false, canScrollRight: false };
+
+  leftButton.classList.toggle('is-hidden', !state.canScrollLeft);
+  leftButton.disabled = !state.canScrollLeft;
+  leftButton.setAttribute('aria-hidden', state.canScrollLeft ? 'false' : 'true');
+
+  rightButton.classList.toggle('is-hidden', !state.canScrollRight);
+  rightButton.disabled = !state.canScrollRight;
+  rightButton.setAttribute('aria-hidden', state.canScrollRight ? 'false' : 'true');
+}
+
+function updateShiftHorizontalScrollControls() {
+  requestAnimationFrame(() => {
+    getShiftScrollContainers().forEach(updateShiftScrollButtons);
+  });
+}
+
+function scrollShiftContainer(scroller, direction) {
+  const distance = Math.max(180, Math.floor(scroller.clientWidth * 0.72));
+  const left = direction === 'left' ? -distance : distance;
+
+  scroller.scrollBy({ left, behavior: 'smooth' });
+  setTimeout(() => updateShiftScrollButtons(scroller), 260);
+}
+
+function createShiftScrollButton(scroller, direction) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `shift-scroll-button scroll-${direction} is-hidden`;
+  button.dir = 'ltr';
+  button.setAttribute('aria-label', direction === 'left' ? 'Scroll left' : 'Scroll right');
+  button.addEventListener('click', () => scrollShiftContainer(scroller, direction));
+  return button;
+}
+
+function setupShiftScrollContainer(scroller) {
+  if (scroller.dataset.shiftScrollControls === '1') {
+    updateShiftScrollButtons(scroller);
+    return;
+  }
+
+  const parent = scroller.parentElement;
+  if (!parent) return;
+
+  const shell = document.createElement('div');
+  shell.className = 'shift-scroll-control-shell';
+  parent.insertBefore(shell, scroller);
+  shell.appendChild(scroller);
+  shell.appendChild(createShiftScrollButton(scroller, 'left'));
+  shell.appendChild(createShiftScrollButton(scroller, 'right'));
+
+  scroller.dataset.shiftScrollControls = '1';
+  scroller.addEventListener('scroll', () => updateShiftScrollButtons(scroller), { passive: true });
+
+  if (window.ResizeObserver) {
+    if (!shiftScrollControlsResizeObserver) {
+      shiftScrollControlsResizeObserver = new ResizeObserver(updateShiftHorizontalScrollControls);
+    }
+    shiftScrollControlsResizeObserver.observe(scroller);
+  }
+
+  updateShiftScrollButtons(scroller);
+}
+
+function initializeShiftHorizontalScrollControls() {
+  getShiftScrollContainers().forEach(setupShiftScrollContainer);
+
+  if (!shiftScrollControlsResizeListenerBound) {
+    window.addEventListener('resize', updateShiftHorizontalScrollControls);
+    shiftScrollControlsResizeListenerBound = true;
+  }
+
+  updateShiftHorizontalScrollControls();
+}
+
+function bindShiftIdentifierListeners() {
+  if (shiftIdentifierListenersInitialized) return;
+
+  const dateInput = document.getElementById('shift-date');
+  const shiftNumberSelect = document.getElementById('shift-number');
+
+  if (dateInput) {
+    dateInput.addEventListener('change', async () => {
+      if (shiftViewMode === 'correction') {
+        return;
+      }
+      if (shiftViewMode === 'history') {
+        await handleShiftIdentifierChange();
+        return;
+      }
+      await loadFuelPricesForDate(dateInput.value);
+      await loadAllOilPrices();
+      await handleShiftIdentifierChange();
+    });
+  }
+
+  if (shiftNumberSelect) {
+    shiftNumberSelect.addEventListener('change', handleShiftIdentifierChange);
+  }
+
+  shiftIdentifierListenersInitialized = true;
+}
 
 // Initialize shift entry when screen is shown
 async function initializeShiftEntry() {
@@ -9933,42 +13061,64 @@ async function initializeShiftEntry() {
 
   // Set up event listeners for date and shift number
   const dateInput = document.getElementById('shift-date');
-  const shiftNumberSelect = document.getElementById('shift-number');
 
   // Only set up event listeners once
   if (!shiftListenersInitialized) {
-    if (dateInput) {
-      // Load prices when date changes
-      dateInput.addEventListener('change', async () => {
-        await loadFuelPricesForDate(dateInput.value);
-        await loadAllOilPrices();
-        await handleShiftIdentifierChange();
-      });
-    }
-
-    if (shiftNumberSelect) {
-      shiftNumberSelect.addEventListener('change', handleShiftIdentifierChange);
-    }
+    bindShiftIdentifierListeners();
+    initializeShiftHorizontalScrollControls();
 
     document.querySelectorAll('.shift-expense-desc').forEach((input) => {
       input.addEventListener('input', () => {
-        currentShiftData.hasUnsavedChanges = true;
-        scheduleShiftDraftAutoSave();
+        markShiftDraftDirty();
       });
     });
 
     document.querySelectorAll('.shift-expense-amount').forEach((input) => {
       input.addEventListener('input', () => {
-        currentShiftData.hasUnsavedChanges = true;
-        scheduleShiftDraftAutoSave();
+        markShiftDraftDirty();
       });
     });
 
     const shiftEntryScreen = document.getElementById('shift-entry-screen');
     if (shiftEntryScreen) {
+      shiftEntryScreen.addEventListener('beforeinput', (event) => {
+        const target = event.target;
+        if (!isShiftNumericInputTarget(target) || !event.data || !hasShiftArabicNumericText(event.data)) {
+          return;
+        }
+
+        event.preventDefault();
+        insertShiftNormalizedNumericText(target, event.data);
+      });
+
+      shiftEntryScreen.addEventListener('paste', (event) => {
+        const target = event.target;
+        const pastedText = event.clipboardData?.getData('text') || '';
+        if (!isShiftNumericInputTarget(target) || !hasShiftArabicNumericText(pastedText)) {
+          return;
+        }
+
+        event.preventDefault();
+        insertShiftNormalizedNumericText(target, pastedText);
+      });
+
       shiftEntryScreen.addEventListener('keydown', (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) {
+          return;
+        }
+
+        if (
+          isShiftNumericInputTarget(target) &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          event.key &&
+          event.key.length === 1 &&
+          hasShiftArabicNumericText(event.key)
+        ) {
+          event.preventDefault();
+          insertShiftNormalizedNumericText(target, event.key);
           return;
         }
 
@@ -9982,8 +13132,14 @@ async function initializeShiftEntry() {
 
         event.preventDefault();
 
-        const fields = getShiftNavigableFields(shiftEntryScreen);
-        const nextField = findAdjacentShiftField(target, fields, event.key);
+        const tableNavigation = findAdjacentShiftTableField(target, event.key);
+        const nextField = tableNavigation.handled
+          ? tableNavigation.field
+          : (() => {
+              const navigationScope = getShiftNavigationScope(target, shiftEntryScreen);
+              const fields = getShiftNavigableFields(navigationScope);
+              return findAdjacentShiftField(target, fields, event.key);
+            })();
         if (!nextField) return;
 
         nextField.focus();
@@ -9998,6 +13154,10 @@ async function initializeShiftEntry() {
           return;
         }
 
+        if (isShiftNumericInputTarget(target)) {
+          normalizeShiftNumericInputValue(target);
+        }
+
         if (target.disabled || target.readOnly) {
           return;
         }
@@ -10010,12 +13170,7 @@ async function initializeShiftEntry() {
           return;
         }
 
-        if (shiftViewMode === 'history') {
-          return;
-        }
-
-        currentShiftData.hasUnsavedChanges = true;
-        scheduleShiftDraftAutoSave();
+        markShiftDraftDirty();
       });
 
       shiftEntryScreen.addEventListener('change', (event) => {
@@ -10036,12 +13191,7 @@ async function initializeShiftEntry() {
           return;
         }
 
-        if (shiftViewMode === 'history') {
-          return;
-        }
-
-        currentShiftData.hasUnsavedChanges = true;
-        scheduleShiftDraftAutoSave();
+        markShiftDraftDirty();
       });
     }
 
@@ -10061,9 +13211,11 @@ async function initializeShiftEntry() {
     shiftListenersInitialized = true;
   }
 
+  initializeShiftHorizontalScrollControls();
+
   // Keep history view fully separated from "new shift" flow:
   // no auto-next-shift loading when opening a saved shift from history.
-  if (shiftViewMode === 'history') {
+  if (shiftViewMode !== 'edit') {
     return;
   }
 
@@ -10293,6 +13445,9 @@ ipcRenderer.on('sync-completed', (event, result) => {
       showMessage(`تمت المزامنة بنجاح: ${result.synced} عملية`, 'success');
     }
     updateConnectionStatus();
+    if (currentScreen === 'profit') {
+      loadProfitMonthlyData();
+    }
   } else {
     showMessage('فشلت المزامنة', 'error');
   }

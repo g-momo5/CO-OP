@@ -1,0 +1,357 @@
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --ink: #18202a;
+  --muted: #657281;
+  --line: #d9e0e7;
+  --brand: #25384c;
+  --brand-2: #0f766e;
+  --danger: #b42318;
+  --shadow: 0 10px 30px rgba(24, 32, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 10px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--brand-2);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.15;
+}
+
+.status-pill {
+  flex: 0 0 auto;
+  border: 1px solid #b9e2dc;
+  background: #e7f7f4;
+  color: #075e56;
+  border-radius: 999px;
+  padding: 8px 11px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sync-card,
+.card,
+.filter-bar {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.sync-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  overflow: hidden;
+  margin: 8px 0 14px;
+}
+
+.sync-card > div {
+  padding: 12px;
+  background: #fff;
+}
+
+.sync-card span,
+.metric span,
+.meta {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sync-card strong,
+.metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 15px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0 14px;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 10px 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tabs button.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.content {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 30px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+}
+
+.grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.card {
+  padding: 14px;
+}
+
+.card h2,
+.card h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.metric {
+  padding: 14px;
+}
+
+.metric strong {
+  font-size: 22px;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+th {
+  background: #eef2f6;
+  color: #2f3f50;
+  font-size: 13px;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+.row-button {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: right;
+  display: grid;
+  gap: 4px;
+}
+
+.row-button strong {
+  font-size: 16px;
+}
+
+.row-button span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  padding: 10px;
+}
+
+.filter-bar label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.filter-bar input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px;
+  background: #fff;
+}
+
+.filter-bar button,
+.primary-button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 13px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 800;
+}
+
+.empty,
+.loading,
+.error {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.error {
+  color: var(--danger);
+  border-color: #f2b8b5;
+  background: #fff5f5;
+}
+
+.shift-dialog {
+  width: min(94vw, 860px);
+  max-height: 88vh;
+  border: 0;
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
+}
+
+.shift-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.icon-button {
+  position: sticky;
+  top: 0;
+  margin-inline-start: auto;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #eef2f6;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.section-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.bar-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(92px, 130px) 1fr minmax(70px, auto);
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.bar-track {
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6ebf0;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: var(--brand-2);
+}
+
+.bar-row strong {
+  text-align: left;
+  direction: ltr;
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .grid.two,
+  .sync-card,
+  .filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-bar button {
+    width: 100%;
+  }
+
+  table {
+    min-width: 460px;
+  }
+}
