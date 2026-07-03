@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Language" content="ar">
   <meta name="format-detection" content="telephone=no">
   <title>محطة بنزين سمنود - الجمعية التعاونية للبترول</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260703-fuel-header-center">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <script src="node_modules/chart.js/dist/chart.umd.min.js"></script>
@@ -48,10 +48,10 @@
           <div class="home-chart-column">
             <div class="home-chart-container">
               <div class="home-chart-header">
-                <h2 id="home-chart-title">كميات المشتريات الشهرية حسب نوع الوقود</h2>
+                <h2 id="home-chart-title">كميات المبيعات الشهرية حسب نوع الوقود</h2>
                 <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
-                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="purchases">المشتراة</button>
-                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="sales">المباعة</button>
+                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="purchases">المشتراة</button>
+                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="sales">المباعة</button>
                 </div>
               </div>
               <div class="chart-wrapper">
@@ -519,9 +519,12 @@
             </div>
             <div class="form-group">
               <div id="shift-history-bar" class="shift-history-bar" style="display: none;">
-                <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
+                <button class="btn btn-secondary btn-compact shift-history-nav-btn" onclick="navigateShiftHistory('prev')">الوردية السابقة</button>
                 <div class="history-chip" id="history-chip">-</div>
-                <button class="btn btn-secondary btn-compact" onclick="navigateShiftHistory('next')">الوردية التالية</button>
+                <button class="btn btn-secondary btn-compact shift-history-nav-btn" onclick="navigateShiftHistory('next')">الوردية التالية</button>
+                <button class="btn btn-primary btn-compact" id="start-shift-correction-btn" onclick="startShiftCorrection()">تصحيح الوردية</button>
+                <button class="btn btn-success btn-compact" id="save-shift-correction-btn" onclick="saveShiftCorrection()" style="display: none;">حفظ التصحيح</button>
+                <button class="btn btn-secondary btn-compact" id="cancel-shift-correction-btn" onclick="cancelShiftCorrection()" style="display: none;">إلغاء التصحيح</button>
               </div>
               <button class="btn-primary" id="save-shift-btn" onclick="saveShift()">
                 حفظ الوردية
@@ -558,14 +561,18 @@
             <div class="fuel-tables-wrapper">
               <!-- Left side: Fuel tables -->
               <div class="fuel-tables-left">
-                <!-- Tabella Diesel e Gas -->
+                <!-- Tabella Diesel e Benzina 92 -->
                 <div class="shift-fuel-table-container">
               <table class="shift-fuel-table diesel-gas-table">
+                <colgroup>
+                  <col class="fuel-row-label-col">
+                  <col class="fuel-counter-col" span="6">
+                </colgroup>
                 <thead>
                   <tr>
                     <th></th>
-                    <th colspan="4">سولار</th>
-                    <th colspan="2">غاز سيارات</th>
+                    <th colspan="4" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">سولار</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٩٢</span></span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -576,8 +583,8 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-2" oninput="calculateDieselQuantity()"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-3" oninput="calculateDieselQuantity()"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-last-4" oninput="calculateDieselQuantity()"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
                   </tr>
                   <!-- أول الوردية -->
                   <tr>
@@ -586,8 +593,8 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-2" oninput="calculateDieselQuantity()" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-3" oninput="calculateDieselQuantity()" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-diesel-first-4" oninput="calculateDieselQuantity()" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
@@ -596,119 +603,123 @@
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-2" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-3" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-diesel-quantity-4" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-1" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-1" readonly></td>
                   </tr>
                   <!-- إجمالي الكمية -->
                   <tr>
                     <td class="row-label">إجمالي الكمية</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-total-qty" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-gas-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-total-qty" readonly></td>
                   </tr>
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-clients" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-clients" readonly></td>
                   </tr>
                   <!-- عيارات -->
                   <tr>
                     <td class="row-label">عيارات</td>
                     <td colspan="4"><input type="number" class="fuel-table-input fuel-table-input-diesel" id="fuel-diesel-cars" oninput="calculateCashForFuel('diesel')"></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-cars" oninput="calculateCashForFuel('92')"></td>
                   </tr>
                   <!-- السعر -->
                   <tr>
                     <td class="row-label">السعر</td>
                     <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-price" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-price" readonly></td>
                   </tr>
                   <!-- نقدى -->
                   <tr>
                     <td class="row-label">نقدى</td>
                     <td colspan="4"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-diesel auto-calculated" id="fuel-diesel-cash" readonly></td>
-                    <td colspan="2"></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-cash" readonly></td>
                   </tr>
                 </tbody>
               </table>
             </div>
             
-            <!-- Tabella Benzine -->
+            <!-- Tabella Benzina 80, Benzina 95 e Gas -->
             <div class="shift-fuel-table-container" style="margin-top: 2rem;">
               <table class="shift-fuel-table benzine-table">
+                <colgroup>
+                  <col class="fuel-row-label-col">
+                  <col class="fuel-counter-col" span="6">
+                </colgroup>
                 <thead>
                   <tr>
                     <th></th>
-                    <th colspan="2">بنزين ٩٥</th>
-                    <th colspan="2">بنزين ٩٢</th>
-                    <th colspan="2">بنزين ٨٠</th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٨٠</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">بنزين ٩٥</span></span></th>
+                    <th colspan="2" class="fuel-group-header"><span class="fuel-group-header-label"><span class="fuel-group-header-text">غاز سيارات</span></span></th>
                   </tr>
                 </thead>
                 <tbody>
                   <!-- آخر الوردية -->
                   <tr>
                     <td class="row-label">آخر الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-2" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-last-1" oninput="calculateFuelQuantity('بنزين ٩٢')"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-2" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-last-1" oninput="calculateFuelQuantity('بنزين ٨٠')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-2" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-last-1" oninput="calculateFuelQuantity('بنزين ٩٥')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-1" oninput="calculateFuelQuantity('غاز سيارات')"></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-last-2" oninput="calculateFuelQuantity('غاز سيارات')"></td>
                   </tr>
                   <!-- أول الوردية -->
                   <tr>
                     <td class="row-label">أول الوردية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-2" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-92-first-1" oninput="calculateFuelQuantity('بنزين ٩٢')" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-2" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-80-first-1" oninput="calculateFuelQuantity('بنزين ٨٠')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-2" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-95-first-1" oninput="calculateFuelQuantity('بنزين ٩٥')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-1" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single" id="fuel-gas-first-2" oninput="calculateFuelQuantity('غاز سيارات')" readonly></td>
                   </tr>
                   <!-- الكمية -->
                   <tr>
                     <td class="row-label">الكمية</td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-2" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-1" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-2" readonly></td>
-                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-92-quantity-1" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-2" readonly></td>
                     <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-80-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-2" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-95-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-1" readonly></td>
+                    <td><input type="number" class="fuel-table-input fuel-table-input-single auto-calculated" id="fuel-gas-quantity-2" readonly></td>
                   </tr>
                   <!-- إجمالي الكمية -->
                   <tr>
                     <td class="row-label">إجمالي الكمية</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-total-qty" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-total-qty" readonly></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-total-qty" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-gas-total-qty" readonly></td>
                   </tr>
                   <!-- عملاء -->
                   <tr>
                     <td class="row-label">عملاء</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-clients" readonly></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-clients" readonly></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-clients" readonly></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-clients" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- عيارات -->
                   <tr>
                     <td class="row-label">عيارات</td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-cars" oninput="calculateCashForFuel('95')"></td>
-                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-92-cars" oninput="calculateCashForFuel('92')"></td>
                     <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-80-cars" oninput="calculateCashForFuel('80')"></td>
+                    <td colspan="2"><input type="number" class="fuel-table-input fuel-table-input-gas-benzine" id="fuel-95-cars" oninput="calculateCashForFuel('95')"></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- السعر -->
                   <tr>
                     <td class="row-label">السعر</td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-price" readonly></td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-price" readonly></td>
                     <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-price" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-price" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                   <!-- نقدى -->
                   <tr>
                     <td class="row-label">نقدى</td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-cash" readonly></td>
-                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-92-cash" readonly></td>
                     <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-80-cash" readonly></td>
+                    <td colspan="2"><input type="number" step="0.01" class="fuel-table-input fuel-table-input-gas-benzine auto-calculated" id="fuel-95-cash" readonly></td>
+                    <td colspan="2"></td>
                   </tr>
                 </tbody>
               </table>
@@ -1983,7 +1994,7 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="movement-quantity">الكمية:</label>
-                <input type="number" id="movement-quantity" min="1" required>
+                <input type="number" id="movement-quantity" min="0.01" step="0.01" required>
               </div>
               <div class="form-group" id="invoice-field" style="display: none;">
                 <label for="movement-invoice">رقم الفاتورة:</label>
@@ -2107,7 +2118,7 @@
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
 
-  <script src="renderer.js"></script>
+  <script src="renderer.js?v=20260703-night-gas-auto-close"></script>
 </body>
 
 </html>

@@ -28,6 +28,7 @@ class DatabaseSchema {
     this.createAnnualInventoriesTable(db);
     this.createSafeBookMovementsTable(db);
     this.createShiftBalanceChangeHistoryTable(db);
+    this.createShiftCorrectionsTable(db);
     this.createMonthlyProfitInputsTable(db);
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
@@ -113,7 +114,7 @@ class DatabaseSchema {
         oil_type TEXT NOT NULL,
         date TEXT NOT NULL,
         type TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
+        quantity REAL NOT NULL,
         invoice_number TEXT,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
@@ -258,6 +259,20 @@ class DatabaseSchema {
     `);
   }
 
+  static createShiftCorrectionsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS shift_corrections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        shift_number INTEGER NOT NULL,
+        corrected_at INTEGER DEFAULT (strftime('%s', 'now')),
+        before_data TEXT NOT NULL,
+        after_data TEXT NOT NULL,
+        diff_summary TEXT DEFAULT '{}'
+      )
+    `);
+  }
+
   static createMonthlyProfitInputsTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS monthly_profit_inputs (
@@ -352,6 +367,8 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_changed_at ON shift_balance_change_history(changed_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_shift ON shift_balance_change_history(shift_date, shift_number)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_shift_balance_history_item ON shift_balance_change_history(item_type, item_name)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_shift_corrections_shift ON shift_corrections(date, shift_number)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_shift_corrections_corrected_at ON shift_corrections(corrected_at)');
 
     // Sync queue indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced)');
@@ -465,6 +482,12 @@ class DatabaseSchema {
       if (balanceHistoryInfo.length === 0) {
         console.log('Creating shift_balance_change_history table...');
         this.createShiftBalanceChangeHistoryTable(db);
+      }
+
+      const shiftCorrectionsInfo = db.prepare("PRAGMA table_info(shift_corrections)").all();
+      if (shiftCorrectionsInfo.length === 0) {
+        console.log('Creating shift_corrections table...');
+        this.createShiftCorrectionsTable(db);
       }
 
       if (monthlyProfitInputsInfo.length === 0) {

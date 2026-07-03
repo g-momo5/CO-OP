@@ -35,6 +35,8 @@ const OFFLINE_RESTRICTED = {
   ]
 };
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
+const SHIFT_OIL_STOCK_MOVEMENT_PREFIX = 'وارد وردية زيت';
+const SHIFT_OIL_STOCK_EXCLUDED_OIL = 'سايب ١ ك';
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE/.test(String(error.message || '')));
@@ -104,6 +106,41 @@ function parseStoredObject(value, fallback = {}) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
   } catch (_error) {
     return fallback;
+  }
+}
+
+function normalizeShiftOilStockName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function getShiftOilStockMovementInvoice(date, shiftNumber) {
+  return `${SHIFT_OIL_STOCK_MOVEMENT_PREFIX} ${date} #${shiftNumber}`;
+}
+
+async function syncShiftOilStockMovements(shiftData = {}) {
+  const date = normalizeIsoDate(shiftData.date);
+  const shiftNumber = parseInt(shiftData.shift_number, 10);
+  if (!date || !Number.isFinite(shiftNumber)) return;
+
+  const invoiceNumber = getShiftOilStockMovementInvoice(date, shiftNumber);
+  await executeUpdate(
+    'DELETE FROM oil_movements WHERE type = $1 AND invoice_number = $2',
+    ['out', invoiceNumber]
+  );
+
+  const oilData = parseStoredObject(shiftData.oil_data, {});
+  for (const [rawOilName, data] of Object.entries(oilData)) {
+    const oilName = normalizeShiftOilStockName(rawOilName);
+    if (!oilName || oilName === SHIFT_OIL_STOCK_EXCLUDED_OIL) continue;
+
+    const quantity = parseFloat(data?.added);
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+    await executeInsert(
+      'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)',
+      [oilName, date, 'out', quantity, invoiceNumber],
+      'oil_movements'
+    );
   }
 }
 
@@ -3261,7 +3298,8 @@ ipcMain.handle('get-sales-summary', async () => {
   // Oil movement handlers
   ipcMain.handle('add-oil-movement', async (event, movementData) => {
     try {
-      const { oil_type, date, type, quantity, invoice_number } = movementData;
+      const { oil_type, date, type, invoice_number } = movementData;
+      const quantity = parseFloat(movementData.quantity);
       const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
       return await executeInsert(insertQuery, [oil_type, date, type, quantity, invoice_number], 'oil_movements');
     } catch (error) {
@@ -3287,9 +3325,9 @@ ipcMain.handle('get-sales-summary', async () => {
       let stock = 0;
       result.forEach(row => {
         if (row.type === 'in') {
-          stock += parseInt(row.total);
+          stock += parseFloat(row.total) || 0;
         } else if (row.type === 'out') {
-          stock -= parseInt(row.total);
+          stock -= parseFloat(row.total) || 0;
         }
       });
       return stock;
@@ -4602,7 +4640,73 @@ ipcMain.handle('update-customer', async (event, { id, name }) => {
 });
 
 // Shift management handlers
-ipcMain.handle('save-shift', async (event, shiftData) => {
+function buildShiftSnapshotFromPayload(payload = {}) {
+  const legacyData = parseStoredObject(payload.data, {});
+  return {
+    date: normalizeIsoDate(payload.date),
+    shift_number: parseInt(payload.shift_number, 10) || 1,
+    fuel_data: parseStoredObject(payload.fuel_data || legacyData.fuel_data, {}),
+    fuel_total: toFiniteNumber(payload.fuel_total ?? legacyData.fuel_total),
+    oil_data: parseStoredObject(payload.oil_data || legacyData.oil_data, {}),
+    oil_total: toFiniteNumber(payload.oil_total ?? legacyData.oil_total),
+    customer_rows: Array.isArray(payload.customer_rows)
+      ? payload.customer_rows
+      : Array.isArray(legacyData.customer_rows)
+        ? legacyData.customer_rows
+        : [],
+    revenue_items: Array.isArray(payload.revenue_items)
+      ? payload.revenue_items
+      : Array.isArray(legacyData.revenue_items)
+        ? legacyData.revenue_items
+        : [],
+    expense_items: Array.isArray(payload.expense_items)
+      ? payload.expense_items
+      : Array.isArray(legacyData.expense_items)
+        ? legacyData.expense_items
+        : [],
+    wash_lube_revenue: toFiniteNumber(payload.wash_lube_revenue ?? legacyData.wash_lube_revenue),
+    total_expenses: toFiniteNumber(payload.total_expenses ?? legacyData.total_expenses),
+    grand_total: toFiniteNumber(payload.grand_total ?? legacyData.grand_total),
+    is_saved: payload.is_saved ? 1 : 0
+  };
+}
+
+function buildShiftSnapshotFromRow(row = {}) {
+  return buildShiftSnapshotFromPayload({
+    ...row,
+    customer_rows: undefined,
+    revenue_items: undefined,
+    expense_items: undefined
+  });
+}
+
+function buildShiftCorrectionDiff(beforeSnapshot, afterSnapshot) {
+  const keys = [
+    'fuel_data',
+    'fuel_total',
+    'oil_data',
+    'oil_total',
+    'customer_rows',
+    'revenue_items',
+    'expense_items',
+    'wash_lube_revenue',
+    'total_expenses',
+    'grand_total'
+  ];
+  const changedFields = keys.filter((key) => (
+    JSON.stringify(beforeSnapshot?.[key] ?? null) !== JSON.stringify(afterSnapshot?.[key] ?? null)
+  ));
+
+  return {
+    changed_fields: changedFields,
+    changed_count: changedFields.length,
+    before_grand_total: toFiniteNumber(beforeSnapshot?.grand_total),
+    after_grand_total: toFiniteNumber(afterSnapshot?.grand_total),
+    grand_total_difference: toFiniteNumber(afterSnapshot?.grand_total) - toFiniteNumber(beforeSnapshot?.grand_total)
+  };
+}
+
+async function persistShiftRecord(shiftData) {
   try {
     const {
       date,
@@ -4699,6 +4803,14 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
       isSavedShift
     ]);
 
+    if (isSavedShift) {
+      await syncShiftOilStockMovements({
+        date,
+        shift_number,
+        oil_data
+      });
+    }
+
     const idRows = await executeQuery(
       'SELECT id FROM shifts WHERE date = $1 AND shift_number = $2 ORDER BY id DESC LIMIT 1',
       [date, shift_number]
@@ -4708,6 +4820,64 @@ ipcMain.handle('save-shift', async (event, shiftData) => {
     return { success: true, id: id };
   } catch (error) {
     console.error('Error saving shift:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+ipcMain.handle('save-shift', async (event, shiftData) => {
+  return persistShiftRecord(shiftData);
+});
+
+ipcMain.handle('correct-saved-shift', async (_event, shiftData) => {
+  try {
+    const date = normalizeIsoDate(shiftData?.date);
+    const shiftNumber = parseInt(shiftData?.shift_number, 10);
+    if (!date || !Number.isFinite(shiftNumber)) {
+      return { success: false, error: 'invalid_shift_identifier' };
+    }
+
+    const existingRows = await executeQuery(
+      'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2 AND is_saved = 1',
+      [date, shiftNumber]
+    );
+    if (existingRows.length === 0) {
+      return { success: false, error: 'saved_shift_not_found' };
+    }
+
+    const beforeSnapshot = buildShiftSnapshotFromRow(existingRows[0]);
+    const saveResult = await persistShiftRecord({
+      ...shiftData,
+      date,
+      shift_number: shiftNumber,
+      is_saved: 1
+    });
+    if (!saveResult?.success) {
+      return saveResult;
+    }
+
+    const updatedRows = await executeQuery(
+      'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2 AND is_saved = 1',
+      [date, shiftNumber]
+    );
+    const afterSnapshot = buildShiftSnapshotFromRow(updatedRows[0] || shiftData);
+    const diffSummary = buildShiftCorrectionDiff(beforeSnapshot, afterSnapshot);
+
+    const correctionId = await executeInsert(
+      `INSERT INTO shift_corrections (date, shift_number, before_data, after_data, diff_summary)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        date,
+        shiftNumber,
+        JSON.stringify(beforeSnapshot),
+        JSON.stringify(afterSnapshot),
+        JSON.stringify(diffSummary)
+      ],
+      'shift_corrections'
+    );
+
+    return { success: true, id: saveResult.id, correction_id: correctionId, diff_summary: diffSummary };
+  } catch (error) {
+    console.error('Error correcting saved shift:', error);
     return { success: false, error: error.message };
   }
 });

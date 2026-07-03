@@ -2264,6 +2264,20 @@ body.modal-scroll-lock {
   min-width: 0;
 }
 
+.shift-history-bar.correction-mode {
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(159, 95, 0, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 237, 196, 0.45);
+}
+
+.shift-history-bar.correction-mode .history-chip {
+  border-color: rgba(159, 95, 0, 0.28);
+  color: #9f5f00;
+  background: rgba(255, 255, 255, 0.75);
+}
+
 .history-chip {
   background: #f8f9fa;
   border: 1px solid #e9ecef;
@@ -7765,13 +7779,26 @@ select option {
 }
 
 .shift-fuel-table {
-  width: auto;
+  --fuel-label-column-width: 100px;
+  --fuel-counter-column-width: 6rem;
+  --fuel-table-fixed-width: calc(var(--fuel-label-column-width) + 36rem);
+  width: var(--fuel-table-fixed-width);
+  min-width: var(--fuel-table-fixed-width);
   border-collapse: collapse;
+  table-layout: fixed;
   direction: rtl;
   background: white;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.shift-fuel-table .fuel-row-label-col {
+  width: var(--fuel-label-column-width);
+}
+
+.shift-fuel-table .fuel-counter-col {
+  width: var(--fuel-counter-column-width);
 }
 
 .shift-fuel-table th {
@@ -7784,14 +7811,42 @@ select option {
   font-size: 16px;
 }
 
+.shift-fuel-table th[colspan] {
+  text-align: center;
+  padding-inline: 0;
+}
+
+.shift-fuel-table th.fuel-group-header {
+  padding: 0;
+  vertical-align: middle;
+}
+
+.fuel-group-header-label {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 2.55rem;
+  text-align: center;
+  direction: rtl;
+}
+
+.fuel-group-header-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  text-align: center;
+}
+
 .shift-fuel-table td {
   padding: 2px 2px;
   border: none;
   text-align: center;
 }
 
-/* Separatore verticale tra Diesel e Gas - Prima tabella */
-/* Separatore a sinistra del primo contatore gas (dopo l'ultimo diesel) */
+/* Separatore verticale tra Diesel e secondo gruppo carburante - Prima tabella */
+/* Separatore a sinistra del primo contatore del secondo gruppo (dopo l'ultimo diesel) */
 /* Per le righe con celle singole */
 .diesel-gas-table tbody tr td:nth-child(6) {
   border-right: 1px solid #34495e;
@@ -7819,7 +7874,8 @@ select option {
   font-weight: 600;
   text-align: right;
   padding-right: 10px;
-  min-width: 100px;
+  width: var(--fuel-label-column-width);
+  min-width: var(--fuel-label-column-width);
 }
 
 .fuel-table-input {
@@ -7849,19 +7905,15 @@ select option {
 
 /* Larghezza specifica per campi singoli contatori */
 .fuel-table-input-single {
-  width: 6rem;
+  width: 100%;
 }
 
-/* Larghezza per campi diesel con colspan="4" */
-/* 6rem × 4 campi + 12px (3 spazi da 4px tra i campi) */
 .fuel-table-input-diesel {
-  width: calc(24rem + 12px);
+  width: 100%;
 }
 
-/* Larghezza per campi gas/benzine con colspan="2" */
-/* 6rem × 2 campi + 4px (1 spazio da 4px tra i campi) */
 .fuel-table-input-gas-benzine {
-  width: calc(12rem + 4px);
+  width: 100%;
 }
 
 .fuel-table-input:focus {

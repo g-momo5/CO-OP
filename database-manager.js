@@ -19,7 +19,9 @@ class DatabaseManager {
     this.closePromise = null;
     this.sqlitePath = null;
     this.lastSyncTime = null;
-    this.connectionString = 'postgresql://postgres.ihajlcodsypvjwfnkcjc:Ghaly1997.@aws-1-eu-west-2.pooler.supabase.com:6543/postgres';
+    this.connectionString = process.env.DATABASE_URL
+      || process.env.SUPABASE_DATABASE_URL
+      || 'postgresql://postgres.ihajlcodsypvjwfnkcjc:Ghaly1997.@aws-1-eu-west-2.pooler.supabase.com:6543/postgres';
   }
 
   /**
@@ -209,10 +211,11 @@ class DatabaseManager {
       oil_type TEXT NOT NULL,
       date TEXT NOT NULL,
       type TEXT NOT NULL,
-      quantity INTEGER NOT NULL,
+      quantity REAL NOT NULL,
       invoice_number TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE oil_movements ALTER COLUMN quantity TYPE REAL USING quantity::real`);
 
     // Fuel movements table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
@@ -361,6 +364,24 @@ class DatabaseManager {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_balance_history_item ON shift_balance_change_history(item_type, item_name)`);
     } catch (err) {
       console.log('Shift balance history indexes creation:', err.message);
+    }
+
+    // Shift corrections audit table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS shift_corrections (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      shift_number INTEGER NOT NULL,
+      corrected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      before_data TEXT NOT NULL,
+      after_data TEXT NOT NULL,
+      diff_summary TEXT DEFAULT '{}'
+    )`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_corrections_shift ON shift_corrections(date, shift_number)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_shift_corrections_corrected_at ON shift_corrections(corrected_at)`);
+    } catch (err) {
+      console.log('Shift corrections indexes creation:', err.message);
     }
 
     // Monthly profit manual inputs table
@@ -661,7 +682,7 @@ class DatabaseManager {
       'sales', 'purchase_prices', 'products', 'price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
       'customers', 'shifts', 'annual_inventories', 'safe_book_movements',
-      'shift_balance_change_history',
+      'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values'
     ];
 
