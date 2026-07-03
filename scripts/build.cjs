@@ -1,7 +1,17 @@
 const { spawnSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 if (process.env.VERCEL) {
-  console.log('Skipping Electron build on Vercel; mobile read-only app uses static files and serverless API.');
+  const root = path.resolve(__dirname, '..');
+  const publicDir = path.join(root, 'public');
+
+  fs.rmSync(publicDir, { recursive: true, force: true });
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.cpSync(path.join(root, 'mobile'), path.join(publicDir, 'mobile'), { recursive: true });
+  fs.cpSync(path.join(root, 'mobile-assets'), path.join(publicDir, 'mobile-assets'), { recursive: true });
+
+  console.log('Prepared Vercel public output for the mobile read-only app.');
   process.exit(0);
 }
 
