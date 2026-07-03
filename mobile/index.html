@@ -4,43 +4,47 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CO-OP Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/mobile-assets/mobile.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">CO-OP</p>
-        <h1>متابعة المحطة</h1>
+      <div class="header-top">
+        <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
+        <div class="status-pill">مشاهدة فقط / Solo lettura</div>
       </div>
-      <div class="status-pill">Solo lettura</div>
     </header>
 
-    <section class="sync-card">
-      <div>
-        <span>آخر تحديث</span>
-        <strong id="lastSync">-</strong>
-      </div>
-      <div>
-        <span>الوضع</span>
-        <strong>مشاهدة فقط</strong>
-      </div>
-    </section>
+    <main class="main-content">
+      <section class="sync-card">
+        <div>
+          <span>آخر تحديث</span>
+          <strong id="lastSync">-</strong>
+        </div>
+        <div>
+          <span>الوضع</span>
+          <strong>مشاهدة فقط</strong>
+        </div>
+      </section>
 
-    <nav class="tabs" aria-label="Mobile sections">
-      <button class="active" data-view="overview">الرئيسية</button>
-      <button data-view="shifts">الورديات</button>
-      <button data-view="report">التقرير</button>
-      <button data-view="charts">الرسوم</button>
-      <button data-view="stock">المخزن</button>
-      <button data-view="safe-book">الخزنة</button>
-      <button data-view="profit">الأرباح</button>
-      <button data-view="prices">الأسعار</button>
-    </nav>
-
-    <main id="content" class="content">
-      <div class="loading">جار التحميل...</div>
+      <div id="content" class="content">
+        <div class="loading">جار التحميل...</div>
+      </div>
     </main>
+
+    <nav class="tabs bottom-navigation" aria-label="Mobile sections">
+      <button class="active" data-view="overview"><span>🏠</span>الرئيسية</button>
+      <button data-view="shifts"><span>📋</span>الورديات</button>
+      <button data-view="report"><span>📊</span>التقرير</button>
+      <button data-view="charts"><span>📈</span>الرسوم</button>
+      <button data-view="stock"><span>📦</span>المخزن</button>
+      <button data-view="safe-book"><span>💰</span>الخزنة</button>
+      <button data-view="profit"><span>📈</span>الأرباح</button>
+      <button data-view="prices"><span>💵</span>الأسعار</button>
+    </nav>
   </div>
 
   <dialog id="shiftDialog" class="shift-dialog">

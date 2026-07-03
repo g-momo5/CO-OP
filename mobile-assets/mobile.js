@@ -129,7 +129,7 @@
     }
     return `
       <div class="table-wrap">
-        <table>
+        <table class="base-table">
           <thead>
             <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
           </thead>
@@ -139,9 +139,21 @@
     `;
   }
 
-  function metric(label, value) {
+  function sectionCard(icon, title, body) {
     return `
-      <div class="card metric">
+      <section class="card">
+        <div class="card-title-row">
+          <h2 class="title-main"><span class="title-icon">${escapeHtml(icon)}</span>${escapeHtml(title)}</h2>
+        </div>
+        ${body}
+      </section>
+    `;
+  }
+
+  function metric(label, value, icon = '📊') {
+    return `
+      <div class="metric">
+        <div class="metric-icon">${escapeHtml(icon)}</div>
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value)}</strong>
       </div>
@@ -184,14 +196,8 @@
       </tr>
     `);
     return `
-      <section class="card">
-        <h2>رصيد الوقود</h2>
-        ${table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], fuelRows)}
-      </section>
-      <section class="card">
-        <h2>رصيد الزيوت</h2>
-        ${table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], oilRows)}
-      </section>
+      ${sectionCard('⛽', 'رصيد الوقود', table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], fuelRows))}
+      ${sectionCard('🛢️', 'رصيد الزيوت', table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], oilRows))}
     `;
   }
 
@@ -220,21 +226,20 @@
     lastSync.textContent = formatDate(data.lastSync);
     const report = data.monthReport || { totals: {}, shift_count: 0 };
     content.innerHTML = `
-      <section class="grid two">
-        ${metric('صافي الشهر', formatMoney(report.totals?.net))}
-        ${metric('رصيد الخزنة', formatMoney(data.safeBalance))}
-        ${metric('عدد الورديات هذا الشهر', formatNumber(report.shift_count))}
-        ${metric('آخر تحديث', formatDate(data.lastSync))}
+      <section class="home-card-groups">
+        <div class="home-card-group">
+          <h2 class="home-card-group-title">إدارة المكتب</h2>
+          <div class="action-cards-grid">
+            ${metric('صافي الشهر', formatMoney(report.totals?.net), '📈')}
+            ${metric('رصيد الخزنة', formatMoney(data.safeBalance), '💰')}
+            ${metric('عدد الورديات هذا الشهر', formatNumber(report.shift_count), '📋')}
+            ${metric('آخر تحديث', formatDate(data.lastSync), '🔄')}
+          </div>
+        </div>
       </section>
-      <section class="card">
-        <h2>آخر الورديات</h2>
-        ${renderShiftRows(data.latestShifts || [])}
-      </section>
+      ${sectionCard('📋', 'آخر الورديات', renderShiftRows(data.latestShifts || []))}
       ${renderStockTables({ fuelStock: data.fuelStock || [], oilStock: data.oilStock || [] })}
-      <section class="card">
-        <h2>آخر حركات الخزنة</h2>
-        ${renderSafeMovements(data.recentSafeMovements || [])}
-      </section>
+      ${sectionCard('💰', 'آخر حركات الخزنة', renderSafeMovements(data.recentSafeMovements || []))}
     `;
     wireShiftButtons();
   }
@@ -261,10 +266,7 @@
     setLoading();
     const data = await api('shifts', { limit: 80 });
     content.innerHTML = `
-      <section class="card">
-        <h2>سجل الورديات</h2>
-        ${renderShiftRows(data.shifts || [])}
-      </section>
+      ${sectionCard('📋', 'سجل الورديات', renderShiftRows(data.shifts || []))}
     `;
     wireShiftButtons();
   }
@@ -333,22 +335,10 @@
           <h2>${formatDay(shift.date)} - ${shiftLabel(shift.shift_number)}</h2>
           <p class="meta">الإجمالي: ${formatMoney(shift.grand_total)} | الوقود: ${formatMoney(shift.fuel_total)} | الزيوت: ${formatMoney(shift.oil_total)} | غسيل وتشحيم: ${formatMoney(shift.wash_lube_revenue)} | مصروفات: ${formatMoney(shift.total_expenses)}</p>
         </section>
-        <section>
-          <h3>الوقود</h3>
-          ${table(['الصنف', 'الكمية', 'عملاء', 'الإجمالي'], fuelRows)}
-        </section>
-        <section>
-          <h3>الزيوت</h3>
-          ${table(['الصنف', 'وارد', 'مباع', 'الإجمالي'], oilRows)}
-        </section>
-        <section>
-          <h3>إيرادات أخرى</h3>
-          ${table(['البيان', 'المبلغ'], revenueRows)}
-        </section>
-        <section>
-          <h3>مصروفات</h3>
-          ${table(['البيان', 'المبلغ'], expenseRows)}
-        </section>
+        ${sectionCard('⛽', 'الوقود', table(['الصنف', 'الكمية', 'عملاء', 'الإجمالي'], fuelRows))}
+        ${sectionCard('🛢️', 'الزيوت', table(['الصنف', 'وارد', 'مباع', 'الإجمالي'], oilRows))}
+        ${sectionCard('💵', 'إيرادات أخرى', table(['البيان', 'المبلغ'], revenueRows))}
+        ${sectionCard('📉', 'مصروفات', table(['البيان', 'المبلغ'], expenseRows))}
       </div>
     `;
   }
@@ -390,22 +380,16 @@
     `);
     target.className = 'section-stack';
     target.innerHTML = `
-      <section class="grid two">
-        ${metric('عدد الورديات', formatNumber(report.shift_count))}
-        ${metric('إجمالي الوقود', formatMoney(totals.fuelRevenue))}
-        ${metric('إجمالي الزيوت', formatMoney(totals.oilRevenue))}
-        ${metric('غسيل وتشحيم', formatMoney(totals.washRevenue))}
-        ${metric('المصروفات', formatMoney(totals.expenses))}
-        ${metric('الصافي', formatMoney(totals.net))}
+      <section class="grid four">
+        ${metric('عدد الورديات', formatNumber(report.shift_count), '📋')}
+        ${metric('إجمالي الوقود', formatMoney(totals.fuelRevenue), '⛽')}
+        ${metric('إجمالي الزيوت', formatMoney(totals.oilRevenue), '🛢️')}
+        ${metric('غسيل وتشحيم', formatMoney(totals.washRevenue), '🧽')}
+        ${metric('المصروفات', formatMoney(totals.expenses), '📉')}
+        ${metric('الصافي', formatMoney(totals.net), '📈')}
       </section>
-      <section class="card">
-        <h2>كميات الوقود</h2>
-        ${table(['الصنف', 'الكمية'], fuelRows)}
-      </section>
-      <section class="card">
-        <h2>كميات الزيوت</h2>
-        ${table(['الصنف', 'الكمية'], oilRows)}
-      </section>
+      ${sectionCard('⛽', 'كميات الوقود', table(['الصنف', 'الكمية'], fuelRows))}
+      ${sectionCard('🛢️', 'كميات الزيوت', table(['الصنف', 'الكمية'], oilRows))}
     `;
   }
 
@@ -429,18 +413,9 @@
       { name: 'الصافي', value: totals.net }
     ];
     content.innerHTML = `
-      <section class="card">
-        <h2>ملخص الشهر الحالي</h2>
-        ${renderBarChart(revenueRows)}
-      </section>
-      <section class="card">
-        <h2>كميات الوقود</h2>
-        ${renderBarChart(report.fuelTotals || [], 'quantity')}
-      </section>
-      <section class="card">
-        <h2>كميات الزيوت</h2>
-        ${renderBarChart(report.oilTotals || [], 'quantity')}
-      </section>
+      ${sectionCard('📊', 'ملخص الشهر الحالي', renderBarChart(revenueRows))}
+      ${sectionCard('⛽', 'كميات الوقود', renderBarChart(report.fuelTotals || [], 'quantity'))}
+      ${sectionCard('🛢️', 'كميات الزيوت', renderBarChart(report.oilTotals || [], 'quantity'))}
     `;
   }
 
@@ -449,13 +424,10 @@
     const data = await api('safe-book', { limit: 160 });
     content.innerHTML = `
       <section class="grid two">
-        ${metric('رصيد الخزنة', formatMoney(data.balance))}
-        ${metric('عدد الحركات المعروضة', formatNumber((data.movements || []).length))}
+        ${metric('رصيد الخزنة', formatMoney(data.balance), '💰')}
+        ${metric('عدد الحركات المعروضة', formatNumber((data.movements || []).length), '📒')}
       </section>
-      <section class="card">
-        <h2>حركات الخزنة</h2>
-        ${renderSafeMovements(data.movements || [])}
-      </section>
+      ${sectionCard('💰', 'حركات الخزنة', renderSafeMovements(data.movements || []))}
     `;
   }
 
@@ -498,7 +470,9 @@
     `);
     target.className = 'card';
     target.innerHTML = `
-      <h2>ملخص الأرباح</h2>
+      <div class="card-title-row">
+        <h2 class="title-main"><span class="title-icon">📈</span>ملخص الأرباح</h2>
+      </div>
       ${table(['الشهر', 'وقود', 'زيوت', 'غسيل', 'خصومات', 'الصافي'], rows)}
     `;
   }
@@ -522,14 +496,8 @@
       </tr>
     `);
     content.innerHTML = `
-      <section class="card">
-        <h2>أسعار الوقود</h2>
-        ${table(['الصنف', 'السعر', 'نشط'], fuelRows)}
-      </section>
-      <section class="card">
-        <h2>أسعار الزيوت</h2>
-        ${table(['الصنف', 'السعر', 'ضريبة', 'نشط'], oilRows)}
-      </section>
+      ${sectionCard('⛽', 'أسعار الوقود', table(['الصنف', 'السعر', 'نشط'], fuelRows))}
+      ${sectionCard('🛢️', 'أسعار الزيوت', table(['الصنف', 'السعر', 'ضريبة', 'نشط'], oilRows))}
     `;
   }
 
