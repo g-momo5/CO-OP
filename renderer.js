@@ -379,6 +379,11 @@ function setupEventListeners() {
       closeStockAuditModal();
     }
 
+    const addDepotOilModal = document.getElementById('add-depot-oil-modal');
+    if (e.target === addDepotOilModal) {
+      closeAddDepotOilModal();
+    }
+
     const priceEditModal = document.getElementById('price-edit-modal');
     if (e.target === priceEditModal) {
       closePriceEditModal();
@@ -810,6 +815,8 @@ function resetDepotView() {
   if (movementsTable) {
     movementsTable.innerHTML = '<div class="empty-movements">اختر نوع الزيت لعرض الحركات</div>';
   }
+
+  loadDepotOils();
 }
 
 function setTodayStatsUnavailable() {
@@ -3356,8 +3363,170 @@ function showMessage(message, type) {
 }
 
 // Depot Management Functions
+const DEPOT_VISIBLE_OILS_FILTER_KEY = 'depot-visible-oils-filter';
+let depotAllOilTypes = [];
+let depotVisibleOilTypes = [];
+
 function showDepotScreen() {
   showScreen('depot', 'home');
+}
+
+function getStoredDepotVisibleOilFilter() {
+  try {
+    const rawValue = localStorage.getItem(DEPOT_VISIBLE_OILS_FILTER_KEY);
+    if (!rawValue) return null;
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map(oilType => String(oilType || '').trim()).filter(Boolean);
+  } catch (error) {
+    console.error('Error reading depot oil filter:', error);
+    return null;
+  }
+}
+
+function getFilteredDepotOilTypes(allOilTypes) {
+  const storedFilter = getStoredDepotVisibleOilFilter();
+  if (!storedFilter) return allOilTypes;
+  const visibleSet = new Set(storedFilter);
+  return allOilTypes.filter(oilType => visibleSet.has(oilType));
+}
+
+async function loadDepotOils(preferredOilType = '') {
+  const list = document.getElementById('depot-oil-list');
+  const mobileList = document.getElementById('depot-oil-list-modal');
+
+  if (!list || !mobileList) return;
+
+  list.innerHTML = '<div class="empty-movements">جاري تحميل المنتجات...</div>';
+  mobileList.innerHTML = '<div class="empty-movements">جاري تحميل المنتجات...</div>';
+
+  try {
+    const oils = await ipcRenderer.invoke('get-oil-prices');
+    const sortedOils = sortOilsByOrder(Array.isArray(oils) ? oils : [], []);
+    depotAllOilTypes = sortedOils.map(row => String(row.oil_type || '').trim()).filter(Boolean);
+    depotVisibleOilTypes = getFilteredDepotOilTypes(depotAllOilTypes);
+
+    renderDepotOilLists(depotVisibleOilTypes);
+
+    if (depotVisibleOilTypes.length === 0) {
+      selectOilType('');
+      return;
+    }
+
+    const currentSelected = preferredOilType
+      || document.querySelector('.oil-item.selected')?.dataset?.oil
+      || '';
+    const nextSelection = depotVisibleOilTypes.includes(currentSelected)
+      ? currentSelected
+      : depotVisibleOilTypes[0];
+    selectOilType(nextSelection);
+  } catch (error) {
+    console.error('Error loading depot oils:', error);
+    list.innerHTML = '<div class="empty-movements error">حدث خطأ أثناء تحميل منتجات المخزن</div>';
+    mobileList.innerHTML = '<div class="empty-movements error">حدث خطأ أثناء تحميل منتجات المخزن</div>';
+    showMessage('حدث خطأ أثناء تحميل منتجات المخزن', 'error');
+  }
+}
+
+function renderDepotOilLists(oilTypes) {
+  const list = document.getElementById('depot-oil-list');
+  const mobileList = document.getElementById('depot-oil-list-modal');
+  if (!list || !mobileList) return;
+
+  if (!oilTypes.length) {
+    const emptyHtml = '<div class="empty-movements">لا توجد زيوت ظاهرة. افتح التصفية لاختيار الزيوت.</div>';
+    list.innerHTML = emptyHtml;
+    mobileList.innerHTML = emptyHtml;
+    return;
+  }
+
+  list.innerHTML = oilTypes.map(oilType => `
+    <div class="oil-item" data-oil="${escapeHtml(oilType)}">${escapeHtml(oilType)}</div>
+  `).join('');
+
+  mobileList.innerHTML = oilTypes.map(oilType => `
+    <div class="oil-item-modal" data-oil="${escapeHtml(oilType)}">${escapeHtml(oilType)}</div>
+  `).join('');
+
+  list.querySelectorAll('.oil-item').forEach(item => {
+    item.addEventListener('click', () => selectOilType(item.dataset.oil));
+  });
+
+  mobileList.querySelectorAll('.oil-item-modal').forEach(item => {
+    item.addEventListener('click', () => {
+      selectOilType(item.dataset.oil);
+      closeProductsModal();
+    });
+  });
+}
+
+async function openAddDepotOilModal() {
+  const modal = document.getElementById('add-depot-oil-modal');
+  const list = document.getElementById('add-depot-oil-select');
+  const message = document.getElementById('add-depot-oil-message');
+
+  if (!modal || !list) return;
+
+  if (message) message.textContent = '';
+  list.innerHTML = '<div class="stock-audit-empty">جاري تحميل الزيوت...</div>';
+  modal.classList.add('show');
+
+  try {
+    if (!depotAllOilTypes.length) {
+      const oils = await ipcRenderer.invoke('get-oil-prices');
+      depotAllOilTypes = sortOilsByOrder(Array.isArray(oils) ? oils : [], [])
+        .map(oil => String(oil.oil_type || '').trim())
+        .filter(Boolean);
+    }
+
+    const storedFilter = getStoredDepotVisibleOilFilter();
+    const visibleSet = new Set(storedFilter || depotAllOilTypes);
+    list.innerHTML = depotAllOilTypes.map(oilType => `
+      <label class="depot-filter-item">
+        <input type="checkbox" class="depot-filter-checkbox" value="${escapeHtml(oilType)}" ${visibleSet.has(oilType) ? 'checked' : ''}>
+        <span>${escapeHtml(oilType)}</span>
+      </label>
+    `).join('');
+  } catch (error) {
+    console.error('Error loading oils for depot add modal:', error);
+    list.innerHTML = '<div class="stock-audit-empty error">تعذر تحميل الزيوت</div>';
+    if (message) message.textContent = 'حدث خطأ أثناء تحميل الزيوت';
+  }
+}
+
+function closeAddDepotOilModal() {
+  const modal = document.getElementById('add-depot-oil-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+async function saveDepotVisibleOil() {
+  const checkedInputs = Array.from(document.querySelectorAll('#add-depot-oil-select .depot-filter-checkbox:checked'));
+  const message = document.getElementById('add-depot-oil-message');
+
+  if (message) message.textContent = '';
+
+  try {
+    const selectedOilTypes = checkedInputs.map(input => String(input.value || '').trim()).filter(Boolean);
+    localStorage.setItem(DEPOT_VISIBLE_OILS_FILTER_KEY, JSON.stringify(selectedOilTypes));
+    closeAddDepotOilModal();
+    await loadDepotOils();
+    showMessage('تم تطبيق تصفية الزيوت', 'success');
+  } catch (error) {
+    console.error('Error saving depot oil filter:', error);
+    if (message) message.textContent = 'حدث خطأ أثناء حفظ التصفية';
+  }
+}
+
+function selectAllDepotFilterOils() {
+  document.querySelectorAll('#add-depot-oil-select .depot-filter-checkbox').forEach(input => {
+    input.checked = true;
+  });
+}
+
+function clearDepotFilterOils() {
+  document.querySelectorAll('#add-depot-oil-select .depot-filter-checkbox').forEach(input => {
+    input.checked = false;
+  });
 }
 
 async function initializeTankManagement() {
@@ -3570,8 +3739,10 @@ function selectOilType(oilType) {
   });
 
   // Add selected class to all items with this oil type (sidebar e modal)
-  document.querySelectorAll(`[data-oil="${oilType}"]`).forEach(item => {
-    item.classList.add('selected');
+  document.querySelectorAll('.oil-item, .oil-item-modal').forEach(item => {
+    if (item.dataset.oil === oilType) {
+      item.classList.add('selected');
+    }
   });
 
   // Update breadcrumb with selected oil name
@@ -3584,10 +3755,10 @@ function selectOilType(oilType) {
 
   // Show results section (già visibile con CSS, ma manteniamo per compatibilità)
   const resultsSection = document.getElementById('results-section');
-  resultsSection.style.display = 'block';
+  if (resultsSection) resultsSection.style.display = 'block';
 
   // Scroll to results section su mobile
-  if (window.innerWidth <= 768) {
+  if (resultsSection && window.innerWidth <= 768) {
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -3603,8 +3774,12 @@ async function loadOilMovements(oilType) {
   }
 
   try {
-    const movements = await ipcRenderer.invoke('get-oil-movements', oilType);
-    const currentStock = await ipcRenderer.invoke('get-current-oil-stock', oilType);
+    const movements = await ipcRenderer.invoke('get-oil-movements', {
+      oilType
+    });
+    const currentStock = await ipcRenderer.invoke('get-current-oil-stock', {
+      oilType
+    });
 
     // Update current stock display with Arabic number formatting
     document.getElementById('current-stock-amount').textContent = formatArabicNumber(currentStock || 0);
@@ -3625,6 +3800,7 @@ function displayOilMovements(movements) {
     return;
   }
 
+  const movementsWithBalance = calculateOilMovementBalances(movements);
   const tableHTML = `
     <table class="movements-table-modern">
       <thead>
@@ -3632,31 +3808,82 @@ function displayOilMovements(movements) {
           <th>التاريخ</th>
           <th>نوع الحركة</th>
           <th>الكمية</th>
+          <th>الرصيد</th>
           <th>رقم الفاتورة</th>
         </tr>
       </thead>
       <tbody>
-        ${movements.map(movement => `
-          <tr class="table-row ${movement.type === 'in' ? 'row-in' : 'row-out'}">
+        ${movementsWithBalance.map(movement => {
+          const movementReference = String(movement.invoice_number || '').trim();
+          const isAuditCount = movement.type === 'audit' || movementReference === 'جرد المخزن';
+          const isAuditDifference = movementReference === 'فرق جرد';
+          const rowClass = isAuditCount ? 'row-audit' : (movement.type === 'in' ? 'row-in' : 'row-out');
+          const badgeClass = isAuditCount ? 'badge-audit' : (movement.type === 'in' ? 'badge-in' : 'badge-out');
+          const quantityClass = isAuditCount ? 'neutral' : (movement.type === 'in' ? 'positive' : 'negative');
+          const movementLabel = isAuditCount ? 'جرد المخزن' : (isAuditDifference ? 'فرق جرد' : (movement.type === 'in' ? 'دخول' : 'خروج'));
+          return `
+          <tr class="table-row ${rowClass}">
             <td class="date-cell">${formatDateDDMMYYYY(movement.date)}</td>
             <td class="type-cell">
-              <span class="type-badge ${movement.type === 'in' ? 'badge-in' : 'badge-out'}">
-                ${movement.type === 'in' ? 'دخول' : 'خروج'}
+              <span class="type-badge ${badgeClass}">
+                ${movementLabel}
               </span>
             </td>
             <td class="quantity-cell">
-              <span class="quantity-value ${movement.type === 'in' ? 'positive' : 'negative'}">
+              <span class="quantity-value ${quantityClass}">
                 ${convertToArabicNumerals(movement.quantity)}
+              </span>
+            </td>
+            <td class="quantity-cell">
+              <span class="quantity-value neutral">
+                ${formatArabicNumber(movement.balance_after || 0)}
               </span>
             </td>
             <td class="invoice-cell">${movement.invoice_number || '-'}</td>
           </tr>
-        `).join('')}
+        `;
+        }).join('')}
       </tbody>
     </table>
   `;
   
   container.innerHTML = tableHTML;
+}
+
+function calculateOilMovementBalances(movements) {
+  const chronological = [...movements].sort((a, b) => {
+    const dateCompare = String(a.date || '').localeCompare(String(b.date || ''));
+    if (dateCompare !== 0) return dateCompare;
+    const createdCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    if (createdCompare !== 0) return createdCompare;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  let balance = 0;
+  chronological.forEach((movement) => {
+    const quantity = parseFloat(movement.quantity) || 0;
+    const movementReference = String(movement.invoice_number || '').trim();
+    if (movementReference === 'فرق جرد') {
+      // Old audit-difference rows are shown for history, but audit rows now set the balance directly.
+    } else if (movement.type === 'in') {
+      balance += quantity;
+    } else if (movement.type === 'out') {
+      balance -= quantity;
+    } else if (movement.type === 'audit') {
+      balance = quantity;
+    }
+    movement.balance_after = balance;
+  });
+
+  const balanceById = new Map(chronological.map((movement, index) => [
+    movement.id != null ? `id:${movement.id}` : `idx:${index}`,
+    movement.balance_after
+  ]));
+
+  return movements.map((movement, index) => ({
+    ...movement,
+    balance_after: balanceById.get(movement.id != null ? `id:${movement.id}` : `idx:${index}`) ?? movement.balance_after ?? 0
+  }));
 }
 
 function showAddMovementModal() {
@@ -3668,7 +3895,6 @@ function showAddMovementModal() {
     return;
   }
   
-  // Set today's date as default
   document.getElementById('movement-date').value = new Date().toISOString().split('T')[0];
   
   // Clear form
@@ -3715,24 +3941,37 @@ function closeMovementModal() {
 }
 
 async function getActiveOilsForStockAudit() {
-  const oils = await ipcRenderer.invoke('get-oil-prices');
-  const migratedOrder = await migrateLegacyLocalOilOrderIfNeeded();
-  return sortOilsByOrder(
-    oils.filter(oil => oil.is_active === 1 || oil.is_active === true),
-    migratedOrder
-  );
+  if (!depotVisibleOilTypes.length) {
+    await loadDepotOils();
+  }
+
+  return depotVisibleOilTypes.map((oilType, index) => ({
+    oil_type: oilType,
+    display_order: index + 1,
+    is_active: 1
+  }));
 }
 
 async function openStockAuditModal() {
   const modal = document.getElementById('stock-audit-modal');
   const dateInput = document.getElementById('stock-audit-date');
-  const tableBody = document.getElementById('stock-audit-oils-body');
 
-  if (!modal || !dateInput || !tableBody) return;
+  if (!modal || !dateInput) return;
 
   dateInput.value = new Date().toISOString().split('T')[0];
-  tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty">جاري تحميل الزيوت...</td></tr>';
+  dateInput.onchange = loadStockAuditRows;
   modal.classList.add('show');
+  await loadStockAuditRows();
+}
+
+async function loadStockAuditRows() {
+  const dateInput = document.getElementById('stock-audit-date');
+  const tableBody = document.getElementById('stock-audit-oils-body');
+  const auditDate = dateInput?.value;
+
+  if (!tableBody) return;
+
+  tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty">جاري تحميل الزيوت...</td></tr>';
 
   try {
     const oils = await getActiveOilsForStockAudit();
@@ -3744,11 +3983,14 @@ async function openStockAuditModal() {
 
     const rows = await Promise.all(oils.map(async (oil) => {
       const oilType = String(oil.oil_type || '').trim();
-      const currentStock = await ipcRenderer.invoke('get-current-oil-stock', oilType).catch(() => 0);
+      const expectedStock = await ipcRenderer.invoke('get-current-oil-stock', {
+        oilType,
+        endDate: auditDate
+      }).catch(() => 0);
       return `
         <tr>
           <td class="stock-audit-oil-name">${escapeHtml(oilType)}</td>
-          <td class="stock-audit-current">${formatArabicNumber(currentStock || 0)}</td>
+          <td class="stock-audit-current">${formatArabicNumber(expectedStock || 0)}</td>
           <td>
             <input type="text" inputmode="decimal" class="stock-audit-quantity"
                    oninput="normalizeStockAuditQuantityInput(this)"
@@ -3759,10 +4001,28 @@ async function openStockAuditModal() {
     }));
 
     tableBody.innerHTML = rows.join('');
+    bindStockAuditKeyboardNavigation();
   } catch (error) {
     console.error('Error loading stock audit oils:', error);
     tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty error">حدث خطأ أثناء تحميل الزيوت</td></tr>';
   }
+}
+
+function bindStockAuditKeyboardNavigation() {
+  const inputs = Array.from(document.querySelectorAll('#stock-audit-oils-body .stock-audit-quantity'));
+  inputs.forEach((input, index) => {
+    input.onkeydown = (event) => {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+
+      const nextIndex = event.key === 'ArrowUp' ? index - 1 : index + 1;
+      const nextInput = inputs[nextIndex];
+      if (!nextInput) return;
+
+      event.preventDefault();
+      nextInput.focus();
+      nextInput.select();
+    };
+  });
 }
 
 function closeStockAuditModal() {
@@ -3812,9 +4072,7 @@ async function saveStockAudit() {
     const rawValue = String(input.value || '').trim();
 
     if (!rawValue) {
-      showMessage('يرجى إدخال كمية لكل زيت', 'error');
-      input.focus();
-      return;
+      continue;
     }
 
     const quantity = parseStockAuditQuantity(rawValue);
@@ -3827,22 +4085,24 @@ async function saveStockAudit() {
     items.push({ oil_type: oilType, quantity });
   }
 
+  if (items.length === 0) {
+    showMessage('يرجى إدخال كمية لزيت واحد على الأقل', 'error');
+    return;
+  }
+
   try {
     const result = await ipcRenderer.invoke('save-oil-stock-audit', { date, items });
     if (!result?.success) {
       throw new Error(result?.error || 'save_failed');
     }
 
-    const adjusted = Number(result.adjusted) || 0;
-    const unchanged = Number(result.unchanged) || 0;
-    showMessage(`تم حفظ الجرد: ${convertToArabicNumerals(adjusted)} تعديل، ${convertToArabicNumerals(unchanged)} بدون فرق`, 'success');
+    const counted = Number(result.counted) || 0;
+    showMessage(`تم حفظ الجرد: ${convertToArabicNumerals(counted)} صنف`, 'success');
     closeStockAuditModal();
 
     const selectedOilItem = document.querySelector('.oil-item.selected');
     const selectedOilType = selectedOilItem ? selectedOilItem.dataset.oil : '';
-    if (selectedOilType) {
-      loadOilMovements(selectedOilType);
-    }
+    await loadDepotOils(selectedOilType);
   } catch (error) {
     console.error('Error saving stock audit:', error);
     showMessage('حدث خطأ أثناء حفظ جرد المخزن', 'error');
@@ -3862,7 +4122,7 @@ async function saveMovement() {
     showMessage('يرجى ملء جميع الحقول المطلوبة', 'error');
     return;
   }
-  
+
   // For 'in' movements, invoice number is required
   if (type === 'in' && !invoiceNumber) {
     showMessage('رقم الفاتورة مطلوب لحركات الدخول', 'error');
@@ -3886,7 +4146,7 @@ async function saveMovement() {
     showMessage('تم حفظ الحركة بنجاح', 'success');
     resetMovementForm();
     closeMovementModal();
-    loadOilMovements(oilType); // Reload the movements for the current oil type
+    await loadDepotOils(oilType);
   } catch (error) {
     console.error('Error saving movement:', error);
     showMessage('حدث خطأ أثناء حفظ الحركة', 'error');

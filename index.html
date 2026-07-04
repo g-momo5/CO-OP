@@ -1525,43 +1525,13 @@
             <!-- Sidebar (destra) -->
             <aside class="depot-sidebar">
               <div class="sidebar-header">
-                <h4>المنتجات</h4>
+                <div class="depot-sidebar-title-row">
+                  <h4>المنتجات</h4>
+                  <button class="btn btn-secondary btn-compact depot-add-oil-btn" onclick="openAddDepotOilModal()">تصفية</button>
+                </div>
               </div>
-              <div class="oil-list">
-                <div class="oil-item" data-oil="COOP FACT 20L">COOP FACT 20L</div>
-                <div class="oil-item" data-oil="COOP FACT 8L">COOP FACT 8L</div>
-                <div class="oil-item" data-oil="COOP FACT 5L">COOP FACT 5L</div>
-                <div class="oil-item" data-oil="COOP FACT 4L">COOP FACT 4L</div>
-                <div class="oil-item" data-oil="COOP FACT 1L">COOP FACT 1L</div>
-                <div class="oil-item" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
-                <div class="oil-item" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
-                <div class="oil-item" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
-                <div class="oil-item" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
-                <div class="oil-item" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
-                <div class="oil-item" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
-                <div class="oil-item" data-oil="CI4 5L">CI4 5L</div>
-                <div class="oil-item" data-oil="SJ 4L">SJ 4L</div>
-                <div class="oil-item" data-oil="SJ 1L">SJ 1L</div>
-                <div class="oil-item" data-oil="CPC 8000 4L">CPC 8000 4L</div>
-                <div class="oil-item" data-oil="CPC 8000 5L">CPC 8000 5L</div>
-                <div class="oil-item" data-oil="XPL 4L">XPL 4L</div>
-                <div class="oil-item" data-oil="SF 20/50 4L">SF 20/50 4L</div>
-                <div class="oil-item" data-oil="SF 20/50 1L">SF 20/50 1L</div>
-                <div class="oil-item" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
-                <div class="oil-item" data-oil="DIXERON 1L">DIXERON 1L</div>
-                <div class="oil-item" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
-                <div class="oil-item" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
-                <div class="oil-item" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
-                <div class="oil-item" data-oil="سايب ١ ك">سايب ١ ك</div>
-                <div class="oil-item" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
-                <div class="oil-item" data-oil="شامبو سيارات">شامبو سيارات</div>
-                <div class="oil-item" data-oil="ماء مقطر">ماء مقطر</div>
-                <div class="oil-item" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
-                <div class="oil-item" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
-                <div class="oil-item" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
-                <div class="oil-item" data-oil="كورال بلومارين">كورال بلومارين</div>
-                <div class="oil-item" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
-                <div class="oil-item" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
+              <div class="oil-list" id="depot-oil-list">
+                <div class="empty-movements">جاري تحميل المنتجات...</div>
               </div>
             </aside>
 
@@ -1571,6 +1541,9 @@
                 <div>
                   <h3>إدارة المخزن</h3>
                   <p class="depot-subtitle">اختر منتجاً من القائمة اليمنى لعرض الحركات</p>
+                </div>
+                <div class="depot-topbar-actions">
+                  <button class="btn btn-secondary btn-compact" onclick="openStockAuditModal()">جرد المخزن</button>
                 </div>
               </div>
 
@@ -1592,7 +1565,6 @@
                     <div class="panel-subtitle">دخول وخروج حسب التاريخ</div>
                   </div>
                   <div class="panel-actions">
-                    <button class="btn btn-secondary btn-compact" onclick="openStockAuditModal()">جرد المخزن</button>
                     <button class="btn btn-primary btn-compact" onclick="openMovementModal()">إضافة حركة</button>
                   </div>
                 </div>
@@ -1686,45 +1658,37 @@
             <button class="close-modal" onclick="closeProductsModal()">&times;</button>
           </div>
           <div class="modal-body">
-            <div class="oil-list-modal">
-              <div class="oil-item-modal" data-oil="COOP FACT 20L">COOP FACT 20L</div>
-              <div class="oil-item-modal" data-oil="COOP FACT 8L">COOP FACT 8L</div>
-              <div class="oil-item-modal" data-oil="COOP FACT 5L">COOP FACT 5L</div>
-              <div class="oil-item-modal" data-oil="COOP FACT 4L">COOP FACT 4L</div>
-              <div class="oil-item-modal" data-oil="COOP FACT 1L">COOP FACT 1L</div>
-              <div class="oil-item-modal" data-oil="SUPER STAN 180L">SUPER STAN 180L</div>
-              <div class="oil-item-modal" data-oil="SUPER STAN 20L">SUPER STAN 20L</div>
-              <div class="oil-item-modal" data-oil="SUPER STAN 4L">SUPER STAN 4L</div>
-              <div class="oil-item-modal" data-oil="ONE EXTRA 5W/40">ONE EXTRA 5W/40</div>
-              <div class="oil-item-modal" data-oil="ONE EXTRA 5W/40 5L">ONE EXTRA 5W/40 5L</div>
-              <div class="oil-item-modal" data-oil="CI4 15W/40 20L">CI4 15W/40 20L</div>
-              <div class="oil-item-modal" data-oil="CI4 5L">CI4 5L</div>
-              <div class="oil-item-modal" data-oil="SJ 4L">SJ 4L</div>
-              <div class="oil-item-modal" data-oil="SJ 1L">SJ 1L</div>
-              <div class="oil-item-modal" data-oil="CPC 8000 4L">CPC 8000 4L</div>
-              <div class="oil-item-modal" data-oil="CPC 8000 5L">CPC 8000 5L</div>
-              <div class="oil-item-modal" data-oil="XPL 4L">XPL 4L</div>
-              <div class="oil-item-modal" data-oil="SF 20/50 4L">SF 20/50 4L</div>
-              <div class="oil-item-modal" data-oil="SF 20/50 1L">SF 20/50 1L</div>
-              <div class="oil-item-modal" data-oil="HYDRAULIC 68">HYDRAULIC 68</div>
-              <div class="oil-item-modal" data-oil="DIXERON 1L">DIXERON 1L</div>
-              <div class="oil-item-modal" data-oil="تروس ١٦٠ HP ١٨ لتر">تروس ١٦٠ HP ١٨ لتر</div>
-              <div class="oil-item-modal" data-oil="ماء أحمر راديتير">ماء أحمر راديتير</div>
-              <div class="oil-item-modal" data-oil="باكم ١\٤ لتر">باكم ١\٤ لتر</div>
-              <div class="oil-item-modal" data-oil="سايب ١ ك">سايب ١ ك</div>
-              <div class="oil-item-modal" data-oil="رويال كلين ٨٠٠م">رويال كلين ٨٠٠م</div>
-              <div class="oil-item-modal" data-oil="شامبو سيارات">شامبو سيارات</div>
-              <div class="oil-item-modal" data-oil="ماء مقطر">ماء مقطر</div>
-              <div class="oil-item-modal" data-oil="نيو فاست رائحة التفاح">نيو فاست رائحة التفاح</div>
-              <div class="oil-item-modal" data-oil="منظف الايدي بالمضخة">منظف الايدي بالمضخة</div>
-              <div class="oil-item-modal" data-oil="ملمع كاوتش سيارة">ملمع كاوتش سيارة</div>
-              <div class="oil-item-modal" data-oil="كورال بلومارين">كورال بلومارين</div>
-              <div class="oil-item-modal" data-oil="ملمع تابلوه الترشاين">ملمع تابلوه الترشاين</div>
-              <div class="oil-item-modal" data-oil="ماء أخضر راديتير">ماء أخضر راديتير</div>
+            <div class="oil-list-modal" id="depot-oil-list-modal">
+              <div class="empty-movements">جاري تحميل المنتجات...</div>
             </div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeProductsModal()">إغلاق</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="add-depot-oil-modal" class="modal">
+        <div class="modal-content modal-compact modal-medium">
+          <div class="modal-header">
+            <h3>تصفية زيوت المخزن</h3>
+            <button class="close-modal" onclick="closeAddDepotOilModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="depot-filter-actions">
+                <button class="btn btn-secondary btn-compact" onclick="selectAllDepotFilterOils()">تحديد الكل</button>
+                <button class="btn btn-secondary btn-compact" onclick="clearDepotFilterOils()">إلغاء الكل</button>
+              </div>
+              <div id="add-depot-oil-select" class="depot-filter-list">
+                <div class="stock-audit-empty">جاري تحميل الزيوت...</div>
+              </div>
+              <div id="add-depot-oil-message" class="modal-message-error"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveDepotVisibleOil()">تطبيق</button>
+            <button class="btn btn-secondary" onclick="closeAddDepotOilModal()">إلغاء</button>
           </div>
         </div>
       </div>
@@ -2034,7 +1998,7 @@
                 <thead>
                   <tr>
                     <th>الزيت</th>
-                    <th>الرصيد الحالي</th>
+                    <th>الرصيد المتوقع</th>
                     <th>الكمية الفعلية</th>
                   </tr>
                 </thead>

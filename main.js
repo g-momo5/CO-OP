@@ -3353,8 +3353,22 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
-  ipcMain.handle('get-oil-movements', async (event, oilType) => {
+  ipcMain.handle('get-oil-movements', async (event, oilTypeInput) => {
     try {
+      const oilType = typeof oilTypeInput === 'object'
+        ? String(oilTypeInput?.oilType || '').trim()
+        : String(oilTypeInput || '').trim();
+      const year = typeof oilTypeInput === 'object' ? parseInt(oilTypeInput?.year, 10) : null;
+
+      if (Number.isInteger(year) && year >= 2000 && year <= 2100) {
+        const movementsQuery = `
+          SELECT * FROM oil_movements
+          WHERE oil_type = $1 AND date >= $2 AND date <= $3
+          ORDER BY date DESC, created_at DESC
+        `;
+        return await executeQuery(movementsQuery, [oilType, `${year}-01-01`, `${year}-12-31`]);
+      }
+
       const movementsQuery = 'SELECT * FROM oil_movements WHERE oil_type = $1 ORDER BY date DESC, created_at DESC';
       return await executeQuery(movementsQuery, [oilType]);
     } catch (error) {
@@ -3363,16 +3377,31 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
-  ipcMain.handle('get-current-oil-stock', async (event, oilType) => {
+  ipcMain.handle('get-current-oil-stock', async (event, oilTypeInput) => {
     try {
-      const stockQuery = 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = $1 GROUP BY type';
-      const result = await executeQuery(stockQuery, [oilType]);
+      const oilType = typeof oilTypeInput === 'object'
+        ? String(oilTypeInput?.oilType || '').trim()
+        : String(oilTypeInput || '').trim();
+      const endDate = typeof oilTypeInput === 'object' ? String(oilTypeInput?.endDate || '').trim() : '';
+      const params = [oilType];
+      let stockQuery = 'SELECT type, quantity, invoice_number FROM oil_movements WHERE oil_type = $1';
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        stockQuery += ' AND date <= $2';
+        params.push(endDate);
+      }
+
+      stockQuery += ' ORDER BY date ASC, created_at ASC, id ASC';
+      const result = await executeQuery(stockQuery, params);
       let stock = 0;
       result.forEach(row => {
+        if (String(row.invoice_number || '').trim() === 'فرق جرد') return;
         if (row.type === 'in') {
-          stock += parseFloat(row.total) || 0;
+          stock += parseFloat(row.quantity) || 0;
         } else if (row.type === 'out') {
-          stock -= parseFloat(row.total) || 0;
+          stock -= parseFloat(row.quantity) || 0;
+        } else if (row.type === 'audit') {
+          stock = parseFloat(row.quantity) || 0;
         }
       });
       return stock;
@@ -3395,9 +3424,8 @@ ipcMain.handle('get-sales-summary', async () => {
         throw new Error('لا توجد زيوت للجرد');
       }
 
-      let adjusted = 0;
-      let unchanged = 0;
-      const reference = `جرد المخزن ${date}`;
+      let counted = 0;
+      const auditReference = 'جرد المخزن';
 
       for (const item of items) {
         const oilType = String(item?.oil_type || '').trim();
@@ -3407,29 +3435,12 @@ ipcMain.handle('get-sales-summary', async () => {
           throw new Error('بيانات الجرد غير صالحة');
         }
 
-        const stockQuery = 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = $1 GROUP BY type';
-        const stockRows = await executeQuery(stockQuery, [oilType]);
-        const currentStock = stockRows.reduce((sum, row) => {
-          const total = parseFloat(row.total) || 0;
-          if (row.type === 'in') return sum + total;
-          if (row.type === 'out') return sum - total;
-          return sum;
-        }, 0);
-
-        const difference = countedQuantity - currentStock;
-        if (Math.abs(difference) < 0.0001) {
-          unchanged += 1;
-          continue;
-        }
-
-        const movementType = difference > 0 ? 'in' : 'out';
-        const quantity = Math.abs(difference);
-        const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
-        await executeInsert(insertQuery, [oilType, date, movementType, quantity, reference], 'oil_movements');
-        adjusted += 1;
+        const auditInsertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
+        await executeInsert(auditInsertQuery, [oilType, date, 'audit', countedQuantity, auditReference], 'oil_movements');
+        counted += 1;
       }
 
-      return { success: true, adjusted, unchanged };
+      return { success: true, counted };
     } catch (error) {
       console.error('Error saving oil stock audit:', error);
       throw error;

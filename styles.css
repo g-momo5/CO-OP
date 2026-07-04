@@ -6068,6 +6068,19 @@ select option {
     flex: 1 1 0;
   }
 
+  .depot-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .depot-topbar-actions {
+    justify-content: stretch;
+  }
+
+  .depot-topbar-actions > .btn {
+    flex: 1 1 auto;
+  }
+
   .stock-audit-modal {
     max-height: 86vh;
   }
@@ -6549,6 +6562,12 @@ select option {
   border: 1px solid #f5c6cb;
 }
 
+.badge-audit {
+  background: #e9f1ff;
+  color: #1d4f8f;
+  border: 1px solid #c8dcff;
+}
+
 .quantity-value {
   font-weight: 700;
   font-size: 1rem;
@@ -6560,6 +6579,10 @@ select option {
 
 .quantity-value.negative {
   color: #dc3545;
+}
+
+.quantity-value.neutral {
+  color: #2c3e50;
 }
 
 .invoice-cell {
@@ -6606,6 +6629,14 @@ select option {
   color: #2c3e50;
   font-size: 1.6rem;
   font-weight: 700;
+}
+
+.depot-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .tank-summary-page {
@@ -6986,6 +7017,13 @@ select option {
   border-bottom: 1px solid #e9ecef;
 }
 
+.depot-sidebar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .sidebar-header h4 {
   margin: 0;
   color: #2c3e50;
@@ -6993,6 +7031,48 @@ select option {
   font-weight: 600;
   text-align: center;
   direction: rtl;
+}
+
+.depot-add-oil-btn {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.8rem;
+}
+
+.depot-filter-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.depot-filter-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 48vh;
+  overflow-y: auto;
+  padding: 0.35rem;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.depot-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  background: #fff;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  color: #2c3e50;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.depot-filter-item input {
+  width: 18px;
+  height: 18px;
+  accent-color: #c4291d;
 }
 
 .oil-list {
