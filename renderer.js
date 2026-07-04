@@ -9914,25 +9914,6 @@ async function loadActiveOils() {
     // Filter only active oils
     let activeOils = oils.filter(oil => oil.is_active === 1 || oil.is_active === true);
 
-    // Load saved order from localStorage
-    const savedOrder = localStorage.getItem('oils-order');
-    if (savedOrder) {
-      try {
-        const orderArray = JSON.parse(savedOrder);
-        // Sort activeOils according to saved order
-        activeOils = activeOils.sort((a, b) => {
-          const indexA = orderArray.indexOf(a.oil_type);
-          const indexB = orderArray.indexOf(b.oil_type);
-          // If not in saved order, put at end
-          if (indexA === -1) return 1;
-          if (indexB === -1) return -1;
-          return indexA - indexB;
-        });
-      } catch (e) {
-        console.error('Error parsing saved oil order:', e);
-      }
-    }
-
     const tableBody = document.getElementById('shift-oil-table-body');
     if (!tableBody) return;
 
@@ -10056,7 +10037,6 @@ function enableOilRowDragDrop() {
     row.addEventListener('dragend', function(e) {
       this.style.opacity = '1';
       draggedRow = null;
-      // Save new order
       saveOilsOrder();
     });
 
@@ -10078,15 +10058,23 @@ function enableOilRowDragDrop() {
   });
 }
 
-// Save oils order to localStorage
-function saveOilsOrder() {
+// Save oils order to the shared database so every PC uses the same order.
+async function saveOilsOrder() {
   const tableBody = document.getElementById('shift-oil-table-body');
   if (!tableBody) return;
 
   const rows = tableBody.querySelectorAll('.draggable-oil-row');
   const order = Array.from(rows).map(row => row.getAttribute('data-oil-name'));
 
-  localStorage.setItem('oils-order', JSON.stringify(order));
+  try {
+    const result = await ipcRenderer.invoke('save-oils-order', order);
+    if (!result?.success) {
+      throw new Error(result?.error || 'save_failed');
+    }
+  } catch (error) {
+    console.error('Error saving shared oil order:', error);
+    showToast?.('تعذر حفظ ترتيب الزيوت', 'error');
+  }
 }
 
 // Calculate oil row totals and remaining

@@ -179,12 +179,27 @@ class DatabaseManager {
       current_price REAL NOT NULL,
       vat REAL DEFAULT 0,
       effective_date DATE,
-      is_active INTEGER DEFAULT 1
+      is_active INTEGER DEFAULT 1,
+      display_order INTEGER DEFAULT 0
     )`);
+
+    await this.pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0`);
+    await this.pgPool.query(`
+      WITH ordered AS (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY product_type ORDER BY product_name ASC, id ASC) AS row_number
+        FROM products
+        WHERE COALESCE(display_order, 0) = 0
+      )
+      UPDATE products
+      SET display_order = ordered.row_number
+      FROM ordered
+      WHERE products.id = ordered.id
+    `);
 
     // Create index on product_type
     try {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type_display_order ON products(product_type, display_order)`);
     } catch (err) {
       console.log('Index creation: ', err.message);
     }

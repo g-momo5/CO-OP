@@ -88,8 +88,20 @@ class DatabaseSchema {
         current_price REAL NOT NULL,
         vat REAL DEFAULT 0,
         effective_date TEXT,
-        is_active INTEGER DEFAULT 1
+        is_active INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0
       )
+    `);
+
+    const columns = db.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
+    if (!columns.includes('display_order')) {
+      db.exec('ALTER TABLE products ADD COLUMN display_order INTEGER DEFAULT 0');
+    }
+
+    db.exec(`
+      UPDATE products
+      SET display_order = id
+      WHERE display_order IS NULL OR display_order = 0
     `);
   }
 

@@ -2038,10 +2038,32 @@ function setupIPCHandlers() {
   // Oil Prices Handlers
   ipcMain.handle('get-oil-prices', async () => {
     try {
-      return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, is_active, effective_date FROM products WHERE product_type = 'oil' ORDER BY product_name");
+      return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, is_active, effective_date, display_order FROM products WHERE product_type = 'oil' ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC, COALESCE(display_order, 0) ASC, product_name ASC");
     } catch (error) {
       console.error('Error getting oil prices:', error);
       throw error;
+    }
+  });
+
+  ipcMain.handle('save-oils-order', async (_event, oilOrder) => {
+    try {
+      if (!Array.isArray(oilOrder)) {
+        throw new Error('ترتيب الزيوت غير صالح');
+      }
+
+      for (const [index, oilName] of oilOrder.entries()) {
+        const cleanName = String(oilName || '').trim();
+        if (!cleanName) continue;
+        await executeUpdate(
+          'UPDATE products SET display_order = $1 WHERE product_type = $2 AND product_name = $3',
+          [index + 1, 'oil', cleanName]
+        );
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error saving oils order:', error);
+      return { success: false, error: error.message };
     }
   });
 
@@ -2120,8 +2142,13 @@ function setupIPCHandlers() {
 
       // Insert new oil product with VAT
       const vatValue = vat || 0;
-      const insertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat) VALUES ($1, $2, $3, $4)';
-      return await executeInsert(insertQuery, ['oil', oil_type, price, vatValue], 'products');
+      const orderRows = await executeQuery(
+        'SELECT COALESCE(MAX(display_order), 0) AS max_order FROM products WHERE product_type = $1',
+        ['oil']
+      );
+      const nextOrder = (parseInt(orderRows[0]?.max_order, 10) || 0) + 1;
+      const insertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat, display_order) VALUES ($1, $2, $3, $4, $5)';
+      return await executeInsert(insertQuery, ['oil', oil_type, price, vatValue, nextOrder], 'products');
     } catch (error) {
       console.error('Error adding oil price:', error);
       throw error;
@@ -2159,9 +2186,15 @@ function setupIPCHandlers() {
         throw new Error('يوجد منتج بهذا الاسم بالفعل');
       }
 
+      const orderRows = await executeQuery(
+        'SELECT COALESCE(MAX(display_order), 0) AS max_order FROM products WHERE product_type = $1',
+        [productType]
+      );
+      const nextOrder = (parseInt(orderRows[0]?.max_order, 10) || 0) + 1;
+
       await executeInsert(
-        'INSERT INTO products (product_type, product_name, current_price, vat, effective_date) VALUES ($1, $2, $3, $4, $5)',
-        [productType, productName, price, 0, startDate],
+        'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, display_order) VALUES ($1, $2, $3, $4, $5, $6)',
+        [productType, productName, price, 0, startDate, nextOrder],
         'products'
       );
 
@@ -4110,8 +4143,15 @@ ipcMain.handle('get-sales-summary', async () => {
       if (backupData.products) {
         // New format with unified products table
         for (const product of backupData.products) {
-          const query = 'INSERT INTO products (product_type, product_name, current_price, vat, is_active) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (product_name) DO UPDATE SET current_price = $3, vat = $4, is_active = $5';
-          await executeInsert(query, [product.product_type, product.product_name, product.current_price, product.vat || 0, product.is_active !== undefined ? product.is_active : 1], 'products');
+          const query = 'INSERT INTO products (product_type, product_name, current_price, vat, is_active, display_order) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (product_name) DO UPDATE SET current_price = $3, vat = $4, is_active = $5, display_order = $6';
+          await executeInsert(query, [
+            product.product_type,
+            product.product_name,
+            product.current_price,
+            product.vat || 0,
+            product.is_active !== undefined ? product.is_active : 1,
+            parseInt(product.display_order, 10) || 0
+          ], 'products');
         }
       } else {
         // Legacy format - import from old fuelPrices and oilPrices
