@@ -2051,7 +2051,19 @@ function setupIPCHandlers() {
         throw new Error('ترتيب الزيوت غير صالح');
       }
 
-      for (const [index, oilName] of oilOrder.entries()) {
+      const cleanRequestedOrder = oilOrder
+        .map((oilName) => String(oilName || '').trim())
+        .filter(Boolean);
+      const existingRows = await executeQuery(
+        "SELECT product_name FROM products WHERE product_type = 'oil' ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC, COALESCE(display_order, 0) ASC, product_name ASC"
+      );
+      const requestedSet = new Set(cleanRequestedOrder);
+      const missingRows = existingRows
+        .map((row) => String(row.product_name || '').trim())
+        .filter((oilName) => oilName && !requestedSet.has(oilName));
+      const completeOrder = [...cleanRequestedOrder, ...missingRows];
+
+      for (const [index, oilName] of completeOrder.entries()) {
         const cleanName = String(oilName || '').trim();
         if (!cleanName) continue;
         await executeUpdate(

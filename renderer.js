@@ -9906,13 +9906,62 @@ function renderSavedShiftOilRows(oilData = {}) {
   });
 }
 
+function getLegacyLocalOilOrder() {
+  try {
+    const rawOrder = localStorage.getItem('oils-order');
+    if (!rawOrder) return [];
+    const parsedOrder = JSON.parse(rawOrder);
+    if (!Array.isArray(parsedOrder)) return [];
+    return parsedOrder
+      .map((oilName) => String(oilName || '').trim())
+      .filter(Boolean);
+  } catch (error) {
+    console.error('Error parsing legacy local oil order:', error);
+    return [];
+  }
+}
+
+function sortOilsByOrder(oils, order) {
+  if (!Array.isArray(order) || order.length === 0) return oils;
+  const orderMap = new Map(order.map((oilName, index) => [oilName, index]));
+  return [...oils].sort((a, b) => {
+    const indexA = orderMap.has(a.oil_type) ? orderMap.get(a.oil_type) : Number.POSITIVE_INFINITY;
+    const indexB = orderMap.has(b.oil_type) ? orderMap.get(b.oil_type) : Number.POSITIVE_INFINITY;
+    if (indexA !== indexB) return indexA - indexB;
+    const orderA = Number.isFinite(Number(a.display_order)) ? Number(a.display_order) : Number.POSITIVE_INFINITY;
+    const orderB = Number.isFinite(Number(b.display_order)) ? Number(b.display_order) : Number.POSITIVE_INFINITY;
+    if (orderA !== orderB) return orderA - orderB;
+    return String(a.oil_type || '').localeCompare(String(b.oil_type || ''));
+  });
+}
+
+async function migrateLegacyLocalOilOrderIfNeeded() {
+  const legacyOrder = getLegacyLocalOilOrder();
+  if (legacyOrder.length === 0) return [];
+
+  try {
+    const result = await ipcRenderer.invoke('save-oils-order', legacyOrder);
+    if (!result?.success) {
+      throw new Error(result?.error || 'save_failed');
+    }
+    localStorage.removeItem('oils-order');
+    return legacyOrder;
+  } catch (error) {
+    console.error('Error migrating legacy local oil order:', error);
+    showToast?.('تعذر استعادة ترتيب الزيوت السابق', 'error');
+    return legacyOrder;
+  }
+}
+
 // Load active oils and populate oil table
 async function loadActiveOils() {
   try {
     const oils = await ipcRenderer.invoke('get-oil-prices');
+    const migratedOrder = await migrateLegacyLocalOilOrderIfNeeded();
 
     // Filter only active oils
     let activeOils = oils.filter(oil => oil.is_active === 1 || oil.is_active === true);
+    activeOils = sortOilsByOrder(activeOils, migratedOrder);
 
     const tableBody = document.getElementById('shift-oil-table-body');
     if (!tableBody) return;
