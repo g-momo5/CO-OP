@@ -292,7 +292,7 @@ button {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.sales-summary-table {
+.financial-summary-table {
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -300,7 +300,9 @@ button {
   overflow: visible;
 }
 
-#salesSummaryBody .table-wrap {
+#salesSummaryBody .table-wrap,
+#profitBody .table-wrap,
+#expensesBody .table-wrap {
   max-height: calc(100vh - 270px);
   min-height: 260px;
   overflow: auto;
@@ -342,15 +344,15 @@ button {
   border-bottom: 0;
 }
 
-.sales-summary-table th:not(:first-child),
-.sales-summary-table td:not(:first-child) {
+.financial-summary-table th:not(:first-child),
+.financial-summary-table td:not(:first-child) {
   text-align: center;
   min-width: 82px;
 }
 
-.sales-summary-table th:last-child,
-.sales-summary-table td:last-child,
-.sales-summary-table .cell-total {
+.financial-summary-table th:last-child,
+.financial-summary-table td:last-child,
+.financial-summary-table .cell-total {
   font-weight: 800;
 }
 
@@ -358,8 +360,8 @@ button {
   border-top: 4px solid rgba(196, 41, 29, 0.55);
 }
 
-.sales-summary-table th:first-child,
-.sales-summary-table td:first-child {
+.financial-summary-table th:first-child,
+.financial-summary-table td:first-child {
   position: sticky;
   inset-inline-end: 0;
   right: 0;
@@ -373,12 +375,12 @@ button {
   text-overflow: ellipsis;
 }
 
-.sales-summary-table th:first-child {
+.financial-summary-table th:first-child {
   z-index: 12;
   background: var(--coop-ink);
 }
 
-.sales-summary-table thead th {
+.financial-summary-table thead th {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -754,6 +756,11 @@ button {
   color: var(--coop-red);
 }
 
+.profit-summary-table .profit-summary-row td:first-child,
+.profit-summary-table .profit-net-row td:first-child {
+  color: var(--coop-red);
+}
+
 .profit-deduction-row td {
   background: #fff8f7;
 }
@@ -806,19 +813,19 @@ button {
     min-width: 470px;
   }
 
-  .sales-summary-table {
+  .financial-summary-table {
     min-width: max-content;
   }
 
-  .sales-summary-table th:first-child,
-  .sales-summary-table td:first-child {
+  .financial-summary-table th:first-child,
+  .financial-summary-table td:first-child {
     min-width: 154px;
     max-width: 154px;
     width: 154px;
   }
 
-  .sales-summary-table th:not(:first-child),
-  .sales-summary-table td:not(:first-child) {
+  .financial-summary-table th:not(:first-child),
+  .financial-summary-table td:not(:first-child) {
     min-width: 76px;
   }
 
@@ -845,7 +852,9 @@ button {
     grid-column: 1 / -1;
   }
 
-  #salesSummaryBody .table-wrap {
+  #salesSummaryBody .table-wrap,
+  #profitBody .table-wrap,
+  #expensesBody .table-wrap {
     max-height: calc(100vh - 320px);
     min-height: 300px;
   }

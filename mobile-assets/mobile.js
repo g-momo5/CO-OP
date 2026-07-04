@@ -336,7 +336,7 @@
     target.innerHTML = sectionCard(
       '📊',
       'ملخص المبيعات',
-      table(['المنتج', ...months.map(monthLabel), 'الإجمالي'], rows, 'لا توجد بيانات', 'sales-summary-table')
+      table(['المنتج', ...months.map(monthLabel), 'الإجمالي'], rows, 'لا توجد بيانات', 'sales-summary-table financial-summary-table')
     );
   }
 
@@ -369,7 +369,11 @@
       </tr>
     `);
     target.className = 'section-stack';
-    target.innerHTML = sectionCard('📈', 'المكسب', table(['البند', ...months.map(monthLabel)], tableRows));
+    target.innerHTML = sectionCard(
+      '📈',
+      'المكسب',
+      table(['البند', ...months.map(monthLabel)], tableRows, 'لا توجد بيانات', 'profit-summary-table financial-summary-table')
+    );
   }
 
   async function loadExpenses() {
@@ -407,7 +411,11 @@
       </tr>
     `);
     target.className = 'section-stack';
-    target.innerHTML = sectionCard('📉', 'المصاريف', table(['المصروف', ...months.map(monthLabel), 'الإجمالي'], rows));
+    target.innerHTML = sectionCard(
+      '📉',
+      'المصاريف',
+      table(['المصروف', ...months.map(monthLabel), 'الإجمالي'], rows, 'لا توجد بيانات', 'expenses-summary-table financial-summary-table')
+    );
   }
 
   async function loadAnnualInventory() {
