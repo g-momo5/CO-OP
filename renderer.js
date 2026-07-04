@@ -374,6 +374,11 @@ function setupEventListeners() {
       closeMovementModal();
     }
 
+    const stockAuditModal = document.getElementById('stock-audit-modal');
+    if (e.target === stockAuditModal) {
+      closeStockAuditModal();
+    }
+
     const priceEditModal = document.getElementById('price-edit-modal');
     if (e.target === priceEditModal) {
       closePriceEditModal();
@@ -3679,6 +3684,10 @@ function showAddMovementModal() {
   document.getElementById('movement-modal').classList.add('show');
 }
 
+function openMovementModal() {
+  showAddMovementModal();
+}
+
 function toggleInvoiceField() {
   const movementType = document.getElementById('movement-type').value;
   const invoiceField = document.getElementById('invoice-field');
@@ -3703,6 +3712,141 @@ function resetMovementForm() {
 
 function closeMovementModal() {
   document.getElementById('movement-modal').classList.remove('show');
+}
+
+async function getActiveOilsForStockAudit() {
+  const oils = await ipcRenderer.invoke('get-oil-prices');
+  const migratedOrder = await migrateLegacyLocalOilOrderIfNeeded();
+  return sortOilsByOrder(
+    oils.filter(oil => oil.is_active === 1 || oil.is_active === true),
+    migratedOrder
+  );
+}
+
+async function openStockAuditModal() {
+  const modal = document.getElementById('stock-audit-modal');
+  const dateInput = document.getElementById('stock-audit-date');
+  const tableBody = document.getElementById('stock-audit-oils-body');
+
+  if (!modal || !dateInput || !tableBody) return;
+
+  dateInput.value = new Date().toISOString().split('T')[0];
+  tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty">جاري تحميل الزيوت...</td></tr>';
+  modal.classList.add('show');
+
+  try {
+    const oils = await getActiveOilsForStockAudit();
+
+    if (!oils.length) {
+      tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty">لا توجد زيوت نشطة للجرد</td></tr>';
+      return;
+    }
+
+    const rows = await Promise.all(oils.map(async (oil) => {
+      const oilType = String(oil.oil_type || '').trim();
+      const currentStock = await ipcRenderer.invoke('get-current-oil-stock', oilType).catch(() => 0);
+      return `
+        <tr>
+          <td class="stock-audit-oil-name">${escapeHtml(oilType)}</td>
+          <td class="stock-audit-current">${formatArabicNumber(currentStock || 0)}</td>
+          <td>
+            <input type="text" inputmode="decimal" class="stock-audit-quantity"
+                   oninput="normalizeStockAuditQuantityInput(this)"
+                   data-oil="${escapeHtml(oilType)}" placeholder="0">
+          </td>
+        </tr>
+      `;
+    }));
+
+    tableBody.innerHTML = rows.join('');
+  } catch (error) {
+    console.error('Error loading stock audit oils:', error);
+    tableBody.innerHTML = '<tr><td colspan="3" class="stock-audit-empty error">حدث خطأ أثناء تحميل الزيوت</td></tr>';
+  }
+}
+
+function closeStockAuditModal() {
+  const modal = document.getElementById('stock-audit-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+function parseStockAuditQuantity(value) {
+  const normalized = String(value || '')
+    .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(',', '.')
+    .trim();
+  return parseFloat(normalized);
+}
+
+function normalizeStockAuditQuantityInput(input) {
+  if (!input) return;
+  const normalized = String(input.value || '')
+    .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(',', '.')
+    .replace(/[^0-9.]/g, '')
+    .replace(/(\..*)\./g, '$1');
+  if (input.value !== normalized) {
+    input.value = normalized;
+  }
+}
+
+async function saveStockAudit() {
+  const date = document.getElementById('stock-audit-date')?.value;
+  const inputs = Array.from(document.querySelectorAll('#stock-audit-oils-body .stock-audit-quantity'));
+
+  if (!date) {
+    showMessage('يرجى تحديد تاريخ الجرد', 'error');
+    return;
+  }
+
+  if (!inputs.length) {
+    showMessage('لا توجد زيوت للحفظ', 'error');
+    return;
+  }
+
+  const items = [];
+  for (const input of inputs) {
+    const oilType = String(input.dataset.oil || '').trim();
+    const rawValue = String(input.value || '').trim();
+
+    if (!rawValue) {
+      showMessage('يرجى إدخال كمية لكل زيت', 'error');
+      input.focus();
+      return;
+    }
+
+    const quantity = parseStockAuditQuantity(rawValue);
+    if (!oilType || !Number.isFinite(quantity) || quantity < 0) {
+      showMessage('يرجى إدخال كميات صحيحة', 'error');
+      input.focus();
+      return;
+    }
+
+    items.push({ oil_type: oilType, quantity });
+  }
+
+  try {
+    const result = await ipcRenderer.invoke('save-oil-stock-audit', { date, items });
+    if (!result?.success) {
+      throw new Error(result?.error || 'save_failed');
+    }
+
+    const adjusted = Number(result.adjusted) || 0;
+    const unchanged = Number(result.unchanged) || 0;
+    showMessage(`تم حفظ الجرد: ${convertToArabicNumerals(adjusted)} تعديل، ${convertToArabicNumerals(unchanged)} بدون فرق`, 'success');
+    closeStockAuditModal();
+
+    const selectedOilItem = document.querySelector('.oil-item.selected');
+    const selectedOilType = selectedOilItem ? selectedOilItem.dataset.oil : '';
+    if (selectedOilType) {
+      loadOilMovements(selectedOilType);
+    }
+  } catch (error) {
+    console.error('Error saving stock audit:', error);
+    showMessage('حدث خطأ أثناء حفظ جرد المخزن', 'error');
+  }
 }
 
 async function saveMovement() {

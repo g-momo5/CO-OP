@@ -1591,7 +1591,10 @@
                     <div class="panel-title">حركات المخزون</div>
                     <div class="panel-subtitle">دخول وخروج حسب التاريخ</div>
                   </div>
-                  <button class="btn btn-primary btn-compact" onclick="openMovementModal()">إضافة حركة</button>
+                  <div class="panel-actions">
+                    <button class="btn btn-secondary btn-compact" onclick="openStockAuditModal()">جرد المخزن</button>
+                    <button class="btn btn-primary btn-compact" onclick="openMovementModal()">إضافة حركة</button>
+                  </div>
                 </div>
                 <div id="results-section" class="results-section">
                   <div class="movements-section">
@@ -2005,6 +2008,47 @@
           <div class="modal-footer">
             <button class="btn btn-primary" onclick="saveMovement()">حفظ</button>
             <button class="btn btn-secondary" onclick="closeMovementModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stock Audit Modal -->
+      <div id="stock-audit-modal" class="modal">
+        <div class="modal-content modal-compact stock-audit-modal">
+          <div class="modal-header">
+            <h3>جرد المخزن</h3>
+            <button class="close-modal" onclick="closeStockAuditModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="form-group">
+                <label for="stock-audit-date">تاريخ الجرد:</label>
+                <input type="date" id="stock-audit-date" required>
+              </div>
+            </div>
+            <div class="stock-audit-note">
+              أدخل الكمية الفعلية لكل زيت. سيتم تسجيل فرق الجرد تلقائياً كحركة دخول أو خروج.
+            </div>
+            <div class="stock-audit-table-wrap">
+              <table class="base-table stock-audit-table">
+                <thead>
+                  <tr>
+                    <th>الزيت</th>
+                    <th>الرصيد الحالي</th>
+                    <th>الكمية الفعلية</th>
+                  </tr>
+                </thead>
+                <tbody id="stock-audit-oils-body">
+                  <tr>
+                    <td colspan="3" class="stock-audit-empty">جاري تحميل الزيوت...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveStockAudit()">حفظ الجرد</button>
+            <button class="btn btn-secondary" onclick="closeStockAuditModal()">إلغاء</button>
           </div>
         </div>
       </div>

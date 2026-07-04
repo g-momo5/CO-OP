@@ -3382,6 +3382,60 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  ipcMain.handle('save-oil-stock-audit', async (event, auditData) => {
+    try {
+      const date = String(auditData?.date || '').trim();
+      const items = Array.isArray(auditData?.items) ? auditData.items : [];
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new Error('تاريخ الجرد غير صالح');
+      }
+
+      if (items.length === 0) {
+        throw new Error('لا توجد زيوت للجرد');
+      }
+
+      let adjusted = 0;
+      let unchanged = 0;
+      const reference = `جرد المخزن ${date}`;
+
+      for (const item of items) {
+        const oilType = String(item?.oil_type || '').trim();
+        const countedQuantity = parseFloat(item?.quantity);
+
+        if (!oilType || !Number.isFinite(countedQuantity) || countedQuantity < 0) {
+          throw new Error('بيانات الجرد غير صالحة');
+        }
+
+        const stockQuery = 'SELECT type, SUM(quantity) as total FROM oil_movements WHERE oil_type = $1 GROUP BY type';
+        const stockRows = await executeQuery(stockQuery, [oilType]);
+        const currentStock = stockRows.reduce((sum, row) => {
+          const total = parseFloat(row.total) || 0;
+          if (row.type === 'in') return sum + total;
+          if (row.type === 'out') return sum - total;
+          return sum;
+        }, 0);
+
+        const difference = countedQuantity - currentStock;
+        if (Math.abs(difference) < 0.0001) {
+          unchanged += 1;
+          continue;
+        }
+
+        const movementType = difference > 0 ? 'in' : 'out';
+        const quantity = Math.abs(difference);
+        const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
+        await executeInsert(insertQuery, [oilType, date, movementType, quantity, reference], 'oil_movements');
+        adjusted += 1;
+      }
+
+      return { success: true, adjusted, unchanged };
+    } catch (error) {
+      console.error('Error saving oil stock audit:', error);
+      throw error;
+    }
+  });
+
   // Fuel movement handlers
   ipcMain.handle('add-fuel-movement', async (event, movementData) => {
     try {

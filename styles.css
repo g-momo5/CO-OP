@@ -6054,6 +6054,31 @@ select option {
   .modal-footer {
     padding: 1.5rem;
   }
+
+  .panel-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panel-actions {
+    justify-content: stretch;
+  }
+
+  .panel-actions .btn {
+    flex: 1 1 0;
+  }
+
+  .stock-audit-modal {
+    max-height: 86vh;
+  }
+
+  .stock-audit-table-wrap {
+    max-height: 52vh;
+  }
+
+  .stock-audit-quantity {
+    width: 100px;
+  }
   
   .depot-info-grid {
     grid-template-columns: 1fr;
@@ -6827,6 +6852,14 @@ select option {
   margin-bottom: 1rem;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .panel-title {
   font-weight: 700;
   color: #2c3e50;
@@ -6850,6 +6883,86 @@ select option {
 
 .movements-section {
   overflow: auto;
+}
+
+.stock-audit-modal {
+  max-width: 760px;
+}
+
+.stock-audit-note {
+  margin: 0.9rem 0 1rem;
+  padding: 0.75rem 0.9rem;
+  background: #fff7f6;
+  border: 1px solid rgba(196, 41, 29, 0.18);
+  border-radius: 10px;
+  color: #7b2a22;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.stock-audit-table-wrap {
+  overflow: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.base-table.stock-audit-table {
+  min-width: 520px;
+  margin: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.stock-audit-table th,
+.stock-audit-table td {
+  text-align: center;
+  vertical-align: middle;
+  padding: 0.7rem 0.75rem;
+}
+
+.stock-audit-table th:first-child,
+.stock-audit-table td:first-child {
+  text-align: right;
+}
+
+.stock-audit-oil-name {
+  color: #2c3e50;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stock-audit-current {
+  color: #c4291d;
+  font-weight: 900;
+}
+
+.stock-audit-quantity {
+  width: 120px;
+  max-width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.stock-audit-quantity:focus {
+  outline: none;
+  border-color: #c4291d;
+  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.12);
+}
+
+.stock-audit-empty {
+  color: #777;
+  font-weight: 700;
+  text-align: center !important;
+  padding: 1.25rem !important;
+}
+
+.stock-audit-empty.error {
+  color: #c4291d;
 }
 
 /* Sidebar prodotti (destra) - FIXED alla finestra */
