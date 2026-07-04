@@ -10168,7 +10168,6 @@ async function calculateOilRow(oilId) {
   // Validation: remaining must be <= total
   if (remaining > total && remaining > 0) {
     remainingInput.classList.add('input-error');
-    alert('خطأ: الكمية المتبقية يجب أن تكون أقل من أو تساوي الإجمالي المتاح');
     soldInput.value = '';
     if (revenueInput) {
       revenueInput.value = '';
@@ -11186,9 +11185,17 @@ function validateShiftData() {
 
       const totalInput = document.getElementById(`oil-${oilId}-total`);
       const soldInput = document.getElementById(`oil-${oilId}-sold`);
+      const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
 
       const total = parseOilQuantity(totalInput?.value);
       const sold = parseOilQuantity(soldInput?.value);
+      const remainingRaw = String(remainingInput?.value ?? '').trim();
+      const remainingParsed = parseFloat(remainingRaw.replace(',', '.'));
+      const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
+
+      if (remainingRaw !== '' && remaining > total && remaining > 0) {
+        errors.push(`${oilName}: الكمية المتبقية يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
+      }
 
       if (sold > total && sold > 0) {
         errors.push(`${oilName}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
