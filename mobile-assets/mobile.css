@@ -71,28 +71,13 @@ button {
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 0.25rem 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 25px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff3cd;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
 .main-content {
   width: min(100%, 1180px);
   margin: 0 auto;
-  padding: 128px 1rem 104px;
+  padding: 106px 1rem 104px;
   min-height: 100vh;
 }
 
-.sync-card,
 .card,
 .filter-bar,
 .metric,
@@ -103,26 +88,6 @@ button {
   box-shadow: var(--coop-shadow);
 }
 
-.sync-card {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-  padding: 1rem;
-}
-
-.sync-card > div {
-  min-height: 74px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  background: #fff7f7;
-  border: 1px solid rgba(196, 41, 29, 0.12);
-}
-
-.sync-card span,
 .metric span,
 .meta {
   display: block;
@@ -130,7 +95,6 @@ button {
   font-size: 0.92rem;
 }
 
-.sync-card strong,
 .metric strong {
   display: block;
   margin-top: 0.25rem;
@@ -148,6 +112,8 @@ button {
   display: flex;
   gap: 0.55rem;
   align-items: center;
+  justify-content: center;
+  justify-content: safe center;
   overflow-x: auto;
   padding: 0.45rem 0.75rem;
   background: #f8f9fa;
@@ -529,6 +495,56 @@ button {
   gap: 1rem;
 }
 
+.shift-day-toggle {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 12px;
+  padding: 0.45rem 0.65rem;
+  background: #fff7f7;
+  color: var(--coop-red);
+  text-align: right;
+  font-weight: 800;
+}
+
+.shift-day-toggle .title-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.25rem;
+}
+
+.shift-day-arrow {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--coop-red);
+  border: 1px solid rgba(196, 41, 29, 0.25);
+  font-size: 1.35rem;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.shift-day-card.is-open .shift-day-arrow {
+  transform: rotate(180deg);
+}
+
+.shift-day-detail {
+  display: grid;
+  gap: 1rem;
+}
+
+.shift-day-detail[hidden] {
+  display: none;
+}
+
 .shift-summary-box {
   display: grid;
   gap: 0.8rem;
@@ -575,10 +591,9 @@ button {
   }
 
   .main-content {
-    padding: 118px 0.75rem 100px;
+    padding: 96px 0.75rem 100px;
   }
 
-  .sync-card,
   .grid.two,
   .grid.three,
   .grid.four,

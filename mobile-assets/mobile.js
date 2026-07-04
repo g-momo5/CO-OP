@@ -123,7 +123,7 @@
   }
 
   function setLastSync(value) {
-    lastSync.textContent = formatDate(value);
+    if (lastSync) lastSync.textContent = formatDate(value);
   }
 
   function buildUrl(base, params) {
@@ -286,10 +286,6 @@
     setLastSync(data.lastSync);
     const chart = data.chart || {};
     content.innerHTML = `
-      <section class="grid two">
-        ${metric('الفترة', `${monthLabel(chart.fromMonth)} - ${monthLabel(chart.toMonth)}`, '📅')}
-        ${metric('نوع الرسم', 'المباعة', '⛽')}
-      </section>
       ${sectionCard('📊', 'كميات المبيعات الشهرية حسب نوع الوقود', renderHomeChartCanvas(chart))}
     `;
   }
@@ -476,20 +472,24 @@
       return;
     }
     content.innerHTML = days.map(renderShiftDayCard).join('');
+    wireShiftDayCards();
   }
 
-  function renderShiftDayCard(day) {
+  function renderShiftDayCard(day, index) {
     return `
       <section class="card shift-day-card">
-        <div class="card-title-row">
-          <h2 class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</h2>
-        </div>
+        <button class="shift-day-toggle" type="button" data-shift-day-index="${index}" aria-expanded="false">
+          <span class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</span>
+          <span class="shift-day-arrow">⌄</span>
+        </button>
         <section class="grid three">
           ${metric('إجمالي الإيرادات', formatMoney(day.totals.revenue), '💵')}
           ${metric('إجمالي المصاريف', formatMoney(day.totals.expenses), '📉')}
           ${metric('صافي اليوم', formatMoney(day.totals.net), '📈')}
         </section>
-        ${day.shifts.map(renderShiftSummary).join('')}
+        <div class="shift-day-detail" data-shift-day-detail="${index}" hidden>
+          ${day.shifts.map(renderShiftSummary).join('')}
+        </div>
       </section>
     `;
   }
@@ -511,10 +511,24 @@
     return `
       <div class="shift-summary-box">
         <h3>${escapeHtml(shift.label)} - صافي الوردية: ${formatMoney(shift.net_total)}</h3>
-        ${table(['الإيرادات', 'الكمية', 'القيمة'], revenueRows)}
+        ${table(['المنتج', 'الكمية', 'القيمة'], revenueRows)}
         ${table(['المصاريف', 'القيمة'], expenseRows, 'لا توجد مصاريف')}
       </div>
     `;
+  }
+
+  function wireShiftDayCards() {
+    document.querySelectorAll('.shift-day-toggle').forEach((button) => {
+      button.addEventListener('click', () => {
+        const index = button.dataset.shiftDayIndex;
+        const detail = document.querySelector(`[data-shift-day-detail="${index}"]`);
+        if (!detail) return;
+        const isOpen = !detail.hidden;
+        detail.hidden = isOpen;
+        button.setAttribute('aria-expanded', String(!isOpen));
+        button.closest('.shift-day-card')?.classList.toggle('is-open', !isOpen);
+      });
+    });
   }
 
   function errorMessage(error) {
