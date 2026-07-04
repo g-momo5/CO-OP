@@ -3,42 +3,6 @@ const { Pool } = require('pg');
 let pool = null;
 
 const FUEL_ORDER = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
-const OIL_ORDER = [
-  'COOP FACT 20L',
-  'COOP FACT 8L',
-  'COOP FACT 5L',
-  'COOP FACT 4L',
-  'COOP FACT 1L',
-  'SUPER STAN 180L',
-  'SUPER STAN 20L',
-  'SUPER STAN 4L',
-  'ONE EXTRA 5W/40',
-  'ONE EXTRA 5W/40 5L',
-  'CI4 15W/40 20L',
-  'CI4 5L',
-  'SJ 4L',
-  'SJ 1L',
-  'CPC 8000 4L',
-  'CPC 8000 5L',
-  'XPL 4L',
-  'SF 20/50 4L',
-  'SF 20/50 1L',
-  'HYDRAULIC 68',
-  'DIXERON 1L',
-  'تروس ١٦٠ HP ١٨ لتر',
-  'ماء أحمر راديتير',
-  'باكم ١\\٤ لتر',
-  'سايب ١ ك',
-  'رويال كلين ٨٠٠م',
-  'شامبو سيارات',
-  'ماء مقطر',
-  'نيو فاست رائحة التفاح',
-  'منظف الايدي بالمضخة',
-  'ملمع كاوتش سيارة',
-  'كورال بلومارين',
-  'ملمع تابلوه الترشاين',
-  'ماء أخضر راديتير'
-];
 const DEFAULT_EXPENSE_ROW_ORDER = [
   'اكرامية مواد',
   'مجارى',
@@ -810,12 +774,16 @@ async function getSalesSummary(queryParams) {
     ).catch(() => [])
   ]);
 
-  const fuelNames = new Set(FUEL_ORDER);
-  fuelProducts.forEach((row) => {
-    const name = String(row.name || '').trim();
-    if (name) fuelNames.add(name);
-  });
-  const oilNames = new Set(oilProducts.map((row) => String(row.name || '').trim()).filter(Boolean));
+  const fuelOrder = fuelProducts
+    .map((row) => String(row.name || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  const oilOrder = oilProducts
+    .map((row) => String(row.name || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  const fuelNames = new Set(fuelOrder.length ? fuelOrder : FUEL_ORDER);
+  const oilNames = new Set(oilOrder);
   const rowsByProduct = new Map();
 
   const getProductType = (name) => {
@@ -840,8 +808,8 @@ async function getSalesSummary(queryParams) {
     return rowsByProduct.get(cleanName);
   };
 
-  fuelNames.forEach((name) => ensure(name, 'fuel'));
-  oilNames.forEach((name) => ensure(name, 'oil'));
+  Array.from(fuelNames).forEach((name) => ensure(name, 'fuel'));
+  Array.from(oilNames).forEach((name) => ensure(name, 'oil'));
 
   shifts.map(normalizeShift).forEach((shift) => {
     const monthKey = normalizeMonth(shift.date);
@@ -883,8 +851,8 @@ async function getSalesSummary(queryParams) {
       const typeDiff = (typeOrder[a.type] ?? 2) - (typeOrder[b.type] ?? 2);
       if (typeDiff !== 0) return typeDiff;
       if (a.type === 'fuel') {
-        const fuelA = FUEL_ORDER.indexOf(a.name);
-        const fuelB = FUEL_ORDER.indexOf(b.name);
+        const fuelA = fuelOrder.length ? fuelOrder.indexOf(a.name) : FUEL_ORDER.indexOf(a.name);
+        const fuelB = fuelOrder.length ? fuelOrder.indexOf(b.name) : FUEL_ORDER.indexOf(b.name);
         if (fuelA !== -1 || fuelB !== -1) {
           if (fuelA === -1) return 1;
           if (fuelB === -1) return -1;
@@ -892,8 +860,8 @@ async function getSalesSummary(queryParams) {
         }
       }
       if (a.type === 'oil') {
-        const oilA = OIL_ORDER.indexOf(a.name);
-        const oilB = OIL_ORDER.indexOf(b.name);
+        const oilA = oilOrder.indexOf(a.name);
+        const oilB = oilOrder.indexOf(b.name);
         if (oilA !== -1 || oilB !== -1) {
           if (oilA === -1) return 1;
           if (oilB === -1) return -1;

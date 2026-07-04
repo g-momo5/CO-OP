@@ -74,7 +74,7 @@ button {
 .main-content {
   width: min(100%, 1180px);
   margin: 0 auto;
-  padding: 80px 1rem 104px;
+  padding: 80px 1rem 124px;
   min-height: 100vh;
 }
 
@@ -105,9 +105,9 @@ button {
 
 .bottom-navigation {
   position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  right: 0.5rem;
+  bottom: calc(0.55rem + env(safe-area-inset-bottom));
+  left: 0.5rem;
   z-index: 21;
   display: flex;
   gap: 0.55rem;
@@ -115,9 +115,10 @@ button {
   justify-content: center;
   justify-content: safe center;
   overflow-x: auto;
-  padding: 0.45rem 0.75rem;
+  padding: 0.55rem 0.75rem calc(0.85rem + env(safe-area-inset-bottom));
   background: #f8f9fa;
-  border-top: 1px solid #e9ecef;
+  border: 1px solid #e9ecef;
+  border-radius: 18px;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
   scrollbar-width: none;
 }
@@ -287,6 +288,14 @@ button {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.sales-summary-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: visible;
+}
+
 .base-table thead {
   background: var(--coop-ink);
 }
@@ -324,6 +333,7 @@ button {
 .sales-summary-table th:not(:first-child),
 .sales-summary-table td:not(:first-child) {
   text-align: center;
+  min-width: 82px;
 }
 
 .sales-summary-table th:last-child,
@@ -334,6 +344,26 @@ button {
 
 .sales-summary-table .sales-first-oil-row td {
   border-top: 4px solid rgba(196, 41, 29, 0.55);
+}
+
+.sales-summary-table th:first-child,
+.sales-summary-table td:first-child {
+  position: sticky;
+  inset-inline-end: 0;
+  right: 0;
+  z-index: 3;
+  min-width: 156px;
+  max-width: 156px;
+  width: 156px;
+  background: #ffffff;
+  box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sales-summary-table th:first-child {
+  z-index: 5;
+  background: var(--coop-ink);
 }
 
 .row-button {
@@ -359,13 +389,15 @@ button {
 
 .filter-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 0.55rem;
   align-items: end;
-  padding: 1rem;
+  padding: 0.75rem;
+  overflow: hidden;
 }
 
 .filter-bar label {
+  min-width: 0;
   display: grid;
   gap: 0.3rem;
   color: var(--coop-ink);
@@ -377,7 +409,7 @@ button {
   min-width: 0;
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 0.62rem 0.75rem;
+  padding: 0.52rem 0.55rem;
   background: #ffffff;
   color: var(--coop-ink);
 }
@@ -401,6 +433,7 @@ button {
 }
 
 .filter-bar button {
+  min-width: 0;
   align-self: end;
 }
 
@@ -726,7 +759,7 @@ button {
   }
 
   .main-content {
-    padding: 72px 0.55rem 96px;
+    padding: 72px 0.55rem 124px;
   }
 
   .grid.two,
@@ -741,12 +774,38 @@ button {
   }
 
   .tabs button {
-    min-width: 92px;
+    min-width: 88px;
     padding: 0.35rem 0.55rem;
   }
 
   .base-table {
     min-width: 470px;
+  }
+
+  .sales-summary-table {
+    min-width: max-content;
+  }
+
+  .sales-summary-table th:first-child,
+  .sales-summary-table td:first-child {
+    min-width: 148px;
+    max-width: 148px;
+    width: 148px;
+  }
+
+  .sales-summary-table th:not(:first-child),
+  .sales-summary-table td:not(:first-child) {
+    min-width: 76px;
+  }
+
+  .filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    padding: 0.6rem;
+  }
+
+  .filter-bar button {
+    grid-column: 1 / -1;
   }
 
   .shift-summary-box .base-table {
