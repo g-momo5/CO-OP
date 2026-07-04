@@ -321,6 +321,21 @@ button {
   border-bottom: 0;
 }
 
+.sales-summary-table th:not(:first-child),
+.sales-summary-table td:not(:first-child) {
+  text-align: center;
+}
+
+.sales-summary-table th:last-child,
+.sales-summary-table td:last-child,
+.sales-summary-table .cell-total {
+  font-weight: 800;
+}
+
+.sales-summary-table .sales-first-oil-row td {
+  border-top: 4px solid rgba(196, 41, 29, 0.55);
+}
+
 .row-button {
   width: 100%;
   min-height: 88px;
@@ -641,13 +656,14 @@ button {
   top: 0;
   z-index: 2;
   justify-self: end;
-  width: 34px;
-  height: 34px;
-  border: 2px solid var(--coop-red);
-  border-radius: 50%;
-  background: #ffffff;
-  color: var(--coop-red);
-  font-size: 1.4rem;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #000000;
+  font-size: 2.25rem;
+  font-weight: 800;
   line-height: 1;
 }
 

@@ -3,6 +3,42 @@ const { Pool } = require('pg');
 let pool = null;
 
 const FUEL_ORDER = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
+const OIL_ORDER = [
+  'COOP FACT 20L',
+  'COOP FACT 8L',
+  'COOP FACT 5L',
+  'COOP FACT 4L',
+  'COOP FACT 1L',
+  'SUPER STAN 180L',
+  'SUPER STAN 20L',
+  'SUPER STAN 4L',
+  'ONE EXTRA 5W/40',
+  'ONE EXTRA 5W/40 5L',
+  'CI4 15W/40 20L',
+  'CI4 5L',
+  'SJ 4L',
+  'SJ 1L',
+  'CPC 8000 4L',
+  'CPC 8000 5L',
+  'XPL 4L',
+  'SF 20/50 4L',
+  'SF 20/50 1L',
+  'HYDRAULIC 68',
+  'DIXERON 1L',
+  'تروس ١٦٠ HP ١٨ لتر',
+  'ماء أحمر راديتير',
+  'باكم ١\\٤ لتر',
+  'سايب ١ ك',
+  'رويال كلين ٨٠٠م',
+  'شامبو سيارات',
+  'ماء مقطر',
+  'نيو فاست رائحة التفاح',
+  'منظف الايدي بالمضخة',
+  'ملمع كاوتش سيارة',
+  'كورال بلومارين',
+  'ملمع تابلوه الترشاين',
+  'ماء أخضر راديتير'
+];
 const DEFAULT_EXPENSE_ROW_ORDER = [
   'اكرامية مواد',
   'مجارى',
@@ -782,28 +818,37 @@ async function getSalesSummary(queryParams) {
   const oilNames = new Set(oilProducts.map((row) => String(row.name || '').trim()).filter(Boolean));
   const rowsByProduct = new Map();
 
-  const ensure = (name) => {
+  const getProductType = (name) => {
+    if (fuelNames.has(name)) return 'fuel';
+    if (oilNames.has(name)) return 'oil';
+    return 'other';
+  };
+
+  const ensure = (name, forcedType = null) => {
     const cleanName = String(name || '').trim();
     if (!cleanName) return null;
     if (!rowsByProduct.has(cleanName)) {
       rowsByProduct.set(cleanName, {
         name: cleanName,
+        type: forcedType || getProductType(cleanName),
         byMonth: Object.fromEntries(months.map((month) => [month, 0])),
         total: 0
       });
+    } else if (forcedType && rowsByProduct.get(cleanName).type === 'other') {
+      rowsByProduct.get(cleanName).type = forcedType;
     }
     return rowsByProduct.get(cleanName);
   };
 
-  fuelNames.forEach(ensure);
-  oilNames.forEach(ensure);
+  fuelNames.forEach((name) => ensure(name, 'fuel'));
+  oilNames.forEach((name) => ensure(name, 'oil'));
 
   shifts.map(normalizeShift).forEach((shift) => {
     const monthKey = normalizeMonth(shift.date);
     if (!monthKey || !months.includes(monthKey)) return;
 
     Object.entries(shift.fuel_data || {}).forEach(([fuelType, data]) => {
-      const row = ensure(fuelType);
+      const row = ensure(fuelType, 'fuel');
       if (!row) return;
       const quantity = getShiftFuelSoldQuantity(fuelType, data);
       row.byMonth[monthKey] += quantity;
@@ -811,7 +856,7 @@ async function getSalesSummary(queryParams) {
     });
 
     Object.entries(shift.oil_data || {}).forEach(([oilName, data]) => {
-      const row = ensure(oilName);
+      const row = ensure(oilName, 'oil');
       if (!row) return;
       const quantity = getOilSoldQuantity(data);
       row.byMonth[monthKey] += quantity;
@@ -824,7 +869,7 @@ async function getSalesSummary(queryParams) {
     if (!product || fuelNames.has(product) || oilNames.has(product)) return;
     const monthKey = normalizeMonth(normalizeDate(sale.date));
     if (!monthKey || !months.includes(monthKey)) return;
-    const row = ensure(product);
+    const row = ensure(product, 'other');
     if (!row) return;
     const quantity = toNumber(sale.quantity);
     row.byMonth[monthKey] += quantity;
@@ -834,12 +879,26 @@ async function getSalesSummary(queryParams) {
   const rows = Array.from(rowsByProduct.values())
     .filter((row) => row.total > 0)
     .sort((a, b) => {
-      const fuelA = FUEL_ORDER.indexOf(a.name);
-      const fuelB = FUEL_ORDER.indexOf(b.name);
-      if (fuelA !== -1 || fuelB !== -1) {
-        if (fuelA === -1) return 1;
-        if (fuelB === -1) return -1;
-        return fuelA - fuelB;
+      const typeOrder = { fuel: 0, oil: 1, other: 2 };
+      const typeDiff = (typeOrder[a.type] ?? 2) - (typeOrder[b.type] ?? 2);
+      if (typeDiff !== 0) return typeDiff;
+      if (a.type === 'fuel') {
+        const fuelA = FUEL_ORDER.indexOf(a.name);
+        const fuelB = FUEL_ORDER.indexOf(b.name);
+        if (fuelA !== -1 || fuelB !== -1) {
+          if (fuelA === -1) return 1;
+          if (fuelB === -1) return -1;
+          return fuelA - fuelB;
+        }
+      }
+      if (a.type === 'oil') {
+        const oilA = OIL_ORDER.indexOf(a.name);
+        const oilB = OIL_ORDER.indexOf(b.name);
+        if (oilA !== -1 || oilB !== -1) {
+          if (oilA === -1) return 1;
+          if (oilB === -1) return -1;
+          return oilA - oilB;
+        }
       }
       return a.name.localeCompare(b.name, 'ar');
     });

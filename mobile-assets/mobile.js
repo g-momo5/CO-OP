@@ -162,11 +162,11 @@
     return payload.data;
   }
 
-  function table(headers, rows, emptyText = 'لا توجد بيانات') {
+  function table(headers, rows, emptyText = 'لا توجد بيانات', tableClass = '') {
     if (!rows.length) return `<div class="empty">${emptyText}</div>`;
     return `
       <div class="table-wrap">
-        <table class="base-table">
+        <table class="base-table ${escapeHtml(tableClass)}">
           <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>
@@ -320,18 +320,23 @@
     setLastSync(data.lastSync);
     const summary = data.summary || {};
     const months = summary.months || [];
-    const rows = (summary.rows || []).map((row) => `
-      <tr>
+    let hasSeenOil = false;
+    const rows = (summary.rows || []).map((row) => {
+      const isFirstOil = row.type === 'oil' && !hasSeenOil;
+      if (row.type === 'oil') hasSeenOil = true;
+      return `
+      <tr class="${isFirstOil ? 'sales-first-oil-row' : ''}">
         <td><strong>${escapeHtml(row.name)}</strong></td>
         ${months.map((month) => `<td>${formatNumber(row.byMonth?.[month] || 0)}</td>`).join('')}
         <td class="cell-total">${formatNumber(row.total)}</td>
       </tr>
-    `);
+    `;
+    });
     target.className = 'section-stack';
     target.innerHTML = sectionCard(
       '📊',
       'ملخص المبيعات',
-      table(['المنتج', ...months.map(monthLabel), 'الإجمالي'], rows)
+      table(['المنتج', ...months.map(monthLabel), 'الإجمالي'], rows, 'لا توجد بيانات', 'sales-summary-table')
     );
   }
 
