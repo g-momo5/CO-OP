@@ -2,11 +2,15 @@
   const state = {
     token: getTokenFromUrl(),
     apiBase: '/api/mobile-data',
-    currentView: 'overview'
+    currentView: 'overview',
+    shiftDays: []
   };
 
   const content = document.getElementById('content');
   const lastSync = document.getElementById('lastSync');
+  const shiftSummaryDialog = document.getElementById('shiftSummaryDialog');
+  const shiftSummaryDialogBody = document.getElementById('shiftSummaryDialogBody');
+  const closeShiftSummaryDialog = document.getElementById('closeShiftSummaryDialog');
   let homeChart = null;
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
@@ -74,6 +78,10 @@
   function formatMoney(value) {
     const numeric = Number(value);
     return moneyFormatter.format(Number.isFinite(numeric) ? numeric : 0);
+  }
+
+  function sumAmounts(rows) {
+    return (rows || []).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   }
 
   function formatDate(value) {
@@ -467,34 +475,43 @@
     const data = await api('shift-day-summaries', { limit: 45 });
     setLastSync(data.lastSync);
     const days = data.summaries?.days || [];
+    state.shiftDays = days;
     if (!days.length) {
       content.innerHTML = '<div class="empty">لا توجد ورديات محفوظة</div>';
       return;
     }
     content.innerHTML = days.map(renderShiftDayCard).join('');
-    wireShiftDayCards();
+    wireShiftTotalButtons();
   }
 
   function renderShiftDayCard(day, index) {
     return `
       <section class="card shift-day-card">
-        <button class="shift-day-toggle" type="button" data-shift-day-index="${index}" aria-expanded="false">
+        <div class="shift-day-heading">
           <span class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</span>
-          <span class="shift-day-arrow">⌄</span>
-        </button>
-        <section class="shift-day-totals" aria-label="إجماليات اليوم">
-          <div><span>الإيرادات</span><strong>${formatMoney(day.totals.revenue)}</strong></div>
-          <div><span>المصاريف</span><strong>${formatMoney(day.totals.expenses)}</strong></div>
-          <div><span>الصافي</span><strong>${formatMoney(day.totals.net)}</strong></div>
-        </section>
-        <div class="shift-day-detail" data-shift-day-detail="${index}" hidden>
-          ${day.shifts.map(renderShiftSummary).join('')}
         </div>
+        <section class="shift-day-totals" aria-label="إجماليات اليوم">
+          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${index}" data-summary-kind="revenues">
+            <span class="shift-total-icon">💵</span>
+            <span>إجمالي الإيرادات</span>
+            <strong>${formatMoney(day.totals.revenue)}</strong>
+          </button>
+          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${index}" data-summary-kind="expenses">
+            <span class="shift-total-icon">📉</span>
+            <span>إجمالي المصاريف</span>
+            <strong>${formatMoney(day.totals.expenses)}</strong>
+          </button>
+          <div class="shift-total-box">
+            <span class="shift-total-icon">📈</span>
+            <span>صافي اليوم</span>
+            <strong>${formatMoney(day.totals.net)}</strong>
+          </div>
+        </section>
       </section>
     `;
   }
 
-  function renderShiftSummary(shift) {
+  function renderShiftRevenueSummary(shift) {
     const revenueRows = (shift.revenues || []).map((row) => `
       <tr>
         <td>${escapeHtml(row.name)}</td>
@@ -502,6 +519,15 @@
         <td>${formatMoney(row.amount)}</td>
       </tr>
     `);
+    return `
+      <div class="shift-summary-box">
+        <h3><span>${escapeHtml(shift.label)}</span><strong>${formatMoney(sumAmounts(shift.revenues))}</strong></h3>
+        ${table(['المنتج', 'الكمية', 'القيمة'], revenueRows)}
+      </div>
+    `;
+  }
+
+  function renderShiftExpenseSummary(shift) {
     const expenseRows = (shift.expenses || []).map((row) => `
       <tr>
         <td>${escapeHtml(row.name)}</td>
@@ -510,23 +536,52 @@
     `);
     return `
       <div class="shift-summary-box">
-        <h3><span>${escapeHtml(shift.label)}</span><strong>${formatMoney(shift.net_total)}</strong></h3>
-        ${table(['المنتج', 'الكمية', 'القيمة'], revenueRows)}
+        <h3><span>${escapeHtml(shift.label)}</span><strong>${formatMoney(sumAmounts(shift.expenses))}</strong></h3>
         ${table(['المصاريف', 'القيمة'], expenseRows, 'لا توجد مصاريف')}
       </div>
     `;
   }
 
-  function wireShiftDayCards() {
-    document.querySelectorAll('.shift-day-toggle').forEach((button) => {
+  function openShiftSummaryModal(dayIndex, kind) {
+    const day = state.shiftDays[Number(dayIndex)];
+    if (!day || !shiftSummaryDialogBody) return;
+
+    const isRevenue = kind === 'revenues';
+    const title = isRevenue ? 'الإيرادات' : 'المصاريف';
+    const total = isRevenue ? day.totals.revenue : day.totals.expenses;
+    const sections = (day.shifts || [])
+      .map((shift) => isRevenue ? renderShiftRevenueSummary(shift) : renderShiftExpenseSummary(shift))
+      .join('');
+
+    shiftSummaryDialogBody.innerHTML = `
+      <div class="modal-title-row">
+        <h2>${title} - ${formatDay(day.date)}</h2>
+        <strong>${formatMoney(total)}</strong>
+      </div>
+      <div class="modal-section-stack">
+        ${sections || '<div class="empty">لا توجد بيانات</div>'}
+      </div>
+    `;
+
+    if (shiftSummaryDialog?.showModal) {
+      shiftSummaryDialog.showModal();
+    } else {
+      shiftSummaryDialog?.setAttribute('open', '');
+    }
+  }
+
+  function closeSummaryModal() {
+    if (shiftSummaryDialog?.open && shiftSummaryDialog.close) {
+      shiftSummaryDialog.close();
+    } else {
+      shiftSummaryDialog?.removeAttribute('open');
+    }
+  }
+
+  function wireShiftTotalButtons() {
+    document.querySelectorAll('.shift-total-button').forEach((button) => {
       button.addEventListener('click', () => {
-        const index = button.dataset.shiftDayIndex;
-        const detail = document.querySelector(`[data-shift-day-detail="${index}"]`);
-        if (!detail) return;
-        const isOpen = !detail.hidden;
-        detail.hidden = isOpen;
-        button.setAttribute('aria-expanded', String(!isOpen));
-        button.closest('.shift-day-card')?.classList.toggle('is-open', !isOpen);
+        openShiftSummaryModal(button.dataset.shiftDayIndex, button.dataset.summaryKind);
       });
     });
   }
@@ -560,6 +615,11 @@
 
   document.querySelectorAll('.tabs button').forEach((button) => {
     button.addEventListener('click', () => loadView(button.dataset.view));
+  });
+
+  closeShiftSummaryDialog?.addEventListener('click', closeSummaryModal);
+  shiftSummaryDialog?.addEventListener('click', (event) => {
+    if (event.target === shiftSummaryDialog) closeSummaryModal();
   });
 
   if (!state.token) {

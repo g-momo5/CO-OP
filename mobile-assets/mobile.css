@@ -58,20 +58,9 @@ button {
 
 .header-top {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-}
-
-.site-logo {
-  width: 54px;
-  height: 40px;
-  object-fit: contain;
-  flex: 0 0 auto;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  padding: 0.18rem;
 }
 
 .app-title {
@@ -508,45 +497,26 @@ button {
   border-radius: 10px;
 }
 
-.shift-day-toggle {
+.shift-day-heading {
   width: 100%;
   min-height: 38px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 0.75rem;
-  border: 0;
   border-radius: 8px;
   padding: 0.25rem 0.45rem;
   background: #fff7f7;
   color: var(--coop-red);
-  text-align: right;
+  text-align: center;
   font-weight: 800;
 }
 
-.shift-day-toggle .title-main {
+.shift-day-heading .title-main {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 1.05rem;
-}
-
-.shift-day-arrow {
-  width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #ffffff;
-  color: var(--coop-red);
-  border: 1px solid rgba(196, 41, 29, 0.25);
-  font-size: 1.1rem;
-  line-height: 1;
-  transition: transform 0.2s ease;
-}
-
-.shift-day-card.is-open .shift-day-arrow {
-  transform: rotate(180deg);
 }
 
 .shift-day-totals {
@@ -555,25 +525,47 @@ button {
   gap: 0.35rem;
 }
 
-.shift-day-totals > div {
+.shift-total-box {
   min-width: 0;
   display: grid;
   gap: 0.05rem;
   justify-items: center;
+  align-content: center;
   border: 1px solid rgba(196, 41, 29, 0.12);
   border-radius: 8px;
   padding: 0.25rem 0.2rem;
   background: #fffafa;
   text-align: center;
+  color: var(--coop-ink);
 }
 
-.shift-day-totals span {
+.shift-total-button {
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.shift-total-button:hover,
+.shift-total-button:focus-visible {
+  outline: none;
+  border-color: var(--coop-red);
+  box-shadow: 0 3px 10px rgba(196, 41, 29, 0.16);
+  transform: translateY(-1px);
+}
+
+.shift-total-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.shift-total-box span:not(.shift-total-icon) {
   color: var(--coop-muted);
   font-size: 0.78rem;
   line-height: 1.2;
 }
 
-.shift-day-totals strong {
+.shift-total-box strong {
   max-width: 100%;
   color: var(--coop-red);
   font-size: 0.92rem;
@@ -581,16 +573,6 @@ button {
   direction: ltr;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.shift-day-detail {
-  display: grid;
-  gap: 0.5rem;
-  padding-top: 0.15rem;
-}
-
-.shift-day-detail[hidden] {
-  display: none;
 }
 
 .shift-summary-box {
@@ -627,6 +609,75 @@ button {
   font-size: 0.84rem;
 }
 
+.mobile-modal {
+  width: min(94vw, 780px);
+  max-height: 88vh;
+  border: 0;
+  border-radius: 12px;
+  padding: 0;
+  background: transparent;
+  color: var(--coop-ink);
+  font-family: "Noto Naskh Arabic", Tahoma, Arial, sans-serif;
+}
+
+.mobile-modal::backdrop {
+  background: rgba(44, 62, 80, 0.55);
+}
+
+.mobile-modal-panel {
+  position: relative;
+  display: grid;
+  gap: 0.8rem;
+  max-height: 88vh;
+  overflow: auto;
+  border-radius: 12px;
+  padding: 1rem;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
+}
+
+.modal-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  justify-self: end;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--coop-red);
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--coop-red);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: #fff7f7;
+}
+
+.modal-title-row h2 {
+  margin: 0;
+  color: var(--coop-red);
+  font-size: 1.1rem;
+}
+
+.modal-title-row strong {
+  direction: ltr;
+  color: var(--coop-red);
+  font-size: 1rem;
+}
+
+.modal-section-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .profit-summary-row td,
 .profit-summary-row strong,
 .profit-net-row td,
@@ -658,15 +709,6 @@ button {
     padding: 0.45rem 0.7rem 0.5rem;
   }
 
-  .header-top {
-    gap: 0.45rem;
-  }
-
-  .site-logo {
-    width: 44px;
-    height: 32px;
-  }
-
   .main-content {
     padding: 72px 0.55rem 96px;
   }
@@ -689,6 +731,18 @@ button {
 
   .base-table {
     min-width: 470px;
+  }
+
+  .shift-summary-box .base-table {
+    min-width: 320px;
+  }
+
+  .mobile-modal {
+    width: 96vw;
+  }
+
+  .mobile-modal-panel {
+    padding: 0.75rem;
   }
 
   .bar-row {

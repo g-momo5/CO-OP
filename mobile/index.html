@@ -15,7 +15,6 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="header-top">
-        <img class="site-logo" src="/assets/logo_cpc.png" alt="CO-OP">
         <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
       </div>
     </header>
@@ -35,6 +34,13 @@
       <button data-view="shift-day-summaries"><span>📋</span>سجل الورديات</button>
     </nav>
   </div>
+
+  <dialog id="shiftSummaryDialog" class="mobile-modal">
+    <div class="mobile-modal-panel">
+      <button id="closeShiftSummaryDialog" class="modal-close" type="button" aria-label="Close">×</button>
+      <div id="shiftSummaryDialogBody"></div>
+    </div>
+  </dialog>
 
   <script src="/mobile-assets/mobile.js"></script>
 </body>
