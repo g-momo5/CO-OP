@@ -51,7 +51,11 @@ button {
   z-index: 20;
   background: linear-gradient(to bottom, var(--coop-red) 0%, var(--coop-red-dark) 100%);
   color: #ffffff;
-  padding: 0.7rem 1rem 0.8rem;
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.95rem 1rem 1.05rem;
   text-align: center;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
@@ -65,16 +69,16 @@ button {
 
 .app-title {
   margin: 0;
-  font-size: clamp(1.22rem, 4.6vw, 2.25rem);
+  font-size: clamp(1.45rem, 5.8vw, 2.65rem);
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.18;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .main-content {
   width: min(100%, 1180px);
   margin: 0 auto;
-  padding: 92px 1rem 124px;
+  padding: 108px 1rem 124px;
   min-height: 100vh;
 }
 
@@ -296,6 +300,14 @@ button {
   overflow: visible;
 }
 
+#salesSummaryBody .table-wrap {
+  max-height: calc(100vh - 270px);
+  min-height: 260px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .base-table thead {
   background: var(--coop-ink);
 }
@@ -351,7 +363,7 @@ button {
   position: sticky;
   inset-inline-end: 0;
   right: 0;
-  z-index: 3;
+  z-index: 8;
   min-width: 156px;
   max-width: 156px;
   width: 156px;
@@ -362,7 +374,14 @@ button {
 }
 
 .sales-summary-table th:first-child {
-  z-index: 5;
+  z-index: 12;
+  background: var(--coop-ink);
+}
+
+.sales-summary-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   background: var(--coop-ink);
 }
 
@@ -755,11 +774,16 @@ button {
 
 @media (max-width: 560px) {
   .topbar {
-    padding: 0.65rem 0.75rem 0.72rem;
+    min-height: 94px;
+    padding: 0.95rem 0.8rem 1rem;
+  }
+
+  .app-title {
+    font-size: clamp(1.38rem, 6.4vw, 1.9rem);
   }
 
   .main-content {
-    padding: 86px 0.55rem 124px;
+    padding: 112px 0.55rem 124px;
   }
 
   .grid.two,
@@ -788,9 +812,9 @@ button {
 
   .sales-summary-table th:first-child,
   .sales-summary-table td:first-child {
-    min-width: 148px;
-    max-width: 148px;
-    width: 148px;
+    min-width: 154px;
+    max-width: 154px;
+    width: 154px;
   }
 
   .sales-summary-table th:not(:first-child),
@@ -806,6 +830,11 @@ button {
 
   .filter-bar button {
     grid-column: 1 / -1;
+  }
+
+  #salesSummaryBody .table-wrap {
+    max-height: calc(100vh - 320px);
+    min-height: 300px;
   }
 
   .shift-summary-box .base-table {
