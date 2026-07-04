@@ -482,10 +482,10 @@
           <span class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</span>
           <span class="shift-day-arrow">⌄</span>
         </button>
-        <section class="grid three">
-          ${metric('إجمالي الإيرادات', formatMoney(day.totals.revenue), '💵')}
-          ${metric('إجمالي المصاريف', formatMoney(day.totals.expenses), '📉')}
-          ${metric('صافي اليوم', formatMoney(day.totals.net), '📈')}
+        <section class="shift-day-totals" aria-label="إجماليات اليوم">
+          <div><span>الإيرادات</span><strong>${formatMoney(day.totals.revenue)}</strong></div>
+          <div><span>المصاريف</span><strong>${formatMoney(day.totals.expenses)}</strong></div>
+          <div><span>الصافي</span><strong>${formatMoney(day.totals.net)}</strong></div>
         </section>
         <div class="shift-day-detail" data-shift-day-detail="${index}" hidden>
           ${day.shifts.map(renderShiftSummary).join('')}
@@ -510,7 +510,7 @@
     `);
     return `
       <div class="shift-summary-box">
-        <h3>${escapeHtml(shift.label)} - صافي الوردية: ${formatMoney(shift.net_total)}</h3>
+        <h3><span>${escapeHtml(shift.label)}</span><strong>${formatMoney(shift.net_total)}</strong></h3>
         ${table(['المنتج', 'الكمية', 'القيمة'], revenueRows)}
         ${table(['المصاريف', 'القيمة'], expenseRows, 'لا توجد مصاريف')}
       </div>
