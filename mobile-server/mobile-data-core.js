@@ -3,6 +3,15 @@ const { Pool } = require('pg');
 let pool = null;
 
 const FUEL_ORDER = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
+const DEFAULT_EXPENSE_ROW_ORDER = [
+  'اكرامية مواد',
+  'مجارى',
+  'مياة للمحطة',
+  'كهرباء للمحطة',
+  'سولار للديزل',
+  'رسوم البوسطة',
+  'تامينات'
+];
 
 function getDatabaseUrl() {
   return process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL || '';
@@ -133,6 +142,16 @@ function normalizeDateRange(query = {}) {
     : { startDate: defaults.startDate, endDate: defaults.endDate };
 }
 
+function normalizeMonthRange(queryParams = {}) {
+  const defaults = getDefaultMonthRange();
+  let toMonth = normalizeMonth(queryParams.toMonth) || defaults.month;
+  let fromMonth = normalizeMonth(queryParams.fromMonth) || `${toMonth.slice(0, 4)}-01`;
+  if (fromMonth > toMonth) {
+    fromMonth = `${toMonth.slice(0, 4)}-01`;
+  }
+  return { fromMonth, toMonth };
+}
+
 function getShiftFuelSoldQuantity(fuelType, data) {
   if (!data || typeof data !== 'object') return 0;
   let totalQuantity = toNumber(data.totalQuantity);
@@ -225,6 +244,59 @@ function normalizeShift(row = {}) {
     grand_total: toNumber(row.grand_total ?? legacyData.grand_total),
     updated_at: row.updated_at || row.created_at || null
   };
+}
+
+function getOilSoldQuantity(data) {
+  return Math.max(toNumber(data?.sold), 0);
+}
+
+function getOilRevenue(data) {
+  const direct = toNumber(data?.revenue ?? data?.total);
+  if (direct > 0) return direct;
+  const quantity = getOilSoldQuantity(data) - toNumber(data?.open);
+  return Math.max(quantity, 0) * toNumber(data?.price);
+}
+
+function buildShiftExpenseEntries(shift) {
+  if (shift.expense_items.length > 0) {
+    return shift.expense_items.map((item) => ({
+      date: shift.date,
+      shift_number: shift.shift_number,
+      description: item.description || `مصروف ${item.index}`,
+      amount: item.amount,
+      is_aggregated: false,
+      line_index: item.index
+    }));
+  }
+
+  if (shift.total_expenses > 0) {
+    return [{
+      date: shift.date,
+      shift_number: shift.shift_number,
+      description: 'مصروفات الوردية',
+      amount: shift.total_expenses,
+      is_aggregated: true,
+      line_index: null
+    }];
+  }
+
+  return [];
+}
+
+function sortArabicRowsByOrder(rows, order, labelKey = 'name') {
+  const normalizedOrder = order.map((value) => String(value || '').trim().toLowerCase());
+  return [...rows].sort((a, b) => {
+    const aLabel = String(a[labelKey] || '').trim();
+    const bLabel = String(b[labelKey] || '').trim();
+    const aIndex = normalizedOrder.indexOf(aLabel.toLowerCase());
+    const bIndex = normalizedOrder.indexOf(bLabel.toLowerCase());
+    if (aIndex !== -1 || bIndex !== -1) {
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    }
+    return aLabel.localeCompare(bLabel, 'ar');
+  });
 }
 
 async function query(sql, params = []) {
@@ -616,6 +688,353 @@ async function getProfit(queryParams) {
   }).sort((a, b) => b.month_key.localeCompare(a.month_key));
 }
 
+async function getHomeChart(queryParams) {
+  const defaults = getDefaultMonthRange();
+  const { fromMonth, toMonth } = normalizeMonthRange({
+    fromMonth: queryParams.fromMonth || `${defaults.month.slice(0, 4)}-01`,
+    toMonth: queryParams.toMonth || defaults.month
+  });
+  const months = buildMonthRange(fromMonth, toMonth);
+  const fromRange = monthToRange(fromMonth);
+  const toRange = monthToRange(toMonth);
+  if (!months.length || !fromRange || !toRange) {
+    return { fromMonth, toMonth, months: [], rows: [] };
+  }
+
+  const report = await getReport({ startDate: fromRange.startDate, endDate: toRange.endDate });
+  const rowsByFuel = new Map();
+  FUEL_ORDER.forEach((fuelType) => {
+    rowsByFuel.set(fuelType, {
+      name: fuelType,
+      quantity: 0,
+      byMonth: Object.fromEntries(months.map((month) => [month, 0]))
+    });
+  });
+
+  const shiftRows = await query(
+    `SELECT date, fuel_data, data
+     FROM shifts
+     WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)
+     ORDER BY date ASC, shift_number ASC, id ASC`,
+    [fromRange.startDate, toRange.endDate]
+  ).catch(() => []);
+
+  shiftRows.forEach((row) => {
+    const monthKey = normalizeMonth(normalizeDate(row.date));
+    if (!monthKey || !months.includes(monthKey)) return;
+    const legacyData = parseStoredObject(row.data, {});
+    const fuelData = parseStoredObject(row.fuel_data || legacyData.fuel_data, {});
+    Object.entries(fuelData).forEach(([fuelType, data]) => {
+      if (!rowsByFuel.has(fuelType)) {
+        rowsByFuel.set(fuelType, {
+          name: fuelType,
+          quantity: 0,
+          byMonth: Object.fromEntries(months.map((month) => [month, 0]))
+        });
+      }
+      const quantity = getShiftFuelSoldQuantity(fuelType, data);
+      const entry = rowsByFuel.get(fuelType);
+      entry.byMonth[monthKey] += quantity;
+      entry.quantity += quantity;
+    });
+  });
+
+  return {
+    fromMonth,
+    toMonth,
+    months,
+    totals: report.fuelTotals || [],
+    rows: sortArabicRowsByOrder(Array.from(rowsByFuel.values()), FUEL_ORDER)
+  };
+}
+
+async function getSalesSummary(queryParams) {
+  const { fromMonth, toMonth } = normalizeMonthRange(queryParams);
+  const months = buildMonthRange(fromMonth, toMonth);
+  const fromRange = monthToRange(fromMonth);
+  const toRange = monthToRange(toMonth);
+  if (!months.length || !fromRange || !toRange) {
+    return { fromMonth, toMonth, months: [], rows: [] };
+  }
+
+  const [fuelProducts, oilProducts, shifts, salesRows] = await Promise.all([
+    query("SELECT product_name AS name FROM products WHERE product_type = 'fuel' ORDER BY product_name").catch(() => []),
+    query("SELECT product_name AS name FROM products WHERE product_type = 'oil' ORDER BY product_name").catch(() => []),
+    query(
+      `SELECT date, shift_number, data, fuel_data, fuel_total, oil_data, oil_total,
+              wash_lube_revenue, total_expenses, grand_total, created_at, updated_at
+       FROM shifts
+       WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)
+       ORDER BY date ASC, shift_number ASC, id ASC`,
+      [fromRange.startDate, toRange.endDate]
+    ).catch(() => []),
+    query(
+      'SELECT date, fuel_type, quantity, total_amount FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+      [fromRange.startDate, toRange.endDate]
+    ).catch(() => [])
+  ]);
+
+  const fuelNames = new Set(FUEL_ORDER);
+  fuelProducts.forEach((row) => {
+    const name = String(row.name || '').trim();
+    if (name) fuelNames.add(name);
+  });
+  const oilNames = new Set(oilProducts.map((row) => String(row.name || '').trim()).filter(Boolean));
+  const rowsByProduct = new Map();
+
+  const ensure = (name) => {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return null;
+    if (!rowsByProduct.has(cleanName)) {
+      rowsByProduct.set(cleanName, {
+        name: cleanName,
+        byMonth: Object.fromEntries(months.map((month) => [month, 0])),
+        total: 0
+      });
+    }
+    return rowsByProduct.get(cleanName);
+  };
+
+  fuelNames.forEach(ensure);
+  oilNames.forEach(ensure);
+
+  shifts.map(normalizeShift).forEach((shift) => {
+    const monthKey = normalizeMonth(shift.date);
+    if (!monthKey || !months.includes(monthKey)) return;
+
+    Object.entries(shift.fuel_data || {}).forEach(([fuelType, data]) => {
+      const row = ensure(fuelType);
+      if (!row) return;
+      const quantity = getShiftFuelSoldQuantity(fuelType, data);
+      row.byMonth[monthKey] += quantity;
+      row.total += quantity;
+    });
+
+    Object.entries(shift.oil_data || {}).forEach(([oilName, data]) => {
+      const row = ensure(oilName);
+      if (!row) return;
+      const quantity = getOilSoldQuantity(data);
+      row.byMonth[monthKey] += quantity;
+      row.total += quantity;
+    });
+  });
+
+  salesRows.forEach((sale) => {
+    const product = String(sale.fuel_type || '').trim();
+    if (!product || fuelNames.has(product) || oilNames.has(product)) return;
+    const monthKey = normalizeMonth(normalizeDate(sale.date));
+    if (!monthKey || !months.includes(monthKey)) return;
+    const row = ensure(product);
+    if (!row) return;
+    const quantity = toNumber(sale.quantity);
+    row.byMonth[monthKey] += quantity;
+    row.total += quantity;
+  });
+
+  const rows = Array.from(rowsByProduct.values())
+    .filter((row) => row.total > 0)
+    .sort((a, b) => {
+      const fuelA = FUEL_ORDER.indexOf(a.name);
+      const fuelB = FUEL_ORDER.indexOf(b.name);
+      if (fuelA !== -1 || fuelB !== -1) {
+        if (fuelA === -1) return 1;
+        if (fuelB === -1) return -1;
+        return fuelA - fuelB;
+      }
+      return a.name.localeCompare(b.name, 'ar');
+    });
+
+  return { fromMonth, toMonth, months, rows };
+}
+
+async function getExpenses(queryParams) {
+  const { fromMonth, toMonth } = normalizeMonthRange(queryParams);
+  const months = buildMonthRange(fromMonth, toMonth);
+  const fromRange = monthToRange(fromMonth);
+  const toRange = monthToRange(toMonth);
+  const minAmount = queryParams.minAmount === undefined || queryParams.minAmount === '' ? null : toNumber(queryParams.minAmount);
+  const maxAmount = queryParams.maxAmount === undefined || queryParams.maxAmount === '' ? null : toNumber(queryParams.maxAmount);
+  const searchTerm = String(queryParams.searchTerm || '').trim().toLowerCase();
+
+  if (!months.length || !fromRange || !toRange) {
+    return { fromMonth, toMonth, months: [], rows: [], entries: [] };
+  }
+
+  const shiftRows = await query(
+    `SELECT date, shift_number, data, fuel_data, fuel_total, oil_data, oil_total,
+            wash_lube_revenue, total_expenses, grand_total, created_at, updated_at
+     FROM shifts
+     WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)
+     ORDER BY date DESC, shift_number DESC, id DESC`,
+    [fromRange.startDate, toRange.endDate]
+  ).catch(() => []);
+
+  const entries = shiftRows
+    .map(normalizeShift)
+    .flatMap(buildShiftExpenseEntries)
+    .filter((entry) => {
+      if (minAmount !== null && entry.amount < minAmount) return false;
+      if (maxAmount !== null && entry.amount > maxAmount) return false;
+      if (!searchTerm) return true;
+      return String(entry.description || '').toLowerCase().includes(searchTerm);
+    });
+
+  const byDescription = new Map();
+  entries.forEach((entry) => {
+    const monthKey = normalizeMonth(entry.date);
+    if (!monthKey || !months.includes(monthKey)) return;
+    const description = entry.description || 'مصروفات';
+    if (!byDescription.has(description)) {
+      byDescription.set(description, {
+        description,
+        byMonth: Object.fromEntries(months.map((month) => [month, 0])),
+        total: 0
+      });
+    }
+    const row = byDescription.get(description);
+    row.byMonth[monthKey] += entry.amount;
+    row.total += entry.amount;
+  });
+
+  const rows = sortArabicRowsByOrder(Array.from(byDescription.values()), DEFAULT_EXPENSE_ROW_ORDER, 'description')
+    .sort((a, b) => {
+      const orderA = DEFAULT_EXPENSE_ROW_ORDER.indexOf(a.description);
+      const orderB = DEFAULT_EXPENSE_ROW_ORDER.indexOf(b.description);
+      if (orderA !== -1 || orderB !== -1) return 0;
+      return b.total - a.total || a.description.localeCompare(b.description, 'ar');
+    });
+
+  return { fromMonth, toMonth, months, rows, entries };
+}
+
+async function getAnnualInventory(queryParams) {
+  const selectedYear = parseInt(queryParams.year, 10);
+  const rows = await query(`
+    SELECT id, year, prev_balance, station_profit, bank_balance, safe_balance,
+           accounting_remainder, customers_balance, vouchers_balance, visa_balance,
+           expected_total, actual_total, difference, expected_items, actual_items,
+           status, finalized, finalized_at, created_at, updated_at
+    FROM annual_inventories
+    ORDER BY year DESC
+  `).catch(() => []);
+
+  const records = rows.map((row) => ({
+    id: row.id,
+    year: String(row.year),
+    fields: {
+      prev_balance: toNumber(row.prev_balance),
+      station_profit: toNumber(row.station_profit),
+      bank_balance: toNumber(row.bank_balance),
+      safe_balance: toNumber(row.safe_balance),
+      accounting_remainder: toNumber(row.accounting_remainder),
+      customers_balance: toNumber(row.customers_balance),
+      vouchers_balance: toNumber(row.vouchers_balance),
+      visa_balance: toNumber(row.visa_balance)
+    },
+    expected_total: toNumber(row.expected_total),
+    actual_total: toNumber(row.actual_total),
+    difference: toNumber(row.difference),
+    expected_items: parseStoredArray(row.expected_items, []),
+    actual_items: parseStoredArray(row.actual_items, []),
+    status: row.status || 'balanced',
+    finalized: Number(row.finalized) === 1 || row.finalized === true,
+    finalized_at: row.finalized_at,
+    updated_at: row.updated_at
+  }));
+
+  const currentYear = String(new Date().getFullYear());
+  const year = Number.isFinite(selectedYear)
+    ? String(selectedYear)
+    : (records[0]?.year || currentYear);
+  return {
+    years: Array.from(new Set([currentYear, ...records.map((record) => record.year)])).sort((a, b) => Number(b) - Number(a)),
+    selectedYear: year,
+    record: records.find((record) => record.year === year) || null,
+    records
+  };
+}
+
+function buildShiftSummaryRows(shift) {
+  const revenues = [];
+  FUEL_ORDER.forEach((fuelType) => {
+    const data = shift.fuel_data?.[fuelType];
+    if (!data) return;
+    const amount = toNumber(data.cash ?? data.total);
+    const quantity = getShiftFuelSoldQuantity(fuelType, data);
+    if (amount <= 0 && quantity <= 0) return;
+    revenues.push({ name: fuelType, quantity, amount, type: 'fuel' });
+  });
+
+  Object.entries(shift.oil_data || {}).forEach(([oilName, data]) => {
+    const quantity = getOilSoldQuantity(data);
+    const amount = getOilRevenue(data);
+    if (amount <= 0 && quantity <= 0) return;
+    revenues.push({ name: oilName, quantity, amount, type: 'oil' });
+  });
+
+  if (shift.wash_lube_revenue > 0) {
+    revenues.push({ name: 'غسيل و تشحيم', quantity: null, amount: shift.wash_lube_revenue, type: 'fixed' });
+  }
+
+  shift.revenue_items.forEach((item) => {
+    revenues.push({
+      name: item.description || `إيراد ${item.index}`,
+      quantity: item.quantity ?? null,
+      amount: item.amount,
+      type: 'extra'
+    });
+  });
+
+  return {
+    revenues,
+    expenses: buildShiftExpenseEntries(shift).map((entry) => ({
+      name: entry.description,
+      amount: entry.amount
+    }))
+  };
+}
+
+async function getShiftDaySummaries(queryParams) {
+  const safeLimit = Math.max(1, Math.min(parseInt(queryParams.limit, 10) || 31, 120));
+  const rows = await query(
+    `SELECT date, shift_number, data, fuel_data, fuel_total, oil_data, oil_total,
+            wash_lube_revenue, total_expenses, grand_total, created_at, updated_at
+     FROM shifts
+     WHERE (is_saved = 1 OR is_saved IS NULL)
+     ORDER BY date DESC, shift_number DESC, id DESC
+     LIMIT $1`,
+    [safeLimit * 2]
+  ).catch(() => []);
+
+  const days = new Map();
+  rows.map(normalizeShift).forEach((shift) => {
+    if (!days.has(shift.date)) {
+      days.set(shift.date, {
+        date: shift.date,
+        shifts: [],
+        totals: { revenue: 0, expenses: 0, net: 0 }
+      });
+    }
+    const day = days.get(shift.date);
+    const summary = buildShiftSummaryRows(shift);
+    day.shifts.push({
+      date: shift.date,
+      shift_number: shift.shift_number,
+      label: shift.shift_number === 2 ? 'وردية ليل' : 'وردية صباح',
+      net_total: shift.grand_total,
+      total_revenue: shift.grand_total + shift.total_expenses,
+      total_expenses: shift.total_expenses,
+      revenues: summary.revenues,
+      expenses: summary.expenses
+    });
+    day.totals.revenue += shift.grand_total + shift.total_expenses;
+    day.totals.expenses += shift.total_expenses;
+    day.totals.net += shift.grand_total;
+  });
+
+  return { days: Array.from(days.values()).slice(0, safeLimit) };
+}
+
 async function getPrices() {
   const [fuelRows, oilRows] = await Promise.all([
     query("SELECT product_name AS name, current_price AS price, effective_date, is_active FROM products WHERE product_type = 'fuel' ORDER BY product_name").catch(() => []),
@@ -656,12 +1075,22 @@ async function getMobileData(queryParams = {}) {
   switch (view) {
     case 'overview':
       return getOverview();
+    case 'home-chart':
+      return { chart: await getHomeChart(queryParams), lastSync: await getLastDataTimestamp() };
+    case 'sales-summary':
+      return { summary: await getSalesSummary(queryParams), lastSync: await getLastDataTimestamp() };
     case 'shifts':
       return { shifts: await getShifts(queryParams.limit) };
+    case 'shift-day-summaries':
+      return { summaries: await getShiftDaySummaries(queryParams), lastSync: await getLastDataTimestamp() };
     case 'shift-detail':
       return { shift: await getShiftDetail(queryParams) };
     case 'report':
       return { report: await getReport(queryParams) };
+    case 'expenses':
+      return { expenses: await getExpenses(queryParams), lastSync: await getLastDataTimestamp() };
+    case 'annual-inventory':
+      return { annual: await getAnnualInventory(queryParams), lastSync: await getLastDataTimestamp() };
     case 'stock':
       return { fuelStock: await getFuelStock(), oilStock: await getOilStock() };
     case 'safe-book':

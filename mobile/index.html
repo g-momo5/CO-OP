@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/mobile-assets/mobile.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -37,20 +38,13 @@
 
     <nav class="tabs bottom-navigation" aria-label="Mobile sections">
       <button class="active" data-view="overview"><span>🏠</span>الرئيسية</button>
-      <button data-view="shifts"><span>📋</span>الورديات</button>
-      <button data-view="report"><span>📊</span>التقرير</button>
-      <button data-view="charts"><span>📈</span>الرسوم</button>
-      <button data-view="stock"><span>📦</span>المخزن</button>
-      <button data-view="safe-book"><span>💰</span>الخزنة</button>
-      <button data-view="profit"><span>📈</span>الأرباح</button>
-      <button data-view="prices"><span>💵</span>الأسعار</button>
+      <button data-view="sales-summary"><span>📊</span>ملخص المبيعات</button>
+      <button data-view="profit"><span>📈</span>المكسب</button>
+      <button data-view="expenses"><span>📉</span>المصاريف</button>
+      <button data-view="annual-inventory"><span>📒</span>جرد سنوي</button>
+      <button data-view="shift-day-summaries"><span>📋</span>سجل الورديات</button>
     </nav>
   </div>
-
-  <dialog id="shiftDialog" class="shift-dialog">
-    <button id="closeShiftDialog" class="icon-button" aria-label="Close">×</button>
-    <div id="shiftDetail"></div>
-  </dialog>
 
   <script src="/mobile-assets/mobile.js"></script>
 </body>

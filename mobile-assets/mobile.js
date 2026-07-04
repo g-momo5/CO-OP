@@ -7,18 +7,42 @@
 
   const content = document.getElementById('content');
   const lastSync = document.getElementById('lastSync');
-  const dialog = document.getElementById('shiftDialog');
-  const shiftDetail = document.getElementById('shiftDetail');
-  const closeDialog = document.getElementById('closeShiftDialog');
+  let homeChart = null;
+  const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
+  const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 
-  const numberFormatter = new Intl.NumberFormat('it-IT', {
-    maximumFractionDigits: 2
-  });
+  const monthNames = [
+    'يناير',
+    'فبراير',
+    'مارس',
+    'أبريل',
+    'مايو',
+    'يونيو',
+    'يوليو',
+    'أغسطس',
+    'سبتمبر',
+    'أكتوبر',
+    'نوفمبر',
+    'ديسمبر'
+  ];
 
-  const moneyFormatter = new Intl.NumberFormat('it-IT', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2
-  });
+  const profitRows = [
+    ['fuel_diesel', 'سولار', 'revenue'],
+    ['fuel_80', 'بنزين ٨٠', 'revenue'],
+    ['fuel_92', 'بنزين ٩٢', 'revenue'],
+    ['fuel_95', 'بنزين ٩٥', 'revenue'],
+    ['oil_total', 'الزيوت', 'revenue'],
+    ['wash_lube_month', 'غسيل و تشحيم', 'revenue'],
+    ['bonuses', 'حوافز', 'revenue'],
+    ['commission_diff', 'فرق العمولة', 'revenue'],
+    ['total_positive', 'إجمالي الإيرادات', 'summary'],
+    ['expenses_month', 'المصاريف', 'deduction'],
+    ['cash_insurance_month', 'تأمين نقدى', 'deduction'],
+    ['deposit_tax', 'ضريبة المنبع', 'deduction'],
+    ['bonus_tax', 'ضرائب الحافز', 'deduction'],
+    ['total_deductions', 'إجمالي الخصومات', 'summary'],
+    ['net_profit', 'صافي المكسب', 'net']
+  ];
 
   function getTokenFromUrl() {
     const params = new URLSearchParams(window.location.search);
@@ -71,14 +95,21 @@
     return year && month && day ? `${day}/${month}/${year}` : escapeHtml(value);
   }
 
-  function todayMonthRange() {
+  function monthLabel(monthKey) {
+    const monthIndex = parseInt(String(monthKey || '').slice(5, 7), 10) - 1;
+    const year = String(monthKey || '').slice(0, 4);
+    return `${monthNames[monthIndex] || monthKey} ${year}`;
+  }
+
+  function currentMonthRange() {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const endDay = new Date(year, now.getMonth() + 1, 0).getDate();
     return {
+      fromMonth: `${year}-01`,
+      toMonth: `${year}-${month}`,
       startDate: `${year}-${month}-01`,
-      endDate: `${year}-${month}-${String(endDay).padStart(2, '0')}`,
+      endDate: new Date(year, now.getMonth() + 1, 0).toISOString().slice(0, 10),
       month: `${year}-${month}`
     };
   }
@@ -89,6 +120,10 @@
 
   function setError(message) {
     content.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+  }
+
+  function setLastSync(value) {
+    lastSync.textContent = formatDate(value);
   }
 
   function buildUrl(base, params) {
@@ -102,10 +137,7 @@
   }
 
   async function api(view, params = {}) {
-    if (!state.token) {
-      throw new Error('token_missing');
-    }
-
+    if (!state.token) throw new Error('token_missing');
     const query = { view, ...params };
     const primaryUrl = buildUrl(state.apiBase, query);
     let response = await fetch(primaryUrl, { method: 'GET', cache: 'no-store' });
@@ -117,22 +149,17 @@
 
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
-      const error = payload.error || `http_${response.status}`;
-      throw new Error(error);
+      throw new Error(payload.error || `http_${response.status}`);
     }
     return payload.data;
   }
 
   function table(headers, rows, emptyText = 'لا توجد بيانات') {
-    if (!rows.length) {
-      return `<div class="empty">${emptyText}</div>`;
-    }
+    if (!rows.length) return `<div class="empty">${emptyText}</div>`;
     return `
       <div class="table-wrap">
         <table class="base-table">
-          <thead>
-            <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
-          </thead>
+          <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>
       </div>
@@ -160,54 +187,28 @@
     `;
   }
 
-  function shiftLabel(shiftNumber) {
-    return Number(shiftNumber) === 2 ? 'وردية ليل' : 'وردية صباح';
-  }
-
-  function renderShiftRows(shifts) {
-    if (!shifts.length) return '<div class="empty">لا توجد ورديات محفوظة</div>';
+  function monthFilter(formId, defaults, buttonText = 'تحديث', extra = '') {
     return `
-      <div class="grid">
-        ${shifts.map((shift) => `
-          <button class="row-button" data-shift-date="${escapeHtml(shift.date)}" data-shift-number="${escapeHtml(shift.shift_number)}">
-            <strong>${formatDay(shift.date)} - ${shiftLabel(shift.shift_number)}</strong>
-            <span>الإجمالي: ${formatMoney(shift.grand_total)} | الوقود: ${formatMoney(shift.fuel_total)} | الزيوت: ${formatMoney(shift.oil_total)}</span>
-          </button>
-        `).join('')}
-      </div>
+      <form id="${formId}" class="filter-bar">
+        <label>من شهر
+          <input type="month" name="fromMonth" value="${escapeHtml(defaults.fromMonth)}">
+        </label>
+        <label>إلى شهر
+          <input type="month" name="toMonth" value="${escapeHtml(defaults.toMonth)}">
+        </label>
+        ${extra}
+        <button type="submit">${escapeHtml(buttonText)}</button>
+      </form>
     `;
   }
 
-  function renderStockTables(data) {
-    const fuelRows = (data.fuelStock || []).map((row) => `
-      <tr>
-        <td>${escapeHtml(row.name)}</td>
-        <td>${formatNumber(row.incoming)}</td>
-        <td>${formatNumber(row.outgoing)}</td>
-        <td>${formatNumber(row.balance)}</td>
-      </tr>
-    `);
-    const oilRows = (data.oilStock || []).map((row) => `
-      <tr>
-        <td>${escapeHtml(row.name)}</td>
-        <td>${formatNumber(row.incoming)}</td>
-        <td>${formatNumber(row.outgoing)}</td>
-        <td>${formatNumber(row.balance)}</td>
-      </tr>
-    `);
-    return `
-      ${sectionCard('⛽', 'رصيد الوقود', table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], fuelRows))}
-      ${sectionCard('🛢️', 'رصيد الزيوت', table(['الصنف', 'وارد', 'منصرف', 'الرصيد'], oilRows))}
-    `;
-  }
-
-  function renderBarChart(rows, valueKey = 'value') {
-    const values = rows.map((row) => Math.abs(Number(row[valueKey]) || 0));
-    const max = Math.max(...values, 1);
-    if (!rows.length) return '<div class="empty">لا توجد بيانات للرسم</div>';
+  function renderBarChart(rows, valueKey = 'quantity') {
+    const safeRows = Array.isArray(rows) ? rows.filter((row) => Number(row[valueKey]) > 0) : [];
+    const max = Math.max(...safeRows.map((row) => Math.abs(Number(row[valueKey]) || 0)), 1);
+    if (!safeRows.length) return '<div class="empty">لا توجد بيانات للرسم</div>';
     return `
       <div class="bar-chart">
-        ${rows.map((row) => {
+        ${safeRows.map((row) => {
           const value = Number(row[valueKey]) || 0;
           const width = Math.max(2, Math.round((Math.abs(value) / max) * 100));
           return `
@@ -222,227 +223,118 @@
     `;
   }
 
-  function renderOverview(data) {
-    lastSync.textContent = formatDate(data.lastSync);
-    const report = data.monthReport || { totals: {}, shift_count: 0 };
-    content.innerHTML = `
-      <section class="home-card-groups">
-        <div class="home-card-group">
-          <h2 class="home-card-group-title">إدارة المكتب</h2>
-          <div class="action-cards-grid">
-            ${metric('صافي الشهر', formatMoney(report.totals?.net), '📈')}
-            ${metric('رصيد الخزنة', formatMoney(data.safeBalance), '💰')}
-            ${metric('عدد الورديات هذا الشهر', formatNumber(report.shift_count), '📋')}
-            ${metric('آخر تحديث', formatDate(data.lastSync), '🔄')}
-          </div>
-        </div>
-      </section>
-      ${sectionCard('📋', 'آخر الورديات', renderShiftRows(data.latestShifts || []))}
-      ${renderStockTables({ fuelStock: data.fuelStock || [], oilStock: data.oilStock || [] })}
-      ${sectionCard('💰', 'آخر حركات الخزنة', renderSafeMovements(data.recentSafeMovements || []))}
-    `;
-    wireShiftButtons();
-  }
+  function renderHomeChartCanvas(chart) {
+    if (!window.Chart || !chart?.months?.length) {
+      return renderBarChart(chart?.rows || []);
+    }
 
-  function renderSafeMovements(movements) {
-    const rows = movements.map((row) => `
-      <tr>
-        <td>${formatDay(row.date)}</td>
-        <td>${escapeHtml(row.label)}</td>
-        <td>${row.direction === 'out' ? 'منصرف' : 'وارد'}</td>
-        <td>${formatMoney(row.amount)}</td>
-      </tr>
-    `);
-    return table(['التاريخ', 'البيان', 'النوع', 'المبلغ'], rows);
+    window.requestAnimationFrame(() => {
+      const canvas = document.getElementById('homeFuelSalesChart');
+      if (!canvas) return;
+      if (homeChart) homeChart.destroy();
+
+      const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#2E7D32', '#C2185B'];
+      const rows = (chart.rows || []).filter((row) => Number(row.quantity) > 0);
+      homeChart = new window.Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: chart.months.map(monthLabel),
+          datasets: rows.map((row, index) => ({
+            label: row.name,
+            data: chart.months.map((month) => Number(row.byMonth?.[month]) || 0),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length],
+            borderWidth: 2,
+            tension: 0.25
+          }))
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { font: { family: 'Noto Naskh Arabic' } }
+            },
+            title: {
+              display: true,
+              text: 'كميات المبيعات الشهرية حسب نوع الوقود',
+              font: { family: 'Noto Naskh Arabic', size: 16 }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'الكمية (لتر)', font: { family: 'Noto Naskh Arabic' } },
+              ticks: { font: { family: 'Noto Naskh Arabic' } }
+            },
+            x: {
+              ticks: { font: { family: 'Noto Naskh Arabic' } }
+            }
+          }
+        }
+      });
+    });
+
+    return '<div class="home-chart-box"><canvas id="homeFuelSalesChart"></canvas></div>';
   }
 
   async function loadOverview() {
     setLoading();
-    const data = await api('overview');
-    renderOverview(data);
-  }
-
-  async function loadShifts() {
-    setLoading();
-    const data = await api('shifts', { limit: 80 });
-    content.innerHTML = `
-      ${sectionCard('📋', 'سجل الورديات', renderShiftRows(data.shifts || []))}
-    `;
-    wireShiftButtons();
-  }
-
-  function wireShiftButtons() {
-    content.querySelectorAll('[data-shift-date]').forEach((button) => {
-      button.addEventListener('click', () => {
-        openShift(button.dataset.shiftDate, button.dataset.shiftNumber);
-      });
-    });
-  }
-
-  async function openShift(date, shiftNumber) {
-    shiftDetail.innerHTML = '<div class="loading">جار التحميل...</div>';
-    if (typeof dialog.showModal === 'function') {
-      dialog.showModal();
-    } else {
-      dialog.setAttribute('open', 'open');
-    }
-
-    try {
-      const data = await api('shift-detail', { date, shiftNumber });
-      if (!data.shift) {
-        shiftDetail.innerHTML = '<div class="empty">لم يتم العثور على الوردية</div>';
-        return;
-      }
-      shiftDetail.innerHTML = renderShiftDetail(data.shift);
-    } catch (error) {
-      shiftDetail.innerHTML = `<div class="error">${errorMessage(error)}</div>`;
-    }
-  }
-
-  function renderShiftDetail(shift) {
-    const fuelRows = Object.entries(shift.fuel_data || {}).map(([name, data]) => `
-      <tr>
-        <td>${escapeHtml(name)}</td>
-        <td>${formatNumber(data?.totalQuantity)}</td>
-        <td>${formatNumber(data?.cars)}</td>
-        <td>${formatMoney(data?.total)}</td>
-      </tr>
-    `);
-    const oilRows = Object.entries(shift.oil_data || {}).map(([name, data]) => `
-      <tr>
-        <td>${escapeHtml(name)}</td>
-        <td>${formatNumber(data?.incoming)}</td>
-        <td>${formatNumber(data?.sold)}</td>
-        <td>${formatMoney(data?.total)}</td>
-      </tr>
-    `);
-    const expenseRows = (shift.expense_items || []).map((item) => `
-      <tr>
-        <td>${escapeHtml(item.description || `مصروف ${item.index}`)}</td>
-        <td>${formatMoney(item.amount)}</td>
-      </tr>
-    `);
-    const revenueRows = (shift.revenue_items || []).map((item) => `
-      <tr>
-        <td>${escapeHtml(item.description || `إيراد ${item.index}`)}</td>
-        <td>${formatMoney(item.amount)}</td>
-      </tr>
-    `);
-
-    return `
-      <div class="section-stack">
-        <section>
-          <h2>${formatDay(shift.date)} - ${shiftLabel(shift.shift_number)}</h2>
-          <p class="meta">الإجمالي: ${formatMoney(shift.grand_total)} | الوقود: ${formatMoney(shift.fuel_total)} | الزيوت: ${formatMoney(shift.oil_total)} | غسيل وتشحيم: ${formatMoney(shift.wash_lube_revenue)} | مصروفات: ${formatMoney(shift.total_expenses)}</p>
-        </section>
-        ${sectionCard('⛽', 'الوقود', table(['الصنف', 'الكمية', 'عملاء', 'الإجمالي'], fuelRows))}
-        ${sectionCard('🛢️', 'الزيوت', table(['الصنف', 'وارد', 'مباع', 'الإجمالي'], oilRows))}
-        ${sectionCard('💵', 'إيرادات أخرى', table(['البيان', 'المبلغ'], revenueRows))}
-        ${sectionCard('📉', 'مصروفات', table(['البيان', 'المبلغ'], expenseRows))}
-      </div>
-    `;
-  }
-
-  async function loadReport() {
-    const range = todayMonthRange();
-    content.innerHTML = `
-      <form id="reportFilter" class="filter-bar">
-        <label>من
-          <input type="date" name="startDate" value="${range.startDate}">
-        </label>
-        <label>إلى
-          <input type="date" name="endDate" value="${range.endDate}">
-        </label>
-        <button type="submit">تحديث</button>
-      </form>
-      <div id="reportBody" class="loading">جار التحميل...</div>
-    `;
-    document.getElementById('reportFilter').addEventListener('submit', (event) => {
-      event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      renderReport(form.get('startDate'), form.get('endDate'));
-    });
-    await renderReport(range.startDate, range.endDate);
-  }
-
-  async function renderReport(startDate, endDate) {
-    const target = document.getElementById('reportBody');
-    target.className = 'loading';
-    target.textContent = 'جار التحميل...';
-    const data = await api('report', { startDate, endDate });
-    const report = data.report || {};
-    const totals = report.totals || {};
-    const fuelRows = (report.fuelTotals || []).map((row) => `
-      <tr><td>${escapeHtml(row.name)}</td><td>${formatNumber(row.quantity)}</td></tr>
-    `);
-    const oilRows = (report.oilTotals || []).map((row) => `
-      <tr><td>${escapeHtml(row.name)}</td><td>${formatNumber(row.quantity)}</td></tr>
-    `);
-    target.className = 'section-stack';
-    target.innerHTML = `
-      <section class="grid four">
-        ${metric('عدد الورديات', formatNumber(report.shift_count), '📋')}
-        ${metric('إجمالي الوقود', formatMoney(totals.fuelRevenue), '⛽')}
-        ${metric('إجمالي الزيوت', formatMoney(totals.oilRevenue), '🛢️')}
-        ${metric('غسيل وتشحيم', formatMoney(totals.washRevenue), '🧽')}
-        ${metric('المصروفات', formatMoney(totals.expenses), '📉')}
-        ${metric('الصافي', formatMoney(totals.net), '📈')}
-      </section>
-      ${sectionCard('⛽', 'كميات الوقود', table(['الصنف', 'الكمية'], fuelRows))}
-      ${sectionCard('🛢️', 'كميات الزيوت', table(['الصنف', 'الكمية'], oilRows))}
-    `;
-  }
-
-  async function loadStock() {
-    setLoading();
-    const data = await api('stock');
-    content.innerHTML = renderStockTables(data);
-  }
-
-  async function loadCharts() {
-    setLoading();
-    const range = todayMonthRange();
-    const data = await api('report', { startDate: range.startDate, endDate: range.endDate });
-    const report = data.report || {};
-    const totals = report.totals || {};
-    const revenueRows = [
-      { name: 'وقود', value: totals.fuelRevenue },
-      { name: 'زيوت', value: totals.oilRevenue },
-      { name: 'غسيل وتشحيم', value: totals.washRevenue },
-      { name: 'مصروفات', value: totals.expenses },
-      { name: 'الصافي', value: totals.net }
-    ];
-    content.innerHTML = `
-      ${sectionCard('📊', 'ملخص الشهر الحالي', renderBarChart(revenueRows))}
-      ${sectionCard('⛽', 'كميات الوقود', renderBarChart(report.fuelTotals || [], 'quantity'))}
-      ${sectionCard('🛢️', 'كميات الزيوت', renderBarChart(report.oilTotals || [], 'quantity'))}
-    `;
-  }
-
-  async function loadSafeBook() {
-    setLoading();
-    const data = await api('safe-book', { limit: 160 });
+    const range = currentMonthRange();
+    const data = await api('home-chart', { fromMonth: range.fromMonth, toMonth: range.toMonth });
+    setLastSync(data.lastSync);
+    const chart = data.chart || {};
     content.innerHTML = `
       <section class="grid two">
-        ${metric('رصيد الخزنة', formatMoney(data.balance), '💰')}
-        ${metric('عدد الحركات المعروضة', formatNumber((data.movements || []).length), '📒')}
+        ${metric('الفترة', `${monthLabel(chart.fromMonth)} - ${monthLabel(chart.toMonth)}`, '📅')}
+        ${metric('نوع الرسم', 'المباعة', '⛽')}
       </section>
-      ${sectionCard('💰', 'حركات الخزنة', renderSafeMovements(data.movements || []))}
+      ${sectionCard('📊', 'كميات المبيعات الشهرية حسب نوع الوقود', renderHomeChartCanvas(chart))}
     `;
+  }
+
+  async function loadSalesSummary() {
+    const range = currentMonthRange();
+    content.innerHTML = `
+      ${monthFilter('salesSummaryFilter', range)}
+      <div id="salesSummaryBody" class="loading">جار التحميل...</div>
+    `;
+    document.getElementById('salesSummaryFilter').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      renderSalesSummary(form.get('fromMonth'), form.get('toMonth'));
+    });
+    await renderSalesSummary(range.fromMonth, range.toMonth);
+  }
+
+  async function renderSalesSummary(fromMonth, toMonth) {
+    const target = document.getElementById('salesSummaryBody');
+    target.className = 'loading';
+    target.textContent = 'جار التحميل...';
+    const data = await api('sales-summary', { fromMonth, toMonth });
+    setLastSync(data.lastSync);
+    const summary = data.summary || {};
+    const months = summary.months || [];
+    const rows = (summary.rows || []).map((row) => `
+      <tr>
+        <td><strong>${escapeHtml(row.name)}</strong></td>
+        ${months.map((month) => `<td>${formatNumber(row.byMonth?.[month] || 0)}</td>`).join('')}
+        <td class="cell-total">${formatNumber(row.total)}</td>
+      </tr>
+    `);
+    target.className = 'section-stack';
+    target.innerHTML = sectionCard(
+      '📊',
+      'ملخص المبيعات',
+      table(['المنتج', ...months.map(monthLabel), 'الإجمالي'], rows)
+    );
   }
 
   async function loadProfit() {
-    const range = todayMonthRange();
+    const range = currentMonthRange();
     content.innerHTML = `
-      <form id="profitFilter" class="filter-bar">
-        <label>من شهر
-          <input type="month" name="fromMonth" value="${range.month.slice(0, 4)}-01">
-        </label>
-        <label>إلى شهر
-          <input type="month" name="toMonth" value="${range.month}">
-        </label>
-        <button type="submit">تحديث</button>
-      </form>
+      ${monthFilter('profitFilter', range)}
       <div id="profitBody" class="loading">جار التحميل...</div>
     `;
     document.getElementById('profitFilter').addEventListener('submit', (event) => {
@@ -450,7 +342,7 @@
       const form = new FormData(event.currentTarget);
       renderProfit(form.get('fromMonth'), form.get('toMonth'));
     });
-    await renderProfit(`${range.month.slice(0, 4)}-01`, range.month);
+    await renderProfit(range.fromMonth, range.toMonth);
   }
 
   async function renderProfit(fromMonth, toMonth) {
@@ -458,46 +350,170 @@
     target.className = 'loading';
     target.textContent = 'جار التحميل...';
     const data = await api('profit', { fromMonth, toMonth });
-    const rows = (data.rows || []).map((row) => `
-      <tr>
-        <td>${escapeHtml(row.month_key)}</td>
-        <td>${formatMoney(row.fuel_total)}</td>
-        <td>${formatMoney(row.oil_total)}</td>
-        <td>${formatMoney(row.wash_lube_revenue)}</td>
-        <td>${formatMoney(row.total_deductions ?? row.total_expenses)}</td>
-        <td>${formatMoney(row.net_profit)}</td>
+    const rows = data.rows || [];
+    const months = rows.map((row) => row.month_key).reverse();
+    const byMonth = new Map(rows.map((row) => [row.month_key, row]));
+    const tableRows = profitRows.map(([key, label, kind]) => `
+      <tr class="profit-${kind}-row">
+        <td><strong>${escapeHtml(label)}</strong></td>
+        ${months.map((month) => `<td>${formatMoney(byMonth.get(month)?.[key] || 0)}</td>`).join('')}
       </tr>
     `);
-    target.className = 'card';
-    target.innerHTML = `
-      <div class="card-title-row">
-        <h2 class="title-main"><span class="title-icon">📈</span>ملخص الأرباح</h2>
-      </div>
-      ${table(['الشهر', 'وقود', 'زيوت', 'غسيل', 'خصومات', 'الصافي'], rows)}
+    target.className = 'section-stack';
+    target.innerHTML = sectionCard('📈', 'المكسب', table(['البند', ...months.map(monthLabel)], tableRows));
+  }
+
+  async function loadExpenses() {
+    const range = currentMonthRange();
+    const extra = `
+      <label>بحث
+        <input type="text" name="searchTerm" placeholder="اسم المصروف">
+      </label>
+    `;
+    content.innerHTML = `
+      ${monthFilter('expensesFilter', range, 'تحديث', extra)}
+      <div id="expensesBody" class="loading">جار التحميل...</div>
+    `;
+    document.getElementById('expensesFilter').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      renderExpenses(form.get('fromMonth'), form.get('toMonth'), form.get('searchTerm'));
+    });
+    await renderExpenses(range.fromMonth, range.toMonth, '');
+  }
+
+  async function renderExpenses(fromMonth, toMonth, searchTerm) {
+    const target = document.getElementById('expensesBody');
+    target.className = 'loading';
+    target.textContent = 'جار التحميل...';
+    const data = await api('expenses', { fromMonth, toMonth, searchTerm });
+    setLastSync(data.lastSync);
+    const expenses = data.expenses || {};
+    const months = expenses.months || [];
+    const rows = (expenses.rows || []).map((row) => `
+      <tr>
+        <td><strong>${escapeHtml(row.description)}</strong></td>
+        ${months.map((month) => `<td>${row.byMonth?.[month] ? formatMoney(row.byMonth[month]) : ''}</td>`).join('')}
+        <td class="cell-total">${formatMoney(row.total)}</td>
+      </tr>
+    `);
+    target.className = 'section-stack';
+    target.innerHTML = sectionCard('📉', 'المصاريف', table(['المصروف', ...months.map(monthLabel), 'الإجمالي'], rows));
+  }
+
+  async function loadAnnualInventory() {
+    setLoading();
+    const data = await api('annual-inventory');
+    setLastSync(data.lastSync);
+    renderAnnualInventory(data.annual);
+  }
+
+  function annualFieldRows(record, fields) {
+    return fields.map(([key, label]) => `
+      <tr>
+        <td>${escapeHtml(label)}</td>
+        <td>${formatMoney(record?.fields?.[key] || 0)}</td>
+      </tr>
+    `);
+  }
+
+  function annualCustomRows(items) {
+    return (items || []).map((item) => `
+      <tr>
+        <td>${escapeHtml(item.label || 'بند إضافي')}</td>
+        <td>${formatMoney(item.value)}</td>
+      </tr>
+    `);
+  }
+
+  function renderAnnualInventory(annual) {
+    const record = annual?.record;
+    if (!record) {
+      content.innerHTML = sectionCard('📒', 'جرد سنوي', '<div class="empty">لا توجد بيانات جرد سنوي محفوظة</div>');
+      return;
+    }
+
+    const expectedRows = [
+      ...annualFieldRows(record, [
+        ['prev_balance', 'رصيد العام السابق'],
+        ['station_profit', 'مكسب المحطة']
+      ]),
+      ...annualCustomRows(record.expected_items),
+      `<tr><td><strong>المفترض وجوده</strong></td><td><strong>${formatMoney(record.expected_total)}</strong></td></tr>`
+    ];
+    const actualRows = [
+      ...annualFieldRows(record, [
+        ['bank_balance', 'رصيد البنك'],
+        ['safe_balance', 'رصيد الخزنة'],
+        ['accounting_remainder', 'متبقى المحاسبة'],
+        ['customers_balance', 'العملاء'],
+        ['vouchers_balance', 'البونات'],
+        ['visa_balance', 'رصيد الفيزا']
+      ]),
+      ...annualCustomRows(record.actual_items),
+      `<tr><td><strong>إجمالي رأس المال</strong></td><td><strong>${formatMoney(record.actual_total)}</strong></td></tr>`
+    ];
+    const statusLabel = record.status === 'surplus' ? 'زيادة' : (record.status === 'shortage' ? 'عجز' : 'متوازن');
+    content.innerHTML = `
+      <section class="grid two">
+        ${metric('السنة', record.year, '📅')}
+        ${metric('الحالة', `${statusLabel}${record.finalized ? ' - مقفل' : ''}`, '📒')}
+        ${metric('الفرق', formatMoney(Math.abs(record.difference)), '⚖️')}
+        ${metric('آخر تحديث', formatDate(record.updated_at), '🔄')}
+      </section>
+      ${sectionCard('📒', 'الرصيد المفترض', table(['البند', 'القيمة'], expectedRows))}
+      ${sectionCard('💰', 'الرصيد الفعلي', table(['البند', 'القيمة'], actualRows))}
     `;
   }
 
-  async function loadPrices() {
+  async function loadShiftDaySummaries() {
     setLoading();
-    const data = await api('prices');
-    const fuelRows = (data.fuels || []).map((row) => `
+    const data = await api('shift-day-summaries', { limit: 45 });
+    setLastSync(data.lastSync);
+    const days = data.summaries?.days || [];
+    if (!days.length) {
+      content.innerHTML = '<div class="empty">لا توجد ورديات محفوظة</div>';
+      return;
+    }
+    content.innerHTML = days.map(renderShiftDayCard).join('');
+  }
+
+  function renderShiftDayCard(day) {
+    return `
+      <section class="card shift-day-card">
+        <div class="card-title-row">
+          <h2 class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</h2>
+        </div>
+        <section class="grid three">
+          ${metric('إجمالي الإيرادات', formatMoney(day.totals.revenue), '💵')}
+          ${metric('إجمالي المصاريف', formatMoney(day.totals.expenses), '📉')}
+          ${metric('صافي اليوم', formatMoney(day.totals.net), '📈')}
+        </section>
+        ${day.shifts.map(renderShiftSummary).join('')}
+      </section>
+    `;
+  }
+
+  function renderShiftSummary(shift) {
+    const revenueRows = (shift.revenues || []).map((row) => `
       <tr>
         <td>${escapeHtml(row.name)}</td>
-        <td>${formatMoney(row.price)}</td>
-        <td>${row.is_active ? 'نعم' : 'لا'}</td>
+        <td>${row.quantity === null || row.quantity === undefined ? '-' : formatNumber(row.quantity)}</td>
+        <td>${formatMoney(row.amount)}</td>
       </tr>
     `);
-    const oilRows = (data.oils || []).map((row) => `
+    const expenseRows = (shift.expenses || []).map((row) => `
       <tr>
         <td>${escapeHtml(row.name)}</td>
-        <td>${formatMoney(row.price)}</td>
-        <td>${formatNumber(row.vat)}</td>
-        <td>${row.is_active ? 'نعم' : 'لا'}</td>
+        <td>${formatMoney(row.amount)}</td>
       </tr>
     `);
-    content.innerHTML = `
-      ${sectionCard('⛽', 'أسعار الوقود', table(['الصنف', 'السعر', 'نشط'], fuelRows))}
-      ${sectionCard('🛢️', 'أسعار الزيوت', table(['الصنف', 'السعر', 'ضريبة', 'نشط'], oilRows))}
+    return `
+      <div class="shift-summary-box">
+        <h3>${escapeHtml(shift.label)} - صافي الوردية: ${formatMoney(shift.net_total)}</h3>
+        ${table(['الإيرادات', 'الكمية', 'القيمة'], revenueRows)}
+        ${table(['المصاريف', 'القيمة'], expenseRows, 'لا توجد مصاريف')}
+      </div>
     `;
   }
 
@@ -518,13 +534,11 @@
 
     try {
       if (view === 'overview') await loadOverview();
-      if (view === 'shifts') await loadShifts();
-      if (view === 'report') await loadReport();
-      if (view === 'charts') await loadCharts();
-      if (view === 'stock') await loadStock();
-      if (view === 'safe-book') await loadSafeBook();
+      if (view === 'sales-summary') await loadSalesSummary();
       if (view === 'profit') await loadProfit();
-      if (view === 'prices') await loadPrices();
+      if (view === 'expenses') await loadExpenses();
+      if (view === 'annual-inventory') await loadAnnualInventory();
+      if (view === 'shift-day-summaries') await loadShiftDaySummaries();
     } catch (error) {
       setError(errorMessage(error));
     }
@@ -532,11 +546,6 @@
 
   document.querySelectorAll('.tabs button').forEach((button) => {
     button.addEventListener('click', () => loadView(button.dataset.view));
-  });
-
-  closeDialog.addEventListener('click', () => {
-    if (typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
   });
 
   if (!state.token) {
