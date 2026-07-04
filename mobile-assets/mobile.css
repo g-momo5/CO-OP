@@ -824,8 +824,21 @@ button {
 
   .filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.45rem;
-    padding: 0.6rem;
+    gap: 0.8rem;
+    padding: 0.72rem;
+  }
+
+  .filter-bar label {
+    border: 1px solid rgba(196, 41, 29, 0.12);
+    border-radius: 10px;
+    padding: 0.55rem;
+    background: #fffafa;
+  }
+
+  .filter-bar input {
+    min-height: 40px;
+    padding-inline: 0.35rem;
+    font-size: 0.92rem;
   }
 
   .filter-bar button {
