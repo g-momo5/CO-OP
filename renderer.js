@@ -10106,6 +10106,16 @@ async function calculateOilRow(oilId) {
   const total = roundOilQuantity(initial + added);
   totalInput.value = total;
 
+  if (remainingRaw === '') {
+    remainingInput.classList.remove('input-error');
+    soldInput.value = '';
+    if (revenueInput) {
+      revenueInput.value = '';
+    }
+    calculateOilTotal();
+    return;
+  }
+
   // Validation: remaining must be <= total
   if (remaining > total && remaining > 0) {
     remainingInput.classList.add('input-error');
