@@ -8068,6 +8068,35 @@ function ensureShiftFieldVisible(field) {
       inline: 'nearest',
       behavior: 'auto'
     });
+
+    requestAnimationFrame(() => {
+      const header = document.querySelector('.header');
+      const bottomNavigation = document.querySelector('.bottom-navigation');
+      const viewportMargin = 14;
+      const headerRect = header?.getBoundingClientRect();
+      const bottomNavRect = bottomNavigation?.getBoundingClientRect();
+      const topLimit = (
+        headerRect
+        && headerRect.bottom > 0
+        && headerRect.top < window.innerHeight
+      )
+        ? headerRect.bottom + viewportMargin
+        : viewportMargin;
+      const bottomLimit = (
+        bottomNavRect
+        && bottomNavRect.top < window.innerHeight
+        && bottomNavRect.bottom > 0
+      )
+        ? bottomNavRect.top - viewportMargin
+        : window.innerHeight - viewportMargin;
+      const rect = field.getBoundingClientRect();
+
+      if (rect.top < topLimit) {
+        window.scrollBy({ top: rect.top - topLimit, behavior: 'auto' });
+      } else if (rect.bottom > bottomLimit) {
+        window.scrollBy({ top: rect.bottom - bottomLimit, behavior: 'auto' });
+      }
+    });
   });
 }
 
