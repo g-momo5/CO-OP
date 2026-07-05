@@ -146,6 +146,7 @@ class DatabaseManager {
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS sales (
       id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
+      product_code TEXT,
       fuel_type TEXT NOT NULL,
       quantity REAL NOT NULL,
       price_per_liter REAL NOT NULL,
@@ -154,6 +155,7 @@ class DatabaseManager {
       customer_name TEXT,
       notes TEXT
     )`);
+    await this.pgPool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS product_code TEXT`);
 
     // Purchase prices table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
@@ -176,6 +178,7 @@ class DatabaseManager {
       id SERIAL PRIMARY KEY,
       product_type TEXT NOT NULL,
       product_name TEXT NOT NULL UNIQUE,
+      product_code TEXT UNIQUE,
       current_price REAL NOT NULL,
       vat REAL DEFAULT 0,
       effective_date DATE,
@@ -183,7 +186,21 @@ class DatabaseManager {
       display_order INTEGER DEFAULT 0
     )`);
 
+    await this.pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS product_code TEXT`);
     await this.pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0`);
+    await this.pgPool.query(`
+      UPDATE products
+      SET product_code = product_type || '_' || id
+      WHERE product_code IS NULL OR TRIM(product_code) = ''
+    `);
+    await this.pgPool.query(`
+      UPDATE sales s
+      SET product_code = p.product_code
+      FROM products p
+      WHERE s.product_code IS NULL
+        AND p.product_type = 'fuel'
+        AND p.product_name = s.fuel_type
+    `);
     await this.pgPool.query(`
       WITH ordered AS (
         SELECT id, ROW_NUMBER() OVER (PARTITION BY product_type ORDER BY product_name ASC, id ASC) AS row_number
@@ -199,6 +216,7 @@ class DatabaseManager {
     // Create index on product_type
     try {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)`);
+      await this.pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_product_code ON products(product_code)`);
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_type_display_order ON products(product_type, display_order)`);
     } catch (err) {
       console.log('Index creation: ', err.message);
@@ -209,6 +227,7 @@ class DatabaseManager {
       id SERIAL PRIMARY KEY,
       product_type TEXT NOT NULL,
       product_name TEXT NOT NULL,
+      product_code TEXT,
       price REAL NOT NULL,
       start_date DATE NOT NULL,
       product_id INTEGER,
@@ -216,13 +235,25 @@ class DatabaseManager {
     )`);
 
     await this.pgPool.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS product_id INTEGER`);
+    await this.pgPool.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS product_code TEXT`);
     await this.pgPool.query(`ALTER TABLE price_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
     await this.pgPool.query(`ALTER TABLE price_history ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP`);
     await this.pgPool.query(`UPDATE price_history SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
+    await this.pgPool.query(`
+      UPDATE price_history ph
+      SET product_code = p.product_code
+      FROM products p
+      WHERE ph.product_code IS NULL
+        AND (
+          (ph.product_id IS NOT NULL AND ph.product_id = p.id)
+          OR (ph.product_id IS NULL AND ph.product_type = p.product_type AND ph.product_name = p.product_name)
+        )
+    `);
 
     // Oil movements table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_movements (
       id SERIAL PRIMARY KEY,
+      product_code TEXT,
       oil_type TEXT NOT NULL,
       date TEXT NOT NULL,
       type TEXT NOT NULL,
@@ -230,11 +261,21 @@ class DatabaseManager {
       invoice_number TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE oil_movements ADD COLUMN IF NOT EXISTS product_code TEXT`);
     await this.pgPool.query(`ALTER TABLE oil_movements ALTER COLUMN quantity TYPE REAL USING quantity::real`);
+    await this.pgPool.query(`
+      UPDATE oil_movements om
+      SET product_code = p.product_code
+      FROM products p
+      WHERE om.product_code IS NULL
+        AND p.product_type = 'oil'
+        AND p.product_name = om.oil_type
+    `);
 
     // Fuel movements table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_movements (
       id SERIAL PRIMARY KEY,
+      product_code TEXT,
       fuel_type TEXT NOT NULL,
       date TEXT NOT NULL,
       type TEXT NOT NULL,
@@ -243,12 +284,22 @@ class DatabaseManager {
       notes TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE fuel_movements ADD COLUMN IF NOT EXISTS product_code TEXT`);
+    await this.pgPool.query(`
+      UPDATE fuel_movements fm
+      SET product_code = p.product_code
+      FROM products p
+      WHERE fm.product_code IS NULL
+        AND p.product_type = 'fuel'
+        AND p.product_name = fm.fuel_type
+    `);
 
     // Fuel invoices table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS fuel_invoices (
       id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
       invoice_number TEXT NOT NULL,
+      product_code TEXT,
       fuel_type TEXT NOT NULL,
       quantity REAL NOT NULL,
       net_quantity REAL NOT NULL,
@@ -257,13 +308,23 @@ class DatabaseManager {
       invoice_total REAL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE fuel_invoices ADD COLUMN IF NOT EXISTS product_code TEXT`);
     await this.pgPool.query(`ALTER TABLE fuel_invoices ADD COLUMN IF NOT EXISTS invoice_total REAL DEFAULT 0`);
+    await this.pgPool.query(`
+      UPDATE fuel_invoices fi
+      SET product_code = p.product_code
+      FROM products p
+      WHERE fi.product_code IS NULL
+        AND p.product_type = 'fuel'
+        AND p.product_name = fi.fuel_type
+    `);
 
     // Oil invoices table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS oil_invoices (
       id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
       invoice_number TEXT NOT NULL,
+      product_code TEXT,
       oil_type TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       purchase_price REAL NOT NULL,
@@ -273,6 +334,15 @@ class DatabaseManager {
       martyrs_tax REAL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE oil_invoices ADD COLUMN IF NOT EXISTS product_code TEXT`);
+    await this.pgPool.query(`
+      UPDATE oil_invoices oi
+      SET product_code = p.product_code
+      FROM products p
+      WHERE oi.product_code IS NULL
+        AND p.product_type = 'oil'
+        AND p.product_name = oi.oil_type
+    `);
 
     // Customers table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS customers (

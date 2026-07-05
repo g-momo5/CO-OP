@@ -130,15 +130,17 @@ async function syncShiftOilStockMovements(shiftData = {}) {
 
   const oilData = parseStoredObject(shiftData.oil_data, {});
   for (const [rawOilName, data] of Object.entries(oilData)) {
-    const oilName = normalizeShiftOilStockName(rawOilName);
+    const product = await getProductByCodeOrName('oil', data?.product_code, data?.product_name || rawOilName);
+    const productCode = product?.product_code || data?.product_code || null;
+    const oilName = normalizeShiftOilStockName(product?.product_name || data?.product_name || rawOilName);
     if (!oilName || oilName === SHIFT_OIL_STOCK_EXCLUDED_OIL) continue;
 
     const quantity = parseFloat(data?.added);
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
 
     await executeInsert(
-      'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)',
-      [oilName, date, 'out', quantity, invoiceNumber],
+      'INSERT INTO oil_movements (product_code, oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5, $6)',
+      [productCode, oilName, date, 'out', quantity, invoiceNumber],
       'oil_movements'
     );
   }
@@ -324,7 +326,7 @@ function getShiftFuelSoldQuantity(fuelType, data) {
 
   let totalQuantity = toFiniteNumber(data.totalQuantity);
   if (totalQuantity <= 0) {
-    const counterCount = fuelType === 'سولار' ? 4 : 2;
+    const counterCount = getShiftProductDisplayName(fuelType, data) === 'سولار' ? 4 : 2;
     for (let i = 1; i <= counterCount; i += 1) {
       totalQuantity += toFiniteNumber(data[`quantity${i}`]);
     }
@@ -346,18 +348,34 @@ function parseShiftJsonObject(value) {
   }
 }
 
+function getShiftProductDisplayName(entryKey, data = {}) {
+  return String(data?.product_name || data?.oil_type || data?.fuel_type || entryKey || '').trim();
+}
+
+function findShiftDataEntryByName(shiftData, productName) {
+  const targetName = String(productName || '').trim();
+  if (!shiftData || typeof shiftData !== 'object' || !targetName) return null;
+  if (shiftData[targetName]) return shiftData[targetName];
+
+  const found = Object.entries(shiftData).find(([entryKey, data]) => (
+    getShiftProductDisplayName(entryKey, data) === targetName
+  ));
+  return found ? found[1] : null;
+}
+
 function validateShiftPayload(shiftData = {}) {
   const errors = [];
   const fuelData = parseShiftJsonObject(shiftData.fuel_data);
   const oilData = parseShiftJsonObject(shiftData.oil_data);
 
   Object.entries(fuelData).forEach(([fuelType, data]) => {
-    const countersCount = fuelType === 'سولار' ? 4 : 2;
+    const fuelName = getShiftProductDisplayName(fuelType, data);
+    const countersCount = fuelName === 'سولار' ? 4 : 2;
     for (let i = 1; i <= countersCount; i += 1) {
       const firstShift = parseFloat(data?.[`firstShift${i}`]) || 0;
       const lastShift = parseFloat(data?.[`lastShift${i}`]) || 0;
       if (firstShift > 0 && lastShift < firstShift) {
-        errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
+        errors.push(`${fuelName} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
       }
     }
   });
@@ -366,7 +384,7 @@ function validateShiftPayload(shiftData = {}) {
     const total = parseFloat(data?.total) || 0;
     const sold = parseFloat(data?.sold) || 0;
     if (sold > total && sold > 0) {
-      errors.push(`${oilName}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
+      errors.push(`${getShiftProductDisplayName(oilName, data)}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
     }
   });
 
@@ -735,6 +753,146 @@ function requireOnline(featureName = 'هذه الوظيفة') {
   }
 }
 
+function generateProductCode(productType) {
+  const cleanType = String(productType || 'product').replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase();
+  return `${cleanType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function getProductByCodeOrName(productType, productCode, productName) {
+  const cleanType = String(productType || '').trim();
+  const cleanCode = String(productCode || '').trim();
+  const cleanName = String(productName || '').trim();
+
+  if (cleanCode) {
+    const rows = await executeQuery(
+      'SELECT id, product_type, product_name, product_code FROM products WHERE product_type = $1 AND product_code = $2 LIMIT 1',
+      [cleanType, cleanCode]
+    );
+    if (rows.length > 0) return rows[0];
+  }
+
+  if (cleanName) {
+    const rows = await executeQuery(
+      'SELECT id, product_type, product_name, product_code FROM products WHERE product_type = $1 AND product_name = $2 LIMIT 1',
+      [cleanType, cleanName]
+    );
+    if (rows.length > 0) return rows[0];
+  }
+
+  return null;
+}
+
+async function migrateShiftProductDataKeys() {
+  try {
+    const productRows = await executeQuery(
+      'SELECT product_type, product_name, product_code FROM products WHERE product_code IS NOT NULL'
+    );
+    const byTypeName = new Map();
+
+    productRows.forEach((product) => {
+      const type = String(product.product_type || '').trim();
+      const name = String(product.product_name || '').trim();
+      const code = String(product.product_code || '').trim();
+      if (!type || !name || !code) return;
+      byTypeName.set(`${type}::${name}`, { code, name });
+    });
+
+    const migrateObject = (rawData, productType) => {
+      const source = parseStoredObject(rawData, {});
+      let changed = false;
+      const next = {};
+
+      Object.entries(source).forEach(([entryKey, entryValue]) => {
+        const data = entryValue && typeof entryValue === 'object' && !Array.isArray(entryValue)
+          ? { ...entryValue }
+          : {};
+        const displayName = getShiftProductDisplayName(entryKey, data);
+        const existingCode = String(data.product_code || '').trim();
+        const product = existingCode
+          ? { code: existingCode, name: data.product_name || displayName }
+          : byTypeName.get(`${productType}::${displayName}`);
+
+        if (!product?.code) {
+          next[entryKey] = entryValue;
+          return;
+        }
+
+        data.product_code = product.code;
+        data.product_name = data.product_name || product.name || displayName;
+        next[product.code] = data;
+
+        if (entryKey !== product.code || !entryValue?.product_code || !entryValue?.product_name) {
+          changed = true;
+        }
+      });
+
+      return { changed, data: next };
+    };
+
+    const shiftRows = await executeQuery('SELECT id, data, fuel_data, oil_data FROM shifts');
+    let migrated = 0;
+
+    for (const row of shiftRows) {
+      const fuelMigration = migrateObject(row.fuel_data, 'fuel');
+      const oilMigration = migrateObject(row.oil_data, 'oil');
+      if (!fuelMigration.changed && !oilMigration.changed) continue;
+
+      const legacyData = parseStoredObject(row.data, {});
+      legacyData.fuel_data = fuelMigration.data;
+      legacyData.oil_data = oilMigration.data;
+
+      await executeUpdate(
+        'UPDATE shifts SET data = $1, fuel_data = $2, oil_data = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4',
+        [
+          JSON.stringify(legacyData),
+          JSON.stringify(fuelMigration.data),
+          JSON.stringify(oilMigration.data),
+          row.id
+        ]
+      );
+      migrated += 1;
+    }
+
+    if (migrated > 0) {
+      console.log(`Migrated product_code keys in ${migrated} shift rows`);
+    }
+  } catch (error) {
+    console.warn('Unable to migrate shift product_code keys:', error.message);
+  }
+}
+
+async function createProduct(productType, productName, price, extra = {}) {
+  const productCode = generateProductCode(productType);
+  const columns = ['product_type', 'product_name', 'product_code', 'current_price'];
+  const values = [productType, productName, productCode, price];
+
+  if (Object.prototype.hasOwnProperty.call(extra, 'vat')) {
+    columns.push('vat');
+    values.push(extra.vat);
+  }
+  if (Object.prototype.hasOwnProperty.call(extra, 'effective_date')) {
+    columns.push('effective_date');
+    values.push(extra.effective_date);
+  }
+  if (Object.prototype.hasOwnProperty.call(extra, 'display_order')) {
+    columns.push('display_order');
+    values.push(extra.display_order);
+  }
+
+  const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
+  await executeInsert(
+    `INSERT INTO products (${columns.join(', ')}) VALUES (${placeholders})`,
+    values,
+    'products'
+  );
+
+  const rows = await executeQuery(
+    'SELECT id, product_code FROM products WHERE product_code = $1 LIMIT 1',
+    [productCode]
+  );
+  return rows[0] || { product_code: productCode };
+}
+
 // IPC Handlers setup function
 function setupIPCHandlers() {
   const PROFIT_MANUAL_FIELDS = [
@@ -790,7 +948,9 @@ function setupIPCHandlers() {
       fuelData = parseJsonObject(legacyData?.fuel_data, null);
     }
 
-    const fuelEntry = fuelData && typeof fuelData === 'object' ? fuelData[normalizedFuelType] : null;
+    const fuelEntry = fuelData && typeof fuelData === 'object'
+      ? findShiftDataEntryByName(fuelData, normalizedFuelType)
+      : null;
     if (!fuelEntry || typeof fuelEntry !== 'object') {
       return 0;
     }
@@ -1334,15 +1494,9 @@ function setupIPCHandlers() {
       const legacyData = parseJsonObject(row?.data, {});
       const fuelData = parseJsonObject(row?.fuel_data, null) || parseJsonObject(legacyData?.fuel_data, {});
       REPORT_FUEL_TYPES.forEach((fuelType) => {
-        const item = fuelData?.[fuelType];
+        const item = findShiftDataEntryByName(fuelData, fuelType);
         if (!item || typeof item !== 'object') return;
-        let totalQuantity = toNumber(item.totalQuantity);
-        if (totalQuantity <= 0) {
-          for (let index = 1; index <= 4; index += 1) {
-            totalQuantity += toNumber(item[`quantity${index}`]);
-          }
-        }
-        const soldQuantity = Math.max(totalQuantity - toNumber(item.cars), 0);
+        const soldQuantity = getShiftFuelSoldQuantity(fuelType, item);
         salesMap.get(fuelType)[monthKey] += soldQuantity;
       });
     });
@@ -1999,8 +2153,11 @@ function setupIPCHandlers() {
   ipcMain.handle('add-sale', async (event, saleData) => {
     try {
       const { date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes } = saleData;
-      const query = 'INSERT INTO sales (date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-      return await executeInsert(query, [date, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes], 'sales');
+      const product = await getProductByCodeOrName('fuel', saleData.product_code, fuel_type);
+      const productCode = product?.product_code || saleData.product_code || null;
+      const productName = product?.product_name || fuel_type;
+      const query = 'INSERT INTO sales (date, product_code, fuel_type, quantity, price_per_liter, total_amount, payment_method, customer_name, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)';
+      return await executeInsert(query, [date, productCode, productName, quantity, price_per_liter, total_amount, payment_method, customer_name, notes], 'sales');
     } catch (error) {
       console.error('Error adding sale:', error);
       throw error;
@@ -2009,7 +2166,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-fuel-prices', async () => {
     try {
-      return await executeQuery("SELECT id, product_name as fuel_type, current_price as price, is_active, effective_date FROM products WHERE product_type = 'fuel' ORDER BY product_name");
+      return await executeQuery("SELECT id, product_code, product_name as fuel_type, current_price as price, is_active, effective_date FROM products WHERE product_type = 'fuel' ORDER BY product_name");
     } catch (error) {
       console.error('Error getting fuel prices:', error);
       throw error;
@@ -2038,7 +2195,7 @@ function setupIPCHandlers() {
   // Oil Prices Handlers
   ipcMain.handle('get-oil-prices', async () => {
     try {
-      return await executeQuery("SELECT id, product_name as oil_type, current_price as price, vat, is_active, effective_date, display_order FROM products WHERE product_type = 'oil' ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC, COALESCE(display_order, 0) ASC, product_name ASC");
+      return await executeQuery("SELECT id, product_code, product_name as oil_type, current_price as price, vat, is_active, effective_date, display_order FROM products WHERE product_type = 'oil' ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC, COALESCE(display_order, 0) ASC, product_name ASC");
     } catch (error) {
       console.error('Error getting oil prices:', error);
       throw error;
@@ -2132,9 +2289,8 @@ function setupIPCHandlers() {
         throw new Error('هذا النوع من الوقود موجود بالفعل');
       }
 
-      // Insert new fuel product
-      const insertQuery = 'INSERT INTO products (product_type, product_name, current_price) VALUES ($1, $2, $3)';
-      return await executeInsert(insertQuery, ['fuel', fuel_type, price], 'products');
+      const product = await createProduct('fuel', fuel_type, price);
+      return product.id || 1;
     } catch (error) {
       console.error('Error adding fuel price:', error);
       throw error;
@@ -2159,8 +2315,8 @@ function setupIPCHandlers() {
         ['oil']
       );
       const nextOrder = (parseInt(orderRows[0]?.max_order, 10) || 0) + 1;
-      const insertQuery = 'INSERT INTO products (product_type, product_name, current_price, vat, display_order) VALUES ($1, $2, $3, $4, $5)';
-      return await executeInsert(insertQuery, ['oil', oil_type, price, vatValue, nextOrder], 'products');
+      const product = await createProduct('oil', oil_type, price, { vat: vatValue, display_order: nextOrder });
+      return product.id || 1;
     } catch (error) {
       console.error('Error adding oil price:', error);
       throw error;
@@ -2204,21 +2360,17 @@ function setupIPCHandlers() {
       );
       const nextOrder = (parseInt(orderRows[0]?.max_order, 10) || 0) + 1;
 
-      await executeInsert(
-        'INSERT INTO products (product_type, product_name, current_price, vat, effective_date, display_order) VALUES ($1, $2, $3, $4, $5, $6)',
-        [productType, productName, price, 0, startDate, nextOrder],
-        'products'
-      );
-
-      const rows = await executeQuery(
-        'SELECT id FROM products WHERE product_name = $1 ORDER BY id DESC LIMIT 1',
-        [productName]
-      );
-      const productId = rows[0]?.id || null;
+      const product = await createProduct(productType, productName, price, {
+        vat: 0,
+        effective_date: startDate,
+        display_order: nextOrder
+      });
+      const productId = product?.id || null;
+      const productCode = product?.product_code || null;
 
       await executeInsert(
-        'INSERT INTO price_history (product_type, product_name, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5)',
-        [productType, productName, price, startDate, productId],
+        'INSERT INTO price_history (product_type, product_name, product_code, price, start_date, product_id) VALUES ($1, $2, $3, $4, $5, $6)',
+        [productType, productName, productCode, price, startDate, productId],
         'price_history'
       );
 
@@ -2232,18 +2384,26 @@ function setupIPCHandlers() {
   // Update product name
   ipcMain.handle('update-product-name', async (event, { type, oldName, newName, id }) => {
     try {
+      const oldProductName = String(oldName || '').trim();
+      const newProductName = String(newName || '').trim();
+      const productId = parseInt(id, 10);
+
+      if (!['fuel', 'oil'].includes(type) || !oldProductName || !newProductName) {
+        throw new Error('بيانات المنتج غير صالحة');
+      }
+
       // Check if new name already exists for this product type
       const checkQuery = 'SELECT * FROM products WHERE product_type = $1 AND product_name = $2';
-      const existing = await executeQuery(checkQuery, [type, newName]);
+      const existing = await executeQuery(checkQuery, [type, newProductName]);
 
       if (existing.length > 0) {
         throw new Error('يوجد منتج بهذا الاسم بالفعل');
       }
 
-      // Update the product name in products table
-      // The product_id remains the same, preserving price history
-      const updateQuery = 'UPDATE products SET product_name = $1 WHERE product_type = $2 AND product_name = $3';
-      await executeQuery(updateQuery, [newName, type, oldName]);
+      const updateQuery = Number.isFinite(productId)
+        ? 'UPDATE products SET product_name = $1 WHERE product_type = $2 AND id = $3'
+        : 'UPDATE products SET product_name = $1 WHERE product_type = $2 AND product_name = $3';
+      await executeUpdate(updateQuery, [newProductName, type, Number.isFinite(productId) ? productId : oldProductName]);
 
       return { success: true };
     } catch (error) {
@@ -2313,7 +2473,7 @@ function setupIPCHandlers() {
         }
 
         // Get product_id and current effective_date from products table
-        const productQuery = 'SELECT id, effective_date FROM products WHERE product_type = $1 AND product_name = $2';
+        const productQuery = 'SELECT id, product_code, effective_date FROM products WHERE product_type = $1 AND product_name = $2';
         const productResult = await executeQuery(productQuery, [product_type, product_name]);
 
         if (productResult.length === 0) {
@@ -2323,11 +2483,12 @@ function setupIPCHandlers() {
         }
 
         const product_id = productResult[0].id;
+        const product_code = productResult[0].product_code || null;
         const current_effective_date = normalizeDateOnly(productResult[0].effective_date);
 
         // Save to history with product_id (always save to history)
-        const historyQuery = 'INSERT INTO price_history (product_type, product_name, price, start_date, product_id, created_at) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)';
-        await executeInsert(historyQuery, [product_type, product_name, price, start_date, product_id], 'price_history');
+        const historyQuery = 'INSERT INTO price_history (product_type, product_name, product_code, price, start_date, product_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)';
+        await executeInsert(historyQuery, [product_type, product_name, product_code, price, start_date, product_id], 'price_history');
         saved++;
 
         // Update current price in products table ONLY if new date is more recent
@@ -2497,7 +2658,8 @@ ipcMain.handle('get-sales-summary', async () => {
 
           entries.push({
             date: shiftDate,
-            fuel_type: fuelType,
+            fuel_type: getShiftProductDisplayName(fuelType, data),
+            product_code: String(data.product_code || fuelType || '').trim(),
             quantity
           });
         });
@@ -2551,7 +2713,7 @@ ipcMain.handle('get-sales-summary', async () => {
       shiftRows.forEach((row) => {
         const legacyData = parseStoredObject(row?.data, {});
         const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
-        const data = fuelData?.[selectedFuelType];
+        const data = findShiftDataEntryByName(fuelData, selectedFuelType);
         const quantity = getShiftFuelSoldQuantity(selectedFuelType, data);
         if (quantity <= 0) return;
 
@@ -2604,8 +2766,8 @@ ipcMain.handle('get-sales-summary', async () => {
       shiftRows.forEach((row) => {
         const legacyData = parseStoredObject(row?.data, {});
         const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
-        Object.keys(fuelData || {}).forEach((name) => {
-          const cleanName = String(name || '').trim();
+        Object.entries(fuelData || {}).forEach(([name, data]) => {
+          const cleanName = getShiftProductDisplayName(name, data);
           if (cleanName) types.add(cleanName);
         });
       });
@@ -2672,9 +2834,10 @@ ipcMain.handle('get-sales-summary', async () => {
         const legacyData = parseStoredObject(row?.data, {});
         const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
         Object.entries(fuelData || {}).forEach(([fuelType, data]) => {
-          const target = ensureFuel(fuelType);
+          const fuelName = getShiftProductDisplayName(fuelType, data);
+          const target = ensureFuel(fuelName);
           if (!target) return;
-          target.outgoing += getShiftFuelSoldQuantity(fuelType, data);
+          target.outgoing += getShiftFuelSoldQuantity(fuelName, data);
         });
       });
 
@@ -2725,7 +2888,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const outgoing = shiftRows.reduce((sum, row) => {
         const legacyData = parseStoredObject(row?.data, {});
         const fuelData = parseStoredObject(row?.fuel_data || legacyData.fuel_data, {});
-        return sum + getShiftFuelSoldQuantity(selectedFuelType, fuelData?.[selectedFuelType]);
+        return sum + getShiftFuelSoldQuantity(selectedFuelType, findShiftDataEntryByName(fuelData, selectedFuelType));
       }, 0);
 
       return incoming - outgoing;
@@ -2757,7 +2920,8 @@ ipcMain.handle('get-sales-summary', async () => {
 
           entries.push({
             date: shiftDate,
-            product_name: String(oilName || '').trim(),
+            product_name: getShiftProductDisplayName(oilName, data),
+            product_code: String(data.product_code || oilName || '').trim(),
             quantity: sold
           });
         });
@@ -3345,8 +3509,11 @@ ipcMain.handle('get-sales-summary', async () => {
     try {
       const { oil_type, date, type, invoice_number } = movementData;
       const quantity = parseFloat(movementData.quantity);
-      const insertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
-      return await executeInsert(insertQuery, [oil_type, date, type, quantity, invoice_number], 'oil_movements');
+      const product = await getProductByCodeOrName('oil', movementData.product_code, oil_type);
+      const productCode = product?.product_code || movementData.product_code || null;
+      const productName = product?.product_name || oil_type;
+      const insertQuery = 'INSERT INTO oil_movements (product_code, oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5, $6)';
+      return await executeInsert(insertQuery, [productCode, productName, date, type, quantity, invoice_number], 'oil_movements');
     } catch (error) {
       console.error('Error adding oil movement:', error);
       throw error;
@@ -3358,19 +3525,23 @@ ipcMain.handle('get-sales-summary', async () => {
       const oilType = typeof oilTypeInput === 'object'
         ? String(oilTypeInput?.oilType || '').trim()
         : String(oilTypeInput || '').trim();
+      const productCode = typeof oilTypeInput === 'object' ? String(oilTypeInput?.productCode || '').trim() : '';
       const year = typeof oilTypeInput === 'object' ? parseInt(oilTypeInput?.year, 10) : null;
+      const product = await getProductByCodeOrName('oil', productCode, oilType);
+      const queryCode = product?.product_code || productCode;
+      const queryName = product?.product_name || oilType;
 
       if (Number.isInteger(year) && year >= 2000 && year <= 2100) {
         const movementsQuery = `
           SELECT * FROM oil_movements
-          WHERE oil_type = $1 AND date >= $2 AND date <= $3
+          WHERE (product_code = $1 OR (product_code IS NULL AND oil_type = $2)) AND date >= $3 AND date <= $4
           ORDER BY date DESC, created_at DESC
         `;
-        return await executeQuery(movementsQuery, [oilType, `${year}-01-01`, `${year}-12-31`]);
+        return await executeQuery(movementsQuery, [queryCode, queryName, `${year}-01-01`, `${year}-12-31`]);
       }
 
-      const movementsQuery = 'SELECT * FROM oil_movements WHERE oil_type = $1 ORDER BY date DESC, created_at DESC';
-      return await executeQuery(movementsQuery, [oilType]);
+      const movementsQuery = 'SELECT * FROM oil_movements WHERE product_code = $1 OR (product_code IS NULL AND oil_type = $2) ORDER BY date DESC, created_at DESC';
+      return await executeQuery(movementsQuery, [queryCode, queryName]);
     } catch (error) {
       console.error('Error getting oil movements:', error);
       throw error;
@@ -3382,12 +3553,16 @@ ipcMain.handle('get-sales-summary', async () => {
       const oilType = typeof oilTypeInput === 'object'
         ? String(oilTypeInput?.oilType || '').trim()
         : String(oilTypeInput || '').trim();
+      const productCode = typeof oilTypeInput === 'object' ? String(oilTypeInput?.productCode || '').trim() : '';
       const endDate = typeof oilTypeInput === 'object' ? String(oilTypeInput?.endDate || '').trim() : '';
-      const params = [oilType];
-      let stockQuery = 'SELECT type, quantity, invoice_number FROM oil_movements WHERE oil_type = $1';
+      const product = await getProductByCodeOrName('oil', productCode, oilType);
+      const queryCode = product?.product_code || productCode;
+      const queryName = product?.product_name || oilType;
+      const params = [queryCode, queryName];
+      let stockQuery = 'SELECT type, quantity, invoice_number FROM oil_movements WHERE (product_code = $1 OR (product_code IS NULL AND oil_type = $2))';
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-        stockQuery += ' AND date <= $2';
+        stockQuery += ' AND date <= $3';
         params.push(endDate);
       }
 
@@ -3429,14 +3604,17 @@ ipcMain.handle('get-sales-summary', async () => {
 
       for (const item of items) {
         const oilType = String(item?.oil_type || '').trim();
+        const product = await getProductByCodeOrName('oil', item?.product_code, oilType);
+        const productCode = product?.product_code || item?.product_code || null;
+        const productName = product?.product_name || oilType;
         const countedQuantity = parseFloat(item?.quantity);
 
-        if (!oilType || !Number.isFinite(countedQuantity) || countedQuantity < 0) {
+        if (!productName || !Number.isFinite(countedQuantity) || countedQuantity < 0) {
           throw new Error('بيانات الجرد غير صالحة');
         }
 
-        const auditInsertQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
-        await executeInsert(auditInsertQuery, [oilType, date, 'audit', countedQuantity, auditReference], 'oil_movements');
+        const auditInsertQuery = 'INSERT INTO oil_movements (product_code, oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5, $6)';
+        await executeInsert(auditInsertQuery, [productCode, productName, date, 'audit', countedQuantity, auditReference], 'oil_movements');
         counted += 1;
       }
 
@@ -3451,20 +3629,30 @@ ipcMain.handle('get-sales-summary', async () => {
   ipcMain.handle('add-fuel-movement', async (event, movementData) => {
     try {
       const { fuel_type, date, type, quantity, invoice_number, notes } = movementData;
-      const insertQuery = 'INSERT INTO fuel_movements (fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6)';
-      return await executeInsert(insertQuery, [fuel_type, date, type, quantity, invoice_number, notes], 'fuel_movements');
+      const product = await getProductByCodeOrName('fuel', movementData.product_code, fuel_type);
+      const productCode = product?.product_code || movementData.product_code || null;
+      const productName = product?.product_name || fuel_type;
+      const insertQuery = 'INSERT INTO fuel_movements (product_code, fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)';
+      return await executeInsert(insertQuery, [productCode, productName, date, type, quantity, invoice_number, notes], 'fuel_movements');
     } catch (error) {
       console.error('Error adding fuel movement:', error);
       throw error;
     }
   });
 
-  ipcMain.handle('get-fuel-movements', async (event, fuelType) => {
+  ipcMain.handle('get-fuel-movements', async (event, fuelTypeInput) => {
     try {
       let movementsQuery, params;
-      if (fuelType) {
-        movementsQuery = 'SELECT * FROM fuel_movements WHERE fuel_type = $1 ORDER BY date DESC, created_at DESC';
-        params = [fuelType];
+      const fuelType = typeof fuelTypeInput === 'object'
+        ? String(fuelTypeInput?.fuelType || '').trim()
+        : String(fuelTypeInput || '').trim();
+      const productCode = typeof fuelTypeInput === 'object' ? String(fuelTypeInput?.productCode || '').trim() : '';
+      const product = await getProductByCodeOrName('fuel', productCode, fuelType);
+      const queryCode = product?.product_code || productCode;
+      const queryName = product?.product_name || fuelType;
+      if (queryCode || queryName) {
+        movementsQuery = 'SELECT * FROM fuel_movements WHERE product_code = $1 OR (product_code IS NULL AND fuel_type = $2) ORDER BY date DESC, created_at DESC';
+        params = [queryCode, queryName];
       } else {
         movementsQuery = 'SELECT * FROM fuel_movements ORDER BY date DESC, created_at DESC';
         params = [];
@@ -3476,10 +3664,17 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
-  ipcMain.handle('get-current-fuel-stock', async (event, fuelType) => {
+  ipcMain.handle('get-current-fuel-stock', async (event, fuelTypeInput) => {
     try {
-      const stockQuery = 'SELECT type, SUM(quantity) as total FROM fuel_movements WHERE fuel_type = $1 GROUP BY type';
-      const result = await executeQuery(stockQuery, [fuelType]);
+      const fuelType = typeof fuelTypeInput === 'object'
+        ? String(fuelTypeInput?.fuelType || '').trim()
+        : String(fuelTypeInput || '').trim();
+      const productCode = typeof fuelTypeInput === 'object' ? String(fuelTypeInput?.productCode || '').trim() : '';
+      const product = await getProductByCodeOrName('fuel', productCode, fuelType);
+      const queryCode = product?.product_code || productCode;
+      const queryName = product?.product_name || fuelType;
+      const stockQuery = 'SELECT type, SUM(quantity) as total FROM fuel_movements WHERE product_code = $1 OR (product_code IS NULL AND fuel_type = $2) GROUP BY type';
+      const result = await executeQuery(stockQuery, [queryCode, queryName]);
       let stock = 0;
       result.forEach(row => {
         if (row.type === 'in') {
@@ -3503,16 +3698,20 @@ ipcMain.handle('get-sales-summary', async () => {
 
       // Save each fuel item as a separate record
       for (const item of fuel_items) {
+        const product = await getProductByCodeOrName('fuel', item.product_code, item.fuel_type);
+        const productCode = product?.product_code || item.product_code || null;
+        const productName = product?.product_name || item.fuel_type;
         const invoiceQuery = `
           INSERT INTO fuel_invoices (
-            date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+            date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `;
         await executeInsert(invoiceQuery, [
           date,
           invoice_number,
-          item.fuel_type,
+          productCode,
+          productName,
           item.quantity,
           item.net_quantity,
           item.purchase_price,
@@ -3535,12 +3734,15 @@ ipcMain.handle('get-sales-summary', async () => {
 
       // Save each oil item as a separate record
       for (const item of oil_items) {
-        const invoiceQuery = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)';
-        await executeInsert(invoiceQuery, [date, invoice_number, item.oil_type, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0], 'oil_invoices');
+        const product = await getProductByCodeOrName('oil', item.product_code, item.oil_type);
+        const productCode = product?.product_code || item.product_code || null;
+        const productName = product?.product_name || item.oil_type;
+        const invoiceQuery = 'INSERT INTO oil_invoices (date, invoice_number, product_code, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)';
+        await executeInsert(invoiceQuery, [date, invoice_number, productCode, productName, item.quantity, item.purchase_price, item.iva, item.total_purchase, immediate_discount || 0, martyrs_tax || 0], 'oil_invoices');
 
         // Also create a stock movement "in" for each oil line
-        const movementQuery = 'INSERT INTO oil_movements (oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5)';
-        await executeInsert(movementQuery, [item.oil_type, date, 'in', item.quantity, invoice_number], 'oil_movements');
+        const movementQuery = 'INSERT INTO oil_movements (product_code, oil_type, date, type, quantity, invoice_number) VALUES ($1, $2, $3, $4, $5, $6)';
+        await executeInsert(movementQuery, [productCode, productName, date, 'in', item.quantity, invoice_number], 'oil_movements');
       }
 
       return true;
@@ -3919,7 +4121,8 @@ ipcMain.handle('get-sales-summary', async () => {
 
         Object.entries(fuelData || {}).forEach(([fuelType, data]) => {
           if (!data || typeof data !== 'object') return;
-          const quantity = getShiftFuelSoldQuantity(fuelType, data);
+          const fuelName = getShiftProductDisplayName(fuelType, data);
+          const quantity = getShiftFuelSoldQuantity(fuelName, data);
           const unitPrice = toFiniteNumber(data.price || data.price_per_liter);
           const totalAmount = toFiniteNumber(data.total || data.totalAmount || data.amount) || (quantity * unitPrice);
           if (quantity <= 0 && totalAmount <= 0) return;
@@ -3928,7 +4131,7 @@ ipcMain.handle('get-sales-summary', async () => {
             source: 'shifts',
             date: shiftDate,
             record_type: 'shift_fuel_sale',
-            product: fuelType,
+            product: fuelName,
             quantity,
             unit_price: unitPrice,
             total_amount: totalAmount,
@@ -3940,6 +4143,7 @@ ipcMain.handle('get-sales-summary', async () => {
 
         Object.entries(oilData || {}).forEach(([oilType, data]) => {
           if (!data || typeof data !== 'object') return;
+          const oilName = getShiftProductDisplayName(oilType, data);
           const quantity = toFiniteNumber(data.sold || data.quantity || data.totalQuantity);
           const unitPrice = toFiniteNumber(data.price || data.unit_price);
           const totalAmount = toFiniteNumber(data.total || data.totalAmount || data.amount) || (quantity * unitPrice);
@@ -3949,7 +4153,7 @@ ipcMain.handle('get-sales-summary', async () => {
             source: 'shifts',
             date: shiftDate,
             record_type: 'shift_oil_sale',
-            product: oilType,
+            product: oilName,
             quantity,
             unit_price: unitPrice,
             total_amount: totalAmount,
@@ -4179,16 +4383,20 @@ ipcMain.handle('get-sales-summary', async () => {
       // Import fuel invoices
       if (backupData.fuelInvoices) {
         for (const invoice of backupData.fuelInvoices) {
+          const product = await getProductByCodeOrName('fuel', invoice.product_code, invoice.fuel_type);
+          const productCode = product?.product_code || invoice.product_code || null;
+          const productName = product?.product_name || invoice.fuel_type;
           const query = `
             INSERT INTO fuel_invoices (
-              date, invoice_number, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+              date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING
           `;
           await executeInsert(query, [
             invoice.date,
             invoice.invoice_number,
-            invoice.fuel_type,
+            productCode,
+            productName,
             invoice.quantity,
             invoice.net_quantity,
             invoice.purchase_price,
@@ -4201,11 +4409,15 @@ ipcMain.handle('get-sales-summary', async () => {
       // Import oil invoices
       if (backupData.oilInvoices) {
         for (const invoice of backupData.oilInvoices) {
-          const query = 'INSERT INTO oil_invoices (date, invoice_number, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING';
+          const product = await getProductByCodeOrName('oil', invoice.product_code, invoice.oil_type);
+          const productCode = product?.product_code || invoice.product_code || null;
+          const productName = product?.product_name || invoice.oil_type;
+          const query = 'INSERT INTO oil_invoices (date, invoice_number, product_code, oil_type, quantity, purchase_price, iva, total_purchase, immediate_discount, martyrs_tax) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING';
           await executeInsert(query, [
             invoice.date,
             invoice.invoice_number,
-            invoice.oil_type,
+            productCode,
+            productName,
             invoice.quantity,
             invoice.purchase_price,
             invoice.iva,
@@ -4220,10 +4432,12 @@ ipcMain.handle('get-sales-summary', async () => {
       if (backupData.products) {
         // New format with unified products table
         for (const product of backupData.products) {
-          const query = 'INSERT INTO products (product_type, product_name, current_price, vat, is_active, display_order) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (product_name) DO UPDATE SET current_price = $3, vat = $4, is_active = $5, display_order = $6';
+          const productCode = String(product.product_code || '').trim() || generateProductCode(product.product_type);
+          const query = 'INSERT INTO products (product_type, product_name, product_code, current_price, vat, is_active, display_order) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (product_name) DO UPDATE SET product_code = COALESCE(products.product_code, EXCLUDED.product_code), current_price = $4, vat = $5, is_active = $6, display_order = $7';
           await executeInsert(query, [
             product.product_type,
             product.product_name,
+            productCode,
             product.current_price,
             product.vat || 0,
             product.is_active !== undefined ? product.is_active : 1,
@@ -4266,10 +4480,13 @@ ipcMain.handle('get-sales-summary', async () => {
             createdAt = new Date(parseInt(rawCreatedAt, 10) * 1000).toISOString();
           }
 
-          const query = 'INSERT INTO price_history (product_type, product_name, price, start_date, created_at, product_id) VALUES ($1, $2, $3, $4, $5, $6)';
+          const product = await getProductByCodeOrName(item.product_type, item.product_code, item.product_name);
+          const productCode = product?.product_code || item.product_code || null;
+          const query = 'INSERT INTO price_history (product_type, product_name, product_code, price, start_date, created_at, product_id) VALUES ($1, $2, $3, $4, $5, $6, $7)';
           await executeInsert(query, [
             item.product_type,
             item.product_name,
+            productCode,
             item.price,
             item.start_date,
             createdAt,
@@ -4465,6 +4682,7 @@ app.whenReady().then(async () => {
     // Initialize database (with 5 second timeout)
     dbResult = await initializeDatabase();
     emitStartupStatus('Database pronto', 60, 'info');
+    await migrateShiftProductDataKeys();
 
     setupIPCHandlers();
     emitStartupStatus('Canali applicazione pronti', 72, 'info');

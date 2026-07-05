@@ -2221,6 +2221,9 @@ function normalizeFuelTypeForHomeChart(value) {
 async function loadFuelPrices() {
   try {
     const prices = await ipcRenderer.invoke('get-fuel-prices');
+    fuelProductCodesByName = new Map((Array.isArray(prices) ? prices : [])
+      .map(product => [String(product.fuel_type || '').trim(), String(product.product_code || '').trim()])
+      .filter(([name]) => Boolean(name)));
     renderFuelPriceRows(Array.isArray(prices) ? prices : []);
   } catch (error) {
     console.error('Error loading fuel prices:', error);
@@ -3527,6 +3530,28 @@ function clearDepotFilterOils() {
   document.querySelectorAll('#add-depot-oil-select .depot-filter-checkbox').forEach(input => {
     input.checked = false;
   });
+}
+
+function renameDepotVisibleOilFilter(oldName, newName) {
+  const oldOilName = String(oldName || '').trim();
+  const newOilName = String(newName || '').trim();
+  if (!oldOilName || !newOilName || oldOilName === newOilName) return;
+
+  const storedFilter = getStoredDepotVisibleOilFilter();
+  if (!storedFilter) return;
+
+  let changed = false;
+  const nextFilter = storedFilter.map(oilType => {
+    if (oilType === oldOilName) {
+      changed = true;
+      return newOilName;
+    }
+    return oilType;
+  });
+
+  if (changed) {
+    localStorage.setItem(DEPOT_VISIBLE_OILS_FILTER_KEY, JSON.stringify(Array.from(new Set(nextFilter))));
+  }
 }
 
 async function initializeTankManagement() {
@@ -4991,6 +5016,10 @@ async function saveEditProductName() {
       id: currentEditContext.productId
     });
 
+    if (currentEditContext.type === 'oil') {
+      renameDepotVisibleOilFilter(currentEditContext.currentName, newName);
+    }
+
     showMessage('تم تحديث اسم المنتج بنجاح', 'success');
     closeEditProductModal();
 
@@ -4998,6 +5027,9 @@ async function saveEditProductName() {
     loadManageProducts();
     loadFuelPrices();
     loadOilPrices();
+    if (typeof loadDepotOils === 'function') {
+      loadDepotOils(newName);
+    }
   } catch (error) {
     showMessage('حدث خطأ أثناء تحديث اسم المنتج: ' + error.message, 'error');
     console.error('Error updating product name:', error);
@@ -8027,6 +8059,33 @@ function getShiftNavigationScope(currentField, fallbackContainer) {
     || fallbackContainer;
 }
 
+function ensureShiftFieldVisible(field) {
+  if (!(field instanceof Element)) return;
+
+  requestAnimationFrame(() => {
+    field.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'auto'
+    });
+  });
+}
+
+function shouldClearShiftNumericOnFocus(target) {
+  if (!isShiftNumericInputTarget(target)) return false;
+  if (target.classList.contains('auto-calculated')) return false;
+  if (target.classList.contains(INLINE_RESET_ACTIVE_CLASS)) return false;
+  if (target.id === 'shift-date' || target.id === 'shift-number') return false;
+  return String(target.value || '').trim() !== '';
+}
+
+function clearShiftNumericFieldOnFocus(target) {
+  if (!shouldClearShiftNumericOnFocus(target)) return;
+
+  target.value = '';
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function isShiftNavigationField(el) {
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
     return false;
@@ -8097,7 +8156,7 @@ function pickShiftVerticalTableField(currentEntry, candidates) {
 }
 
 function findAdjacentShiftTableField(currentField, direction) {
-  const table = currentField?.closest?.('.shift-fuel-table, .shift-oil-table');
+  const table = currentField?.closest?.('.shift-fuel-table, .shift-oil-table, .customers-table');
   if (!table) {
     return { handled: false, field: null };
   }
@@ -9961,6 +10020,22 @@ const fuelIdMap = {
   'غاز سيارات': 'gas'
 };
 
+let fuelProductCodesByName = new Map();
+
+function getShiftFuelEntryName(entryKey, data = {}) {
+  return String(data?.product_name || data?.fuel_type || entryKey || '').trim();
+}
+
+function findShiftFuelEntryByName(fuelData, fuelType) {
+  const targetName = String(fuelType || '').trim();
+  if (!fuelData || typeof fuelData !== 'object' || !targetName) return null;
+  if (fuelData[targetName]) return fuelData[targetName];
+  const found = Object.entries(fuelData).find(([entryKey, data]) => (
+    getShiftFuelEntryName(entryKey, data) === targetName
+  ));
+  return found ? found[1] : null;
+}
+
 // Calculate fuel quantity sold (first shift - last shift counter) - 2 counters for gasoline
 function calculateFuelQuantity(fuelType) {
   const fuelId = fuelIdMap[fuelType];
@@ -10239,27 +10314,32 @@ function renderSavedShiftOilRows(oilData = {}) {
     return;
   }
 
-  entries.forEach(([oilName], index) => {
+  entries.forEach(([oilKey, data], index) => {
     const oilId = `saved-${index}`;
+    const oilName = getShiftOilEntryName(oilKey, data);
+    const oilCode = getShiftOilEntryCode(oilKey, data);
+    const oilNameHtml = escapeHtml(oilName);
+    const oilCodeAttr = escapeHtml(oilCode);
     const row = document.createElement('tr');
     row.setAttribute('data-oil-id', oilId);
+    row.setAttribute('data-oil-code', oilCode);
     row.setAttribute('data-oil-name', oilName);
     row.innerHTML = `
       <td class="oil-name-cell">
         <div class="oil-cell-center oil-name-content">
-          <strong>${escapeHtml(oilName)}</strong>
+          <strong>${oilNameHtml}</strong>
         </div>
       </td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-initial" data-oil="${escapeHtml(oilName)}" data-field="initial" readonly>
+                 id="oil-${oilId}-initial" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="initial" readonly>
         </div>
       </td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-added" data-oil="${escapeHtml(oilName)}" data-field="added">
+                 id="oil-${oilId}-added" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="added">
         </div>
       </td>
       <td>
@@ -10277,20 +10357,20 @@ function renderSavedShiftOilRows(oilData = {}) {
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-remaining" data-oil="${escapeHtml(oilName)}" data-field="remaining">
+                 id="oil-${oilId}-remaining" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="remaining">
         </div>
       </td>
       <td class="spacer-cell"></td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-open" data-oil="${escapeHtml(oilName)}" data-field="open">
+                 id="oil-${oilId}-open" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="open">
         </div>
       </td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-customers" data-oil="${escapeHtml(oilName)}" data-field="customers">
+                 id="oil-${oilId}-customers" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customers">
         </div>
       </td>
       <td>
@@ -10339,6 +10419,24 @@ function sortOilsByOrder(oils, order) {
   });
 }
 
+function getOilProductCode(oil) {
+  return String(oil?.product_code || '').trim();
+}
+
+function getOilDomId(oil) {
+  const code = getOilProductCode(oil);
+  const fallback = oil?.id || oil?.oil_type || `oil-${Math.random().toString(36).slice(2, 8)}`;
+  return String(code || fallback).replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function getShiftOilEntryName(entryKey, data = {}) {
+  return String(data?.product_name || data?.oil_type || entryKey || '').trim();
+}
+
+function getShiftOilEntryCode(entryKey, data = {}) {
+  return String(data?.product_code || entryKey || '').trim();
+}
+
 async function migrateLegacyLocalOilOrderIfNeeded() {
   const legacyOrder = getLegacyLocalOilOrder();
   if (legacyOrder.length === 0) return [];
@@ -10384,30 +10482,35 @@ async function loadActiveOils() {
     tableBody.innerHTML = '';
 
     activeOils.forEach(oil => {
-      const oilId = oil.id || oil.oil_type.replace(/\s+/g, '-').toLowerCase();
+      const oilId = getOilDomId(oil);
+      const oilCode = getOilProductCode(oil);
+      const oilName = String(oil.oil_type || '').trim();
+      const oilCodeAttr = escapeHtml(oilCode);
+      const oilNameHtml = escapeHtml(oilName);
       const row = document.createElement('tr');
       row.setAttribute('data-oil-id', oilId);
-      row.setAttribute('data-oil-name', oil.oil_type);
+      row.setAttribute('data-oil-code', oilCode);
+      row.setAttribute('data-oil-name', oilName);
       row.setAttribute('draggable', 'true');
       row.classList.add('draggable-oil-row');
       row.innerHTML = `
         <td class="oil-name-cell">
           <div class="oil-cell-center oil-name-content">
             <span class="drag-handle" title="اسحب لإعادة الترتيب">⋮⋮</span>
-            <strong>${oil.oil_type}</strong>
+            <strong>${oilNameHtml}</strong>
           </div>
         </td>
         <td>
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
-                   id="oil-${oilId}-initial" data-oil="${oil.oil_type}" data-field="initial"
+                   id="oil-${oilId}-initial" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="initial"
                    oninput="calculateOilRow('${oilId}')" readonly>
           </div>
         </td>
         <td>
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
-                   id="oil-${oilId}-added" data-oil="${oil.oil_type}" data-field="added"
+                   id="oil-${oilId}-added" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="added"
                    oninput="calculateOilRow('${oilId}')">
           </div>
         </td>
@@ -10426,7 +10529,7 @@ async function loadActiveOils() {
         <td>
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
-                   id="oil-${oilId}-remaining" data-oil="${oil.oil_type}" data-field="remaining"
+                   id="oil-${oilId}-remaining" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="remaining"
                    oninput="calculateOilRow('${oilId}')">
           </div>
         </td>
@@ -10434,14 +10537,14 @@ async function loadActiveOils() {
         <td>
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
-                   id="oil-${oilId}-open" data-oil="${oil.oil_type}" data-field="open"
+                   id="oil-${oilId}-open" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="open"
                    oninput="calculateOilRow('${oilId}')">
           </div>
         </td>
         <td>
           <div class="oil-cell-center">
             <input type="number" step="0.01" class="form-control shift-oil-input"
-                   id="oil-${oilId}-customers" data-oil="${oil.oil_type}" data-field="customers"
+                   id="oil-${oilId}-customers" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customers"
                    oninput="calculateOilRow('${oilId}')">
           </div>
         </td>
@@ -11397,9 +11500,13 @@ function collectFuelData() {
   const fuelData = {};
 
   Object.entries(fuelIdMap).forEach(([fuelType, fuelId]) => {
+    const productCode = fuelProductCodesByName.get(fuelType) || null;
+    const fuelKey = productCode || fuelType;
     if (fuelType === 'سولار') {
       // Diesel has 4 counters
-      fuelData[fuelType] = {
+      fuelData[fuelKey] = {
+        product_code: productCode,
+        product_name: fuelType,
         lastShift1: parseFloat(document.getElementById('fuel-diesel-last-1')?.value) || 0,
         firstShift1: parseFloat(document.getElementById('fuel-diesel-first-1')?.value) || 0,
         lastShift2: parseFloat(document.getElementById('fuel-diesel-last-2')?.value) || 0,
@@ -11420,7 +11527,9 @@ function collectFuelData() {
       };
     } else {
       // Other fuels have 2 counters
-      fuelData[fuelType] = {
+      fuelData[fuelKey] = {
+        product_code: productCode,
+        product_name: fuelType,
         lastShift1: parseFloat(document.getElementById(`fuel-${fuelId}-last-1`)?.value) || 0,
         firstShift1: parseFloat(document.getElementById(`fuel-${fuelId}-first-1`)?.value) || 0,
         lastShift2: parseFloat(document.getElementById(`fuel-${fuelId}-last-2`)?.value) || 0,
@@ -11449,7 +11558,9 @@ function collectOilData() {
   const rows = tableBody.querySelectorAll('tr[data-oil-id]');
   rows.forEach(row => {
     const oilId = row.getAttribute('data-oil-id');
-    const oilName = row.querySelector('td strong')?.textContent;
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent;
+    const oilCode = row.getAttribute('data-oil-code') || '';
+    const oilKey = oilCode || oilName;
 
     if (!oilName) return;
 
@@ -11463,7 +11574,9 @@ function collectOilData() {
     const priceInput = document.getElementById(`oil-${oilId}-price`);
     const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
 
-    oilData[oilName] = {
+    oilData[oilKey] = {
+      product_code: oilCode || null,
+      product_name: oilName,
       initial: parseOilQuantity(initialInput?.value),
       added: parseOilQuantity(addedInput?.value),
       total: parseOilQuantity(totalInput?.value),
@@ -12045,13 +12158,19 @@ function loadPreviousShiftOilBalances(previousShift) {
   if (!tableBody || Object.keys(oilData).length === 0) return;
 
   const oilDataByName = new Map(
-    Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(oilName), data])
+    Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(getShiftOilEntryName(oilName, data)), data])
+  );
+  const oilDataByCode = new Map(
+    Object.entries(oilData)
+      .map(([oilName, data]) => [getShiftOilEntryCode(oilName, data), data])
+      .filter(([code]) => Boolean(code))
   );
 
   tableBody.querySelectorAll('tr[data-oil-id]').forEach((row) => {
     const oilId = row.getAttribute('data-oil-id');
+    const oilCode = row.getAttribute('data-oil-code') || '';
     const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
-    const previousOilData = oilDataByName.get(normalizeOilName(oilName));
+    const previousOilData = oilDataByCode.get(oilCode) || oilDataByName.get(normalizeOilName(oilName));
     if (!oilId || !previousOilData) return;
 
     const carriedInitial = getShiftInputDisplayValue(previousOilData.remaining);
@@ -12146,9 +12265,10 @@ async function loadPreviousShiftEndValues(previousShift) {
 
     // Populate "first shift" fields with "last shift" values from previous shift
     Object.entries(fuelData).forEach(([fuelType, data]) => {
-      const fuelId = fuelIdMap[fuelType];
+      const fuelName = getShiftFuelEntryName(fuelType, data);
+      const fuelId = fuelIdMap[fuelName];
       if (fuelId) {
-        if (fuelType === 'سولار') {
+        if (fuelName === 'سولار') {
           // Diesel has 4 counters
           for (let i = 1; i <= 4; i++) {
             const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
@@ -12245,9 +12365,10 @@ async function loadShiftData(date, shiftNumber) {
 
     // Populate fuel data
     Object.entries(fuelData).forEach(([fuelType, data]) => {
-      const fuelId = fuelIdMap[fuelType];
+      const fuelName = getShiftFuelEntryName(fuelType, data);
+      const fuelId = fuelIdMap[fuelName];
       if (fuelId) {
-        if (fuelType === 'سولار') {
+        if (fuelName === 'سولار') {
           // Diesel has 4 counters
           for (let i = 1; i <= 4; i++) {
             const lastShiftInput = document.getElementById(`fuel-diesel-last-${i}`);
@@ -12298,39 +12419,45 @@ async function loadShiftData(date, shiftNumber) {
     });
 
     // Populate oil data
-    Object.entries(oilData).forEach(([oilName, data]) => {
-      // Find the oil row by name
-      const tableBody = document.getElementById('shift-oil-table-body');
-      if (tableBody) {
-        const rows = tableBody.querySelectorAll('tr[data-oil-id]');
-        rows.forEach(row => {
-          const rowOilName = row.querySelector('td strong')?.textContent;
-          if (rowOilName === oilName) {
-            const oilId = row.getAttribute('data-oil-id');
+    const tableBody = document.getElementById('shift-oil-table-body');
+    if (tableBody) {
+      const oilDataByName = new Map(
+        Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(getShiftOilEntryName(oilName, data)), data])
+      );
+      const oilDataByCode = new Map(
+        Object.entries(oilData)
+          .map(([oilName, data]) => [getShiftOilEntryCode(oilName, data), data])
+          .filter(([code]) => Boolean(code))
+      );
 
-            const initialInput = document.getElementById(`oil-${oilId}-initial`);
-            const addedInput = document.getElementById(`oil-${oilId}-added`);
-            const totalInput = document.getElementById(`oil-${oilId}-total`);
-            const soldInput = document.getElementById(`oil-${oilId}-sold`);
-            const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
-            const openInput = document.getElementById(`oil-${oilId}-open`);
-            const customersInput = document.getElementById(`oil-${oilId}-customers`);
-            const priceInput = document.getElementById(`oil-${oilId}-price`);
-            const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+      tableBody.querySelectorAll('tr[data-oil-id]').forEach(row => {
+        const oilId = row.getAttribute('data-oil-id');
+        const rowOilCode = row.getAttribute('data-oil-code') || '';
+        const rowOilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+        const data = oilDataByCode.get(rowOilCode) || oilDataByName.get(normalizeOilName(rowOilName));
+        if (!oilId || !data) return;
 
-            setInputValue(initialInput, data.initial);
-            setInputValue(addedInput, data.added);
-            setInputValue(totalInput, data.total);
-            setInputValue(soldInput, data.sold);
-            setInputValue(remainingInput, data.remaining);
-            setInputValue(openInput, data.open);
-            setInputValue(customersInput, data.customers);
-            setInputValue(priceInput, data.price);
-            setInputValue(revenueInput, data.revenue);
-          }
-        });
-      }
-    });
+        const initialInput = document.getElementById(`oil-${oilId}-initial`);
+        const addedInput = document.getElementById(`oil-${oilId}-added`);
+        const totalInput = document.getElementById(`oil-${oilId}-total`);
+        const soldInput = document.getElementById(`oil-${oilId}-sold`);
+        const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+        const openInput = document.getElementById(`oil-${oilId}-open`);
+        const customersInput = document.getElementById(`oil-${oilId}-customers`);
+        const priceInput = document.getElementById(`oil-${oilId}-price`);
+        const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+
+        setInputValue(initialInput, data.initial);
+        setInputValue(addedInput, data.added);
+        setInputValue(totalInput, data.total);
+        setInputValue(soldInput, data.sold);
+        setInputValue(remainingInput, data.remaining);
+        setInputValue(openInput, data.open);
+        setInputValue(customersInput, data.customers);
+        setInputValue(priceInput, data.price);
+        setInputValue(revenueInput, data.revenue);
+      });
+    }
 
     const washLubeInput = document.getElementById('total-wash-lube-revenue');
     if (washLubeInput) {
@@ -13560,6 +13687,16 @@ async function initializeShiftEntry() {
         insertShiftNormalizedNumericText(target, pastedText);
       });
 
+      shiftEntryScreen.addEventListener('focusin', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) {
+          return;
+        }
+
+        ensureShiftFieldVisible(target);
+        clearShiftNumericFieldOnFocus(target);
+      });
+
       shiftEntryScreen.addEventListener('keydown', (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) {
@@ -13580,11 +13717,12 @@ async function initializeShiftEntry() {
           return;
         }
 
-        if (target.type !== 'number') {
+        if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
           return;
         }
 
-        if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        const isCustomerTableNavigation = Boolean(target.closest('.customers-table'));
+        if (target.type !== 'number' && !isCustomerTableNavigation) {
           return;
         }
 
@@ -13601,6 +13739,7 @@ async function initializeShiftEntry() {
         if (!nextField) return;
 
         nextField.focus();
+        ensureShiftFieldVisible(nextField);
         if (nextField instanceof HTMLInputElement && (nextField.type === 'number' || nextField.type === 'text')) {
           nextField.select();
         }

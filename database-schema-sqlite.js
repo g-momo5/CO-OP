@@ -45,6 +45,7 @@ class DatabaseSchema {
       CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
+        product_code TEXT,
         fuel_type TEXT NOT NULL,
         quantity REAL NOT NULL,
         price_per_liter REAL NOT NULL,
@@ -85,6 +86,7 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_type TEXT NOT NULL,
         product_name TEXT NOT NULL UNIQUE,
+        product_code TEXT UNIQUE,
         current_price REAL NOT NULL,
         vat REAL DEFAULT 0,
         effective_date TEXT,
@@ -94,6 +96,9 @@ class DatabaseSchema {
     `);
 
     const columns = db.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
+    if (!columns.includes('product_code')) {
+      db.exec('ALTER TABLE products ADD COLUMN product_code TEXT');
+    }
     if (!columns.includes('display_order')) {
       db.exec('ALTER TABLE products ADD COLUMN display_order INTEGER DEFAULT 0');
     }
@@ -103,6 +108,12 @@ class DatabaseSchema {
       SET display_order = id
       WHERE display_order IS NULL OR display_order = 0
     `);
+
+    db.exec(`
+      UPDATE products
+      SET product_code = product_type || '_' || id
+      WHERE product_code IS NULL OR TRIM(product_code) = ''
+    `);
   }
 
   static createPriceHistoryTable(db) {
@@ -111,6 +122,7 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_type TEXT NOT NULL,
         product_name TEXT NOT NULL,
+        product_code TEXT,
         price REAL NOT NULL,
         start_date TEXT NOT NULL,
         product_id INTEGER,
@@ -123,6 +135,7 @@ class DatabaseSchema {
     db.exec(`
       CREATE TABLE IF NOT EXISTS oil_movements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_code TEXT,
         oil_type TEXT NOT NULL,
         date TEXT NOT NULL,
         type TEXT NOT NULL,
@@ -137,6 +150,7 @@ class DatabaseSchema {
     db.exec(`
       CREATE TABLE IF NOT EXISTS fuel_movements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_code TEXT,
         fuel_type TEXT NOT NULL,
         date TEXT NOT NULL,
         type TEXT NOT NULL,
@@ -154,6 +168,7 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         invoice_number TEXT NOT NULL,
+        product_code TEXT,
         fuel_type TEXT NOT NULL,
         quantity REAL NOT NULL,
         net_quantity REAL NOT NULL,
@@ -171,6 +186,7 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         invoice_number TEXT NOT NULL,
+        product_code TEXT,
         oil_type TEXT NOT NULL,
         quantity INTEGER NOT NULL,
         purchase_price REAL NOT NULL,
@@ -357,6 +373,7 @@ class DatabaseSchema {
     // Products indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_product_code ON products(product_code)');
 
     // Movements indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_oil_movements_date ON oil_movements(date)');
@@ -398,6 +415,82 @@ class DatabaseSchema {
       // Check if product_id column exists in price_history
       const priceHistoryTableInfo = db.prepare("PRAGMA table_info(price_history)").all();
       const hasProductId = priceHistoryTableInfo.some(col => col.name === 'product_id');
+      const ensureColumn = (tableName, tableInfo, columnName, definition) => {
+        const exists = tableInfo.some(col => col.name === columnName);
+        if (!exists) {
+          console.log(`Adding ${columnName} column to ${tableName} table...`);
+          db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+        }
+      };
+
+      ensureColumn('sales', db.prepare("PRAGMA table_info(sales)").all(), 'product_code', 'TEXT');
+      ensureColumn('products', db.prepare("PRAGMA table_info(products)").all(), 'product_code', 'TEXT');
+      ensureColumn('price_history', priceHistoryTableInfo, 'product_code', 'TEXT');
+      ensureColumn('oil_movements', db.prepare("PRAGMA table_info(oil_movements)").all(), 'product_code', 'TEXT');
+      ensureColumn('fuel_movements', db.prepare("PRAGMA table_info(fuel_movements)").all(), 'product_code', 'TEXT');
+      ensureColumn('fuel_invoices', db.prepare("PRAGMA table_info(fuel_invoices)").all(), 'product_code', 'TEXT');
+      ensureColumn('oil_invoices', db.prepare("PRAGMA table_info(oil_invoices)").all(), 'product_code', 'TEXT');
+
+      db.exec(`
+        UPDATE products
+        SET product_code = product_type || '_' || id
+        WHERE product_code IS NULL OR TRIM(product_code) = ''
+      `);
+      db.exec(`
+        UPDATE sales
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE p.product_type = 'fuel' AND p.product_name = sales.fuel_type
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE price_history
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE (price_history.product_id IS NOT NULL AND p.id = price_history.product_id)
+             OR (price_history.product_id IS NULL AND p.product_type = price_history.product_type AND p.product_name = price_history.product_name)
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE oil_movements
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE p.product_type = 'oil' AND p.product_name = oil_movements.oil_type
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE oil_invoices
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE p.product_type = 'oil' AND p.product_name = oil_invoices.oil_type
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE fuel_movements
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE p.product_type = 'fuel' AND p.product_name = fuel_movements.fuel_type
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE fuel_invoices
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE p.product_type = 'fuel' AND p.product_name = fuel_invoices.fuel_type
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
 
       if (!hasProductId) {
         console.log('Adding product_id column to price_history table...');

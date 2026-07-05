@@ -156,7 +156,7 @@ function getShiftFuelSoldQuantity(fuelType, data) {
   if (!data || typeof data !== 'object') return 0;
   let totalQuantity = toNumber(data.totalQuantity);
   if (totalQuantity <= 0) {
-    const counterCount = fuelType === 'سولار' ? 4 : 2;
+    const counterCount = getShiftProductDisplayName(fuelType, data) === 'سولار' ? 4 : 2;
     for (let i = 1; i <= counterCount; i += 1) {
       totalQuantity += toNumber(data[`quantity${i}`]);
     }
@@ -164,8 +164,22 @@ function getShiftFuelSoldQuantity(fuelType, data) {
   return Math.max(totalQuantity - toNumber(data.cars), 0);
 }
 
+function getShiftProductDisplayName(entryKey, data = {}) {
+  return String(data?.product_name || data?.oil_type || data?.fuel_type || entryKey || '').trim();
+}
+
+function findShiftDataEntryByName(shiftData, productName) {
+  const targetName = String(productName || '').trim();
+  if (!shiftData || typeof shiftData !== 'object' || !targetName) return null;
+  if (shiftData[targetName]) return shiftData[targetName];
+  const found = Object.entries(shiftData).find(([entryKey, data]) => (
+    getShiftProductDisplayName(entryKey, data) === targetName
+  ));
+  return found ? found[1] : null;
+}
+
 function getShiftFuelProfitValue(shift, fuelType) {
-  const fuelEntry = shift?.fuel_data?.[fuelType];
+  const fuelEntry = findShiftDataEntryByName(shift?.fuel_data, fuelType);
   if (!fuelEntry || typeof fuelEntry !== 'object') return 0;
   return (toNumber(fuelEntry.totalQuantity) - toNumber(fuelEntry.cars)) * toNumber(fuelEntry.price);
 }
@@ -371,9 +385,10 @@ async function getFuelStock() {
     const legacyData = parseStoredObject(row.data, {});
     const fuelData = parseStoredObject(row.fuel_data || legacyData.fuel_data, {});
     Object.entries(fuelData).forEach(([fuelType, data]) => {
-      const target = ensure(fuelType);
+      const fuelName = getShiftProductDisplayName(fuelType, data);
+      const target = ensure(fuelName);
       if (!target) return;
-      target.outgoing += getShiftFuelSoldQuantity(fuelType, data);
+      target.outgoing += getShiftFuelSoldQuantity(fuelName, data);
     });
   });
 
@@ -475,10 +490,12 @@ async function getReport(queryParams) {
     net += shift.grand_total;
 
     Object.entries(shift.fuel_data).forEach(([fuelType, data]) => {
-      fuelTotals.set(fuelType, (fuelTotals.get(fuelType) || 0) + getShiftFuelSoldQuantity(fuelType, data));
+      const fuelName = getShiftProductDisplayName(fuelType, data);
+      fuelTotals.set(fuelName, (fuelTotals.get(fuelName) || 0) + getShiftFuelSoldQuantity(fuelName, data));
     });
     Object.entries(shift.oil_data).forEach(([oilName, data]) => {
-      oilTotals.set(oilName, (oilTotals.get(oilName) || 0) + toNumber(data?.sold));
+      const displayName = getShiftProductDisplayName(oilName, data);
+      oilTotals.set(displayName, (oilTotals.get(displayName) || 0) + toNumber(data?.sold));
     });
   });
 
@@ -725,15 +742,16 @@ async function getHomeChart(queryParams) {
     const legacyData = parseStoredObject(row.data, {});
     const fuelData = parseStoredObject(row.fuel_data || legacyData.fuel_data, {});
     Object.entries(fuelData).forEach(([fuelType, data]) => {
-      if (!rowsByFuel.has(fuelType)) {
-        rowsByFuel.set(fuelType, {
-          name: fuelType,
+      const fuelName = getShiftProductDisplayName(fuelType, data);
+      if (!rowsByFuel.has(fuelName)) {
+        rowsByFuel.set(fuelName, {
+          name: fuelName,
           quantity: 0,
           byMonth: Object.fromEntries(months.map((month) => [month, 0]))
         });
       }
-      const quantity = getShiftFuelSoldQuantity(fuelType, data);
-      const entry = rowsByFuel.get(fuelType);
+      const quantity = getShiftFuelSoldQuantity(fuelName, data);
+      const entry = rowsByFuel.get(fuelName);
       entry.byMonth[monthKey] += quantity;
       entry.quantity += quantity;
     });
@@ -816,15 +834,16 @@ async function getSalesSummary(queryParams) {
     if (!monthKey || !months.includes(monthKey)) return;
 
     Object.entries(shift.fuel_data || {}).forEach(([fuelType, data]) => {
-      const row = ensure(fuelType, 'fuel');
+      const fuelName = getShiftProductDisplayName(fuelType, data);
+      const row = ensure(fuelName, 'fuel');
       if (!row) return;
-      const quantity = getShiftFuelSoldQuantity(fuelType, data);
+      const quantity = getShiftFuelSoldQuantity(fuelName, data);
       row.byMonth[monthKey] += quantity;
       row.total += quantity;
     });
 
     Object.entries(shift.oil_data || {}).forEach(([oilName, data]) => {
-      const row = ensure(oilName, 'oil');
+      const row = ensure(getShiftProductDisplayName(oilName, data), 'oil');
       if (!row) return;
       const quantity = getOilSoldQuantity(data);
       row.byMonth[monthKey] += quantity;
@@ -984,7 +1003,7 @@ async function getAnnualInventory(queryParams) {
 function buildShiftSummaryRows(shift) {
   const revenues = [];
   FUEL_ORDER.forEach((fuelType) => {
-    const data = shift.fuel_data?.[fuelType];
+    const data = findShiftDataEntryByName(shift.fuel_data, fuelType);
     if (!data) return;
     const amount = toNumber(data.cash ?? data.total);
     const quantity = getShiftFuelSoldQuantity(fuelType, data);
@@ -996,7 +1015,7 @@ function buildShiftSummaryRows(shift) {
     const quantity = getOilSoldQuantity(data);
     const amount = getOilRevenue(data);
     if (amount <= 0 && quantity <= 0) return;
-    revenues.push({ name: oilName, quantity, amount, type: 'oil' });
+    revenues.push({ name: getShiftProductDisplayName(oilName, data), quantity, amount, type: 'oil' });
   });
 
   if (shift.wash_lube_revenue > 0) {
