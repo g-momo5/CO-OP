@@ -31,7 +31,9 @@ const OFFLINE_RESTRICTED = {
     'get-fuel-invoices',
     'get-oil-invoices',
     'get-oil-invoices-report',
-    'get-price-history'
+    'get-price-history',
+    'get-purchase-price-history',
+    'get-purchase-prices-by-date'
   ]
 };
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
@@ -2175,7 +2177,22 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-purchase-prices', async () => {
     try {
-      return await executeQuery('SELECT * FROM purchase_prices ORDER BY fuel_type');
+      return await executeQuery(`
+        SELECT
+          pp.id,
+          p.id AS product_id,
+          p.product_code,
+          p.product_name AS fuel_type,
+          pp.price,
+          pp.effective_date,
+          pp.updated_at
+        FROM products p
+        LEFT JOIN purchase_prices pp
+          ON pp.product_code = p.product_code
+          OR (pp.product_code IS NULL AND pp.fuel_type = p.product_name)
+        WHERE p.product_type = 'fuel'
+        ORDER BY p.product_name
+      `);
     } catch (error) {
       console.error('Error getting purchase prices:', error);
       throw error;
@@ -2184,8 +2201,28 @@ function setupIPCHandlers() {
 
   ipcMain.handle('update-purchase-price', async (event, { fuel_type, price }) => {
     try {
-      const updateQuery = 'UPDATE purchase_prices SET price = $1, updated_at = CURRENT_TIMESTAMP WHERE fuel_type = $2';
-      return await executeUpdate(updateQuery, [price, fuel_type]);
+      const product = await getProductByCodeOrName('fuel', null, fuel_type);
+      const productCode = product?.product_code || null;
+      const productId = product?.id || null;
+      const productName = product?.product_name || fuel_type;
+      const today = new Date().toISOString().slice(0, 10);
+      await executeInsert(
+        `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+        [productName, productCode, price, today, productId],
+        'purchase_price_history'
+      );
+      return await executeUpdate(
+        `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+         ON CONFLICT (fuel_type) DO UPDATE
+         SET product_code = EXCLUDED.product_code,
+             price = EXCLUDED.price,
+             effective_date = EXCLUDED.effective_date,
+             product_id = EXCLUDED.product_id,
+             updated_at = CURRENT_TIMESTAMP`,
+        [productName, productCode, price, today, productId]
+      );
     } catch (error) {
       console.error('Error updating purchase price:', error);
       throw error;
@@ -2506,6 +2543,108 @@ function setupIPCHandlers() {
     }
   });
 
+  ipcMain.handle('save-all-purchase-prices', async (_event, prices) => {
+    try {
+      if (!Array.isArray(prices) || prices.length === 0) {
+        throw new Error('No purchase prices to save');
+      }
+
+      const normalizeDateOnly = (value) => {
+        if (!value) return '';
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+          return value.toISOString().split('T')[0];
+        }
+
+        const raw = String(value).trim();
+        const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (dateOnlyMatch) {
+          return dateOnlyMatch[1];
+        }
+
+        const parsed = new Date(raw);
+        return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
+      };
+
+      const isValidDateOnly = (value) => {
+        const dateOnly = normalizeDateOnly(value);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false;
+
+        const parsed = new Date(`${dateOnly}T00:00:00Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().split('T')[0] === dateOnly;
+      };
+
+      const skipped = [];
+      let saved = 0;
+      let updatedCurrent = 0;
+
+      for (const item of prices) {
+        const product_name = String(item?.product_name || item?.fuel_type || '').trim();
+        const product_code_input = String(item?.product_code || '').trim();
+        const normalizedPrice = String(item?.price ?? '').replace(',', '.').trim();
+        const price = parseFloat(normalizedPrice);
+        const start_date = normalizeDateOnly(item?.start_date);
+
+        if (!product_name || !isValidDateOnly(start_date)) {
+          skipped.push({ product_name, reason: 'invalid_fields' });
+          continue;
+        }
+
+        if (normalizedPrice === '') {
+          skipped.push({ product_name, reason: 'empty_price' });
+          continue;
+        }
+
+        if (!Number.isFinite(price) || price <= 0) {
+          skipped.push({ product_name, reason: 'invalid_price' });
+          continue;
+        }
+
+        const product = await getProductByCodeOrName('fuel', product_code_input, product_name);
+        if (!product) {
+          skipped.push({ product_name, reason: 'product_not_found' });
+          continue;
+        }
+
+        const product_id = product.id;
+        const product_code = product.product_code || product_code_input || null;
+        const fuel_type = product.product_name || product_name;
+        const currentRows = await executeQuery(
+          'SELECT effective_date FROM purchase_prices WHERE product_code = $1 OR (product_code IS NULL AND fuel_type = $2) LIMIT 1',
+          [product_code, fuel_type]
+        );
+        const current_effective_date = normalizeDateOnly(currentRows[0]?.effective_date);
+
+        await executeInsert(
+          `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+          [fuel_type, product_code, price, start_date, product_id],
+          'purchase_price_history'
+        );
+        saved++;
+
+        if (!current_effective_date || start_date >= current_effective_date) {
+          await executeUpdate(
+            `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+             ON CONFLICT (fuel_type) DO UPDATE
+             SET product_code = EXCLUDED.product_code,
+                 price = EXCLUDED.price,
+                 effective_date = EXCLUDED.effective_date,
+                 product_id = EXCLUDED.product_id,
+                 updated_at = CURRENT_TIMESTAMP`,
+            [fuel_type, product_code, price, start_date, product_id]
+          );
+          updatedCurrent++;
+        }
+      }
+
+      return { success: true, saved, skipped, updatedCurrent };
+    } catch (error) {
+      console.error('Error saving purchase prices:', error);
+      throw error;
+    }
+  });
+
   // Get price history
   ipcMain.handle('get-price-history', async (event, filter) => {
     try {
@@ -2523,6 +2662,63 @@ function setupIPCHandlers() {
       return await executeQuery(query, params);
     } catch (error) {
       console.error('Error getting price history:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-purchase-price-history', async (_event, filter) => {
+    try {
+      requireOnline('سجل أسعار الشراء');
+      let query = 'SELECT * FROM purchase_price_history';
+      const params = [];
+
+      if (filter) {
+        query += ' WHERE fuel_type = $1';
+        params.push(filter);
+      }
+
+      query += ' ORDER BY created_at DESC';
+
+      return await executeQuery(query, params);
+    } catch (error) {
+      console.error('Error getting purchase price history:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-purchase-prices-by-date', async (_event, { date }) => {
+    try {
+      const rawDate = String(date || '').trim();
+      const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+        ? rawDate
+        : new Date().toISOString().slice(0, 10);
+
+      return await executeQuery(
+        `
+          SELECT
+            p.id AS product_id,
+            p.product_code,
+            p.product_name AS fuel_type,
+            (
+              SELECT pph.price
+              FROM purchase_price_history pph
+              WHERE (
+                  pph.product_id = p.id
+                  OR pph.product_code = p.product_code
+                  OR (pph.product_id IS NULL AND pph.product_code IS NULL AND pph.fuel_type = p.product_name)
+                )
+                AND pph.start_date <= $1
+              ORDER BY pph.start_date DESC, pph.created_at DESC, pph.id DESC
+              LIMIT 1
+            ) AS price
+          FROM products p
+          WHERE p.product_type = 'fuel'
+          ORDER BY p.product_name
+        `,
+        [normalizedDate]
+      );
+    } catch (error) {
+      console.error('Error getting purchase prices by date:', error);
       throw error;
     }
   });
@@ -4323,6 +4519,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const products = await executeQuery('SELECT * FROM products ORDER BY product_type, product_name');
       const purchasePrices = await executeQuery('SELECT * FROM purchase_prices');
       const priceHistory = await executeQuery('SELECT * FROM price_history ORDER BY created_at DESC');
+      const purchasePriceHistory = await executeQuery('SELECT * FROM purchase_price_history ORDER BY created_at DESC');
       const depotMovements = await executeQuery('SELECT * FROM depot_movements ORDER BY date DESC');
       const safeBookMovements = await executeQuery('SELECT * FROM safe_book_movements ORDER BY date DESC, created_at DESC');
       const monthlyProfitInputs = await executeQuery('SELECT * FROM monthly_profit_inputs ORDER BY month_key DESC');
@@ -4343,6 +4540,7 @@ ipcMain.handle('get-sales-summary', async () => {
         products,
         purchasePrices,
         priceHistory,
+        purchasePriceHistory,
         depotMovements,
         safeBookMovements,
         monthlyProfitInputs,
@@ -4463,8 +4661,27 @@ ipcMain.handle('get-sales-summary', async () => {
       // Import purchase prices
       if (backupData.purchasePrices) {
         for (const price of backupData.purchasePrices) {
-          const query = 'INSERT INTO purchase_prices (fuel_type, price) VALUES ($1, $2) ON CONFLICT (fuel_type) DO UPDATE SET price = $2';
-          await executeInsert(query, [price.fuel_type, price.price], 'purchase_prices');
+          const product = await getProductByCodeOrName('fuel', price.product_code, price.fuel_type);
+          const productCode = product?.product_code || price.product_code || null;
+          const productName = product?.product_name || price.fuel_type;
+          const query = `
+            INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (fuel_type) DO UPDATE
+            SET product_code = COALESCE(purchase_prices.product_code, EXCLUDED.product_code),
+                price = EXCLUDED.price,
+                effective_date = EXCLUDED.effective_date,
+                product_id = COALESCE(purchase_prices.product_id, EXCLUDED.product_id),
+                updated_at = EXCLUDED.updated_at
+          `;
+          await executeInsert(query, [
+            productName,
+            productCode,
+            price.price,
+            price.effective_date || null,
+            product?.id || price.product_id || null,
+            price.updated_at || new Date().toISOString()
+          ], 'purchase_prices');
         }
       }
 
@@ -4492,6 +4709,32 @@ ipcMain.handle('get-sales-summary', async () => {
             createdAt,
             item.product_id || null
           ], 'price_history');
+        }
+      }
+
+      if (backupData.purchasePriceHistory) {
+        for (const item of backupData.purchasePriceHistory) {
+          const rawCreatedAt = item.created_at;
+          let createdAt = rawCreatedAt || new Date().toISOString();
+
+          if (typeof rawCreatedAt === 'number') {
+            createdAt = new Date(rawCreatedAt * 1000).toISOString();
+          } else if (typeof rawCreatedAt === 'string' && /^\d+$/.test(rawCreatedAt)) {
+            createdAt = new Date(parseInt(rawCreatedAt, 10) * 1000).toISOString();
+          }
+
+          const product = await getProductByCodeOrName('fuel', item.product_code, item.fuel_type);
+          const productCode = product?.product_code || item.product_code || null;
+          const productName = product?.product_name || item.fuel_type;
+          const query = 'INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, created_at, product_id) VALUES ($1, $2, $3, $4, $5, $6)';
+          await executeInsert(query, [
+            productName,
+            productCode,
+            item.price,
+            item.start_date,
+            createdAt,
+            product?.id || item.product_id || null
+          ], 'purchase_price_history');
         }
       }
 

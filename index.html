@@ -895,67 +895,8 @@
               <div class="fuel-header-item">سعر الشراء</div>
               <div class="fuel-header-item">الإجمالي</div>
             </div>
-            <div class="fuel-item" data-fuel="بنزين ٨٠">
-              <div class="fuel-row">
-                <div class="fuel-name">بنزين ٨٠</div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-quantity" placeholder="الكمية">
-                  <div class="net-quantity" data-fuel="بنزين ٨٠">الكمية الصافية: <span>0</span> لتر</div>
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
-                </div>
-              </div>
-            </div>
-
-            <div class="fuel-item" data-fuel="بنزين ٩٢">
-              <div class="fuel-row">
-                <div class="fuel-name">بنزين ٩٢</div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-quantity" placeholder="الكمية">
-                  <div class="net-quantity" data-fuel="بنزين ٩٢">الكمية الصافية: <span>0</span> لتر</div>
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
-                </div>
-              </div>
-            </div>
-
-            <div class="fuel-item" data-fuel="بنزين ٩٥">
-              <div class="fuel-row">
-                <div class="fuel-name">بنزين ٩٥</div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-quantity" placeholder="الكمية">
-                  <div class="net-quantity" data-fuel="بنزين ٩٥">الكمية الصافية: <span>0</span> لتر</div>
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
-                </div>
-              </div>
-            </div>
-
-            <div class="fuel-item" data-fuel="سولار">
-              <div class="fuel-row">
-                <div class="fuel-name">سولار</div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-quantity" placeholder="الكمية">
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-purchase-price" placeholder="سعر الشراء">
-                </div>
-                <div class="fuel-input-group">
-                  <input type="text" class="fuel-total" readonly placeholder="الإجمالي">
-                </div>
-              </div>
+            <div id="fuel-items-list">
+              <!-- Fuel rows will be loaded dynamically from program fuel products, excluding gas -->
             </div>
           </div>
 
@@ -1131,7 +1072,10 @@
                       <tr>
                         <th style="width: 50px;">#</th>
                         <th>اسم المنتج</th>
-                        <th>السعر الحالي</th>
+                        <th>سعر البيع الحالي</th>
+                        <th>سريان البيع</th>
+                        <th>سعر الشراء الحالي</th>
+                        <th>سريان الشراء</th>
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
@@ -1870,8 +1814,10 @@
                   <thead>
                     <tr>
                       <th>المنتج</th>
-                      <th>الحالي</th>
-                      <th>الجديد</th>
+                      <th>بيع حالي</th>
+                      <th>بيع جديد</th>
+                      <th>شراء حالي</th>
+                      <th>شراء جديد</th>
                     </tr>
                   </thead>
                   <tbody id="fuel-prices-table-body">

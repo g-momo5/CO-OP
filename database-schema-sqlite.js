@@ -19,6 +19,7 @@ class DatabaseSchema {
     this.createPurchasePricesTable(db);
     this.createProductsTable(db);
     this.createPriceHistoryTable(db);
+    this.createPurchasePriceHistoryTable(db);
     this.createOilMovementsTable(db);
     this.createFuelMovementsTable(db);
     this.createFuelInvoicesTable(db);
@@ -61,23 +62,29 @@ class DatabaseSchema {
     db.exec(`
       CREATE TABLE IF NOT EXISTS purchase_prices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_code TEXT,
         fuel_type TEXT NOT NULL UNIQUE,
         price REAL NOT NULL,
+        effective_date TEXT,
+        product_id INTEGER,
         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
 
-    // Insert default values if table is empty
-    const count = db.prepare('SELECT COUNT(*) as count FROM purchase_prices').get();
-    if (count.count === 0) {
-      const insert = db.prepare(`
-        INSERT INTO purchase_prices (fuel_type, price) VALUES (?, ?)
-      `);
-      insert.run('بنزين ٨٠', 8.00);
-      insert.run('بنزين ٩٢', 10.00);
-      insert.run('بنزين ٩٥', 11.00);
-      insert.run('سولار', 7.00);
-    }
+  }
+
+  static createPurchasePriceHistoryTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS purchase_price_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fuel_type TEXT NOT NULL,
+        product_code TEXT,
+        price REAL NOT NULL,
+        start_date TEXT NOT NULL,
+        product_id INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
   }
 
   static createProductsTable(db) {
@@ -425,7 +432,16 @@ class DatabaseSchema {
 
       ensureColumn('sales', db.prepare("PRAGMA table_info(sales)").all(), 'product_code', 'TEXT');
       ensureColumn('products', db.prepare("PRAGMA table_info(products)").all(), 'product_code', 'TEXT');
+      const purchasePricesTableInfo = db.prepare("PRAGMA table_info(purchase_prices)").all();
+      ensureColumn('purchase_prices', purchasePricesTableInfo, 'product_code', 'TEXT');
+      ensureColumn('purchase_prices', purchasePricesTableInfo, 'effective_date', 'TEXT');
+      ensureColumn('purchase_prices', purchasePricesTableInfo, 'product_id', 'INTEGER');
       ensureColumn('price_history', priceHistoryTableInfo, 'product_code', 'TEXT');
+      this.createPurchasePriceHistoryTable(db);
+      const purchasePriceHistoryTableInfo = db.prepare("PRAGMA table_info(purchase_price_history)").all();
+      ensureColumn('purchase_price_history', purchasePriceHistoryTableInfo, 'product_code', 'TEXT');
+      ensureColumn('purchase_price_history', purchasePriceHistoryTableInfo, 'product_id', 'INTEGER');
+      ensureColumn('purchase_price_history', purchasePriceHistoryTableInfo, 'created_at', 'INTEGER');
       ensureColumn('oil_movements', db.prepare("PRAGMA table_info(oil_movements)").all(), 'product_code', 'TEXT');
       ensureColumn('fuel_movements', db.prepare("PRAGMA table_info(fuel_movements)").all(), 'product_code', 'TEXT');
       ensureColumn('fuel_invoices', db.prepare("PRAGMA table_info(fuel_invoices)").all(), 'product_code', 'TEXT');
@@ -454,6 +470,80 @@ class DatabaseSchema {
           LIMIT 1
         )
         WHERE product_code IS NULL
+      `);
+      db.exec(`
+        UPDATE purchase_prices
+        SET
+          product_code = COALESCE(product_code, (
+            SELECT p.product_code FROM products p
+            WHERE p.product_type = 'fuel' AND p.product_name = purchase_prices.fuel_type
+            LIMIT 1
+          )),
+          product_id = COALESCE(product_id, (
+            SELECT p.id FROM products p
+            WHERE p.product_type = 'fuel' AND p.product_name = purchase_prices.fuel_type
+            LIMIT 1
+          )),
+          effective_date = COALESCE(effective_date, date(COALESCE(updated_at, strftime('%s', 'now')), 'unixepoch'))
+      `);
+      db.exec(`
+        UPDATE purchase_price_history
+        SET product_code = (
+          SELECT p.product_code FROM products p
+          WHERE (purchase_price_history.product_id IS NOT NULL AND p.id = purchase_price_history.product_id)
+             OR (purchase_price_history.product_id IS NULL AND p.product_type = 'fuel' AND p.product_name = purchase_price_history.fuel_type)
+          LIMIT 1
+        )
+        WHERE product_code IS NULL
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS app_migrations (
+          key TEXT PRIMARY KEY,
+          applied_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+      `);
+      const seedPurchasePricesMigration = db.prepare(
+        'SELECT key FROM app_migrations WHERE key = ? LIMIT 1'
+      ).get('seed_manual_fuel_purchase_prices_20260101');
+      if (!seedPurchasePricesMigration) {
+        db.exec('DELETE FROM purchase_prices');
+        db.exec('DELETE FROM purchase_price_history');
+        db.exec(`
+          INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+          SELECT
+            COALESCE(p.product_name, mp.fuel_type) AS fuel_type,
+            p.product_code,
+            mp.price,
+            '2026-01-01' AS effective_date,
+            p.id AS product_id,
+            strftime('%s', 'now') AS updated_at
+          FROM (
+            SELECT 'بنزين ٨٠' AS fuel_type, 9.0 AS price
+            UNION ALL
+            SELECT 'بنزين ٩٢' AS fuel_type, 12.0 AS price
+          ) mp
+          LEFT JOIN products p
+            ON p.product_type = 'fuel'
+            AND p.product_name = mp.fuel_type
+        `);
+        db.exec(`
+          INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+          SELECT fuel_type, product_code, price, '2026-01-01', product_id, strftime('%s', 'now')
+          FROM purchase_prices
+        `);
+        db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)')
+          .run('seed_manual_fuel_purchase_prices_20260101');
+      }
+      db.exec(`
+        INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+        SELECT pp.fuel_type, pp.product_code, pp.price, COALESCE(pp.effective_date, date(COALESCE(pp.updated_at, strftime('%s', 'now')), 'unixepoch')), pp.product_id, COALESCE(pp.updated_at, strftime('%s', 'now'))
+        FROM purchase_prices pp
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM purchase_price_history pph
+          WHERE pph.fuel_type = pp.fuel_type
+            AND pph.start_date = COALESCE(pp.effective_date, date(COALESCE(pp.updated_at, strftime('%s', 'now')), 'unixepoch'))
+        )
       `);
       db.exec(`
         UPDATE oil_movements

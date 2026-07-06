@@ -61,11 +61,15 @@ async function importData() {
       console.log(`Importing ${data.purchase_prices.length} purchase prices...`);
       for (const row of data.purchase_prices) {
         await client.query(
-          `INSERT INTO purchase_prices (fuel_type, price, updated_at)
-           VALUES ($1, $2, $3)
+          `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (fuel_type) DO UPDATE
-           SET price = $2, updated_at = $3`,
-          [row.fuel_type, row.price, row.updated_at]
+           SET product_code = COALESCE(purchase_prices.product_code, $2),
+               price = $3,
+               effective_date = $4,
+               product_id = COALESCE(purchase_prices.product_id, $5),
+               updated_at = $6`,
+          [row.fuel_type, row.product_code || null, row.price, row.effective_date || null, row.product_id || null, row.updated_at]
         );
       }
       console.log('✓ Purchase prices imported');
@@ -121,6 +125,19 @@ async function importData() {
         );
       }
       console.log('✓ Price history imported');
+    }
+
+    // Import purchase_price_history
+    if (data.purchase_price_history && data.purchase_price_history.length > 0) {
+      console.log(`Importing ${data.purchase_price_history.length} purchase price history records...`);
+      for (const row of data.purchase_price_history) {
+        await client.query(
+          `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [row.fuel_type, row.product_code || null, row.price, row.start_date, row.product_id || null, row.created_at]
+        );
+      }
+      console.log('✓ Purchase price history imported');
     }
 
     // Skip invoices import for now - schema differences need to be resolved

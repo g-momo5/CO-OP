@@ -10,6 +10,7 @@ const tables = [
   'products',
   'fuel_prices',
   'purchase_prices',
+  'purchase_price_history',
   'sales',
   'oil_movements',
   'fuel_movements',

@@ -160,18 +160,17 @@ class DatabaseManager {
     // Purchase prices table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_prices (
       id SERIAL PRIMARY KEY,
+      product_code TEXT,
       fuel_type TEXT NOT NULL UNIQUE,
       price REAL NOT NULL,
+      effective_date DATE,
+      product_id INTEGER,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
-
-    // Insert default purchase prices
-    await this.pgPool.query(`INSERT INTO purchase_prices (fuel_type, price) VALUES
-      ('بنزين ٨٠', 8.00),
-      ('بنزين ٩٢', 10.00),
-      ('بنزين ٩٥', 11.00),
-      ('سولار', 7.00)
-    ON CONFLICT (fuel_type) DO NOTHING`);
+    await this.pgPool.query(`ALTER TABLE purchase_prices ADD COLUMN IF NOT EXISTS product_code TEXT`);
+    await this.pgPool.query(`ALTER TABLE purchase_prices ADD COLUMN IF NOT EXISTS effective_date DATE`);
+    await this.pgPool.query(`ALTER TABLE purchase_prices ADD COLUMN IF NOT EXISTS product_id INTEGER`);
+    await this.pgPool.query(`ALTER TABLE purchase_prices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
     // Products table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS products (
@@ -222,6 +221,17 @@ class DatabaseManager {
       console.log('Index creation: ', err.message);
     }
 
+    await this.pgPool.query(`
+      UPDATE purchase_prices pp
+      SET
+        product_code = COALESCE(pp.product_code, p.product_code),
+        product_id = COALESCE(pp.product_id, p.id),
+        effective_date = COALESCE(pp.effective_date, pp.updated_at::date, CURRENT_DATE)
+      FROM products p
+      WHERE p.product_type = 'fuel'
+        AND p.product_name = pp.fuel_type
+    `);
+
     // Price history table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS price_history (
       id SERIAL PRIMARY KEY,
@@ -248,6 +258,88 @@ class DatabaseManager {
           (ph.product_id IS NOT NULL AND ph.product_id = p.id)
           OR (ph.product_id IS NULL AND ph.product_type = p.product_type AND ph.product_name = p.product_name)
         )
+    `);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS purchase_price_history (
+      id SERIAL PRIMARY KEY,
+      fuel_type TEXT NOT NULL,
+      product_code TEXT,
+      price REAL NOT NULL,
+      start_date DATE NOT NULL,
+      product_id INTEGER,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await this.pgPool.query(`ALTER TABLE purchase_price_history ADD COLUMN IF NOT EXISTS product_id INTEGER`);
+    await this.pgPool.query(`ALTER TABLE purchase_price_history ADD COLUMN IF NOT EXISTS product_code TEXT`);
+    await this.pgPool.query(`ALTER TABLE purchase_price_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE purchase_price_history ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`UPDATE purchase_price_history SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
+    await this.pgPool.query(`
+      UPDATE purchase_price_history pph
+      SET product_code = p.product_code
+      FROM products p
+      WHERE pph.product_code IS NULL
+        AND (
+          (pph.product_id IS NOT NULL AND pph.product_id = p.id)
+          OR (pph.product_id IS NULL AND p.product_type = 'fuel' AND p.product_name = pph.fuel_type)
+        )
+    `);
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS app_migrations (
+      key TEXT PRIMARY KEY,
+      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    const seedPurchasePriceRows = await this.pgPool.query(
+      `SELECT key FROM app_migrations WHERE key = $1 LIMIT 1`,
+      ['seed_manual_fuel_purchase_prices_20260101']
+    );
+    if (seedPurchasePriceRows.rows.length === 0) {
+      await this.pgPool.query(`DELETE FROM purchase_prices`);
+      await this.pgPool.query(`DELETE FROM purchase_price_history`);
+      await this.pgPool.query(`
+        WITH manual_prices(fuel_type, price) AS (
+          VALUES
+            ('بنزين ٨٠', 9::real),
+            ('بنزين ٩٢', 12::real)
+        )
+        INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+        SELECT
+          COALESCE(p.product_name, mp.fuel_type),
+          p.product_code,
+          mp.price,
+          DATE '2026-01-01',
+          p.id,
+          CURRENT_TIMESTAMP
+        FROM manual_prices mp
+        LEFT JOIN products p
+          ON p.product_type = 'fuel'
+          AND p.product_name = mp.fuel_type
+        ON CONFLICT (fuel_type) DO UPDATE
+        SET product_code = EXCLUDED.product_code,
+            price = EXCLUDED.price,
+            effective_date = EXCLUDED.effective_date,
+            product_id = EXCLUDED.product_id,
+            updated_at = CURRENT_TIMESTAMP
+      `);
+      await this.pgPool.query(`
+        INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+        SELECT fuel_type, product_code, price, DATE '2026-01-01', product_id, CURRENT_TIMESTAMP
+        FROM purchase_prices
+      `);
+      await this.pgPool.query(
+        `INSERT INTO app_migrations (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+        ['seed_manual_fuel_purchase_prices_20260101']
+      );
+    }
+    await this.pgPool.query(`
+      INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
+      SELECT pp.fuel_type, pp.product_code, pp.price, COALESCE(pp.effective_date, pp.updated_at::date, CURRENT_DATE), pp.product_id, COALESCE(pp.updated_at, CURRENT_TIMESTAMP)
+      FROM purchase_prices pp
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM purchase_price_history pph
+        WHERE pph.fuel_type = pp.fuel_type
+          AND pph.start_date = COALESCE(pp.effective_date, pp.updated_at::date, CURRENT_DATE)
+      )
     `);
 
     // Oil movements table
@@ -764,7 +856,7 @@ class DatabaseManager {
     console.log('Starting initial sync from PostgreSQL to SQLite...');
 
     const tables = [
-      'sales', 'purchase_prices', 'products', 'price_history',
+      'sales', 'purchase_prices', 'products', 'price_history', 'purchase_price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
       'customers', 'shifts', 'annual_inventories', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
