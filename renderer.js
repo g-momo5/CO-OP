@@ -8505,6 +8505,11 @@ function hasShiftArabicNumericText(value) {
   return /[٠-٩۰-۹٫٬،]/.test(String(value ?? ''));
 }
 
+function hasShiftNumericInsertText(value) {
+  const text = String(value ?? '').trim();
+  return text !== '' && /^[0-9٠-٩۰-۹.,٫٬،\s]+$/.test(text);
+}
+
 function isShiftNumericInputTarget(target) {
   if (!(target instanceof HTMLInputElement)) return false;
   if (target.disabled || target.readOnly) return false;
@@ -8542,6 +8547,14 @@ function insertShiftNormalizedNumericText(input, text) {
   const currentValue = String(input.value ?? '');
   input.value = `${currentValue.slice(0, start)}${normalized}${currentValue.slice(end)}`;
   setShiftInputSelection(input, start + normalized.length);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function replaceShiftNumericText(input, text) {
+  const normalized = normalizeShiftNumericText(text);
+  input.value = normalized;
+  setShiftInputSelection(input, normalized.length);
+  delete input.dataset.shiftClearOnNextInput;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
@@ -8615,8 +8628,21 @@ function shouldClearShiftNumericOnFocus(target) {
 function clearShiftNumericFieldOnFocus(target) {
   if (!shouldClearShiftNumericOnFocus(target)) return;
 
-  target.value = '';
-  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.dataset.shiftClearOnNextInput = '1';
+}
+
+function clearShiftNumericFieldPendingState(target) {
+  if (target instanceof HTMLInputElement) {
+    delete target.dataset.shiftClearOnNextInput;
+  }
+}
+
+function shouldReplaceShiftNumericOnInsert(target, text) {
+  return (
+    isShiftNumericInputTarget(target)
+    && target.dataset.shiftClearOnNextInput === '1'
+    && hasShiftNumericInsertText(text)
+  );
 }
 
 function isShiftNavigationField(el) {
@@ -14245,23 +14271,39 @@ async function initializeShiftEntry() {
     if (shiftEntryScreen) {
       shiftEntryScreen.addEventListener('beforeinput', (event) => {
         const target = event.target;
-        if (!isShiftNumericInputTarget(target) || !event.data || !hasShiftArabicNumericText(event.data)) {
+        if (!isShiftNumericInputTarget(target) || !event.data) {
           return;
         }
 
-        event.preventDefault();
-        insertShiftNormalizedNumericText(target, event.data);
+        if (shouldReplaceShiftNumericOnInsert(target, event.data)) {
+          event.preventDefault();
+          replaceShiftNumericText(target, event.data);
+          return;
+        }
+
+        if (hasShiftArabicNumericText(event.data)) {
+          event.preventDefault();
+          insertShiftNormalizedNumericText(target, event.data);
+        }
       });
 
       shiftEntryScreen.addEventListener('paste', (event) => {
         const target = event.target;
         const pastedText = event.clipboardData?.getData('text') || '';
-        if (!isShiftNumericInputTarget(target) || !hasShiftArabicNumericText(pastedText)) {
+        if (!isShiftNumericInputTarget(target)) {
           return;
         }
 
-        event.preventDefault();
-        insertShiftNormalizedNumericText(target, pastedText);
+        if (shouldReplaceShiftNumericOnInsert(target, pastedText)) {
+          event.preventDefault();
+          replaceShiftNumericText(target, pastedText);
+          return;
+        }
+
+        if (hasShiftArabicNumericText(pastedText)) {
+          event.preventDefault();
+          insertShiftNormalizedNumericText(target, pastedText);
+        }
       });
 
       shiftEntryScreen.addEventListener('focusin', (event) => {
@@ -14273,6 +14315,10 @@ async function initializeShiftEntry() {
         ensureShiftFieldVisible(target);
         clearShiftNumericFieldOnFocus(target);
         activateOilRemainingEmptyMeansZero(target);
+      });
+
+      shiftEntryScreen.addEventListener('focusout', (event) => {
+        clearShiftNumericFieldPendingState(event.target);
       });
 
       shiftEntryScreen.addEventListener('keydown', (event) => {
@@ -14291,7 +14337,11 @@ async function initializeShiftEntry() {
           hasShiftArabicNumericText(event.key)
         ) {
           event.preventDefault();
-          insertShiftNormalizedNumericText(target, event.key);
+          if (shouldReplaceShiftNumericOnInsert(target, event.key)) {
+            replaceShiftNumericText(target, event.key);
+          } else {
+            insertShiftNormalizedNumericText(target, event.key);
+          }
           return;
         }
 
@@ -14300,7 +14350,8 @@ async function initializeShiftEntry() {
         }
 
         const isCustomerTableNavigation = Boolean(target.closest('.customers-table'));
-        if (target.type !== 'number' && !isCustomerTableNavigation) {
+        const isSummaryNavigation = Boolean(target.closest('.shift-summary-sidebar'));
+        if (target.type !== 'number' && !isCustomerTableNavigation && !isSummaryNavigation) {
           return;
         }
 

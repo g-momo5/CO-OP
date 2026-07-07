@@ -5365,6 +5365,7 @@ async function persistShiftRecord(shiftData) {
         grand_total = EXCLUDED.grand_total,
         is_saved = EXCLUDED.is_saved,
         updated_at = CURRENT_TIMESTAMP
+      WHERE COALESCE(shifts.is_saved, 0) = 0 OR EXCLUDED.is_saved = 1
     `;
 
     await executeUpdate(query, [
