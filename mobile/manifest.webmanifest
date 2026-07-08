@@ -1,0 +1,25 @@
+{
+  "name": "CO-OP",
+  "short_name": "CO-OP",
+  "description": "CO-OP mobile dashboard",
+  "start_url": "/m/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#0b6b3a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/mobile-assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/mobile-assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
