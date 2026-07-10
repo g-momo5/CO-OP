@@ -768,26 +768,17 @@ body.modal-scroll-lock {
 }
 
 .customer-invoices-balance-edit {
-  display: grid;
-  grid-template-columns: auto minmax(130px, 180px) auto;
-  align-items: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 
-.customer-invoices-balance-edit label {
-  font-weight: 800;
-  color: #2c3e50;
-  align-self: center;
-}
-
-.customer-invoices-balance-edit input {
-  min-width: 0;
-  padding: 0.48rem 0.6rem;
-  border: 1px solid #ccd3da;
-  border-radius: 6px;
-  font-size: 1rem;
+.customer-balance-modal-note {
+  color: #667085;
+  font-size: 0.9rem;
+  line-height: 1.5;
   text-align: center;
-  direction: ltr;
 }
 
 .customer-invoices-summary-grid {
@@ -869,7 +860,11 @@ body.modal-scroll-lock {
   }
 
   .customer-invoices-balance-edit {
-    grid-template-columns: 1fr;
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .customer-invoices-balance-edit .btn {
     width: 100%;
   }
 }

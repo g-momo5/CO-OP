@@ -291,9 +291,7 @@
               <select id="customer-invoices-select" onchange="handleCustomerInvoiceClientChange()"></select>
             </div>
             <div class="customer-invoices-balance-edit">
-              <label for="customer-invoices-previous-balance">الرصيد السابق:</label>
-              <input type="text" inputmode="decimal" id="customer-invoices-previous-balance" class="summary-numeric-input" oninput="sanitizeSummaryNumericInput(this)">
-              <button type="button" class="btn btn-primary btn-compact" onclick="saveCustomerInvoiceOpeningBalance()">حفظ الرصيد</button>
+              <button type="button" class="btn btn-secondary btn-compact" id="customer-invoices-edit-balance-btn" onclick="openCustomerInvoiceBalanceModal()">تعديل الرصيد السابق</button>
             </div>
           </div>
 
@@ -338,6 +336,7 @@
               <thead>
                 <tr>
                   <th>التاريخ</th>
+                  <th>البيان</th>
                   <th>المبلغ المدفوع</th>
                 </tr>
               </thead>
@@ -475,6 +474,28 @@
               </table>
             </div>
             <div id="expenses-empty" class="empty-state" style="display:none;">لا توجد بيانات في الفترة المحددة</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="customer-balance-modal" class="modal">
+        <div class="modal-content modal-compact modal-narrow">
+          <div class="modal-header">
+            <h3>تعديل الرصيد السابق</h3>
+            <button class="close-modal" onclick="closeCustomerInvoiceBalanceModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="form-group">
+                <label for="customer-invoices-previous-balance">الرصيد السابق</label>
+                <input type="text" inputmode="decimal" id="customer-invoices-previous-balance" class="summary-numeric-input" oninput="sanitizeSummaryNumericInput(this)">
+              </div>
+              <div class="customer-balance-modal-note" id="customer-balance-modal-note"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeCustomerInvoiceBalanceModal()">إلغاء</button>
+            <button type="button" class="btn btn-primary" onclick="saveCustomerInvoiceOpeningBalance()">حفظ الرصيد</button>
           </div>
         </div>
       </div>

@@ -24,6 +24,7 @@ const HOME_CHART_MODE = {
   PURCHASES: 'purchases',
   SALES: 'sales'
 };
+const HOME_CHART_FORECAST_DASH = [8, 5];
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
@@ -149,7 +150,7 @@ let customerNameOptionsByName = new Map();
 let customerInvoicesState = {
   weekStart: '',
   weekEnd: '',
-  selectedCustomer: '',
+  selectedCustomerId: '',
   customers: [],
   invoicesByCustomer: {},
   warnings: []
@@ -1647,14 +1648,15 @@ async function changeCustomerInvoiceWeek(direction) {
 
 function handleCustomerInvoiceClientChange() {
   const select = document.getElementById('customer-invoices-select');
-  customerInvoicesState.selectedCustomer = select?.value || '';
+  customerInvoicesState.selectedCustomerId = select?.value || '';
   renderCustomerInvoices();
 }
 
 async function saveCustomerInvoiceOpeningBalance() {
-  const customerName = customerInvoicesState.selectedCustomer;
+  const customerId = parseInt(customerInvoicesState.selectedCustomerId, 10);
+  const customer = customerInvoicesState.customers.find((item) => String(item.id) === String(customerInvoicesState.selectedCustomerId));
   const input = document.getElementById('customer-invoices-previous-balance');
-  if (!customerName) {
+  if (!Number.isFinite(customerId) || customerId <= 0) {
     showMessage('اختر العميل أولاً', 'warning');
     return;
   }
@@ -1662,7 +1664,8 @@ async function saveCustomerInvoiceOpeningBalance() {
   const balance = parseSummaryNumber(input?.value);
   try {
     const result = await ipcRenderer.invoke('upsert-customer-balance-adjustment', {
-      customer_name: customerName,
+      customer_id: customerId,
+      customer_name: customer?.name || '',
       effective_date: customerInvoicesState.weekStart,
       balance
     });
@@ -1672,6 +1675,7 @@ async function saveCustomerInvoiceOpeningBalance() {
     }
 
     showMessage('تم حفظ الرصيد السابق', 'success');
+    closeCustomerInvoiceBalanceModal();
     await loadCustomerWeeklyInvoices();
   } catch (error) {
     console.error('Error saving customer balance adjustment:', error);
@@ -1679,19 +1683,63 @@ async function saveCustomerInvoiceOpeningBalance() {
   }
 }
 
+function getSelectedCustomerInvoice() {
+  return customerInvoicesState.invoicesByCustomer[customerInvoicesState.selectedCustomerId] || {
+    total: 0,
+    previous_balance: 0,
+    purchases_total: 0,
+    payments_total: 0,
+    current_balance: 0,
+    items: [],
+    payments: []
+  };
+}
+
+function openCustomerInvoiceBalanceModal() {
+  if (!customerInvoicesState.selectedCustomerId) {
+    showMessage('اختر العميل أولاً', 'warning');
+    return;
+  }
+
+  const modal = document.getElementById('customer-balance-modal');
+  const input = document.getElementById('customer-invoices-previous-balance');
+  const note = document.getElementById('customer-balance-modal-note');
+  const selectedInvoice = getSelectedCustomerInvoice();
+  const previousBalance = parseFloat(selectedInvoice.previous_balance) || 0;
+
+  if (input) {
+    input.value = formatPrice(previousBalance);
+    input.disabled = false;
+  }
+
+  if (note) {
+    note.textContent = 'سيتم تسجيل الفرق كتصحيح في جدول المدفوعات.';
+  }
+
+  if (modal) {
+    modal.classList.add('show');
+    setTimeout(() => input?.focus(), 0);
+  }
+}
+
+function closeCustomerInvoiceBalanceModal() {
+  const modal = document.getElementById('customer-balance-modal');
+  if (modal) modal.classList.remove('show');
+}
+
 async function loadCustomerWeeklyInvoices() {
   const body = document.getElementById('customer-invoices-body');
   const empty = document.getElementById('customer-invoices-empty');
   const paymentsBody = document.getElementById('customer-invoices-payments-body');
   const paymentsEmpty = document.getElementById('customer-invoices-payments-empty');
-  const previousCustomer = customerInvoicesState.selectedCustomer;
+  const previousCustomerId = customerInvoicesState.selectedCustomerId;
 
   if (body) {
     body.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading">جاري تحميل فواتير العملاء...</td></tr>';
   }
   if (empty) empty.style.display = 'none';
   if (paymentsBody) {
-    paymentsBody.innerHTML = '<tr><td colspan="2" class="customer-invoices-loading">جاري تحميل المدفوعات...</td></tr>';
+    paymentsBody.innerHTML = '<tr><td colspan="3" class="customer-invoices-loading">جاري تحميل المدفوعات...</td></tr>';
   }
   if (paymentsEmpty) paymentsEmpty.style.display = 'none';
 
@@ -1701,14 +1749,14 @@ async function loadCustomerWeeklyInvoices() {
       weekEnd: customerInvoicesState.weekEnd
     });
 
-    customerInvoicesState.customers = Array.isArray(result?.customers) ? result.customers : [];
+    customerInvoicesState.customers = normalizeCustomerInvoiceCustomers(result?.customers);
     customerInvoicesState.invoicesByCustomer = result?.invoicesByCustomer || {};
-    customerInvoicesState.warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+    customerInvoicesState.warnings = filterCustomerInvoiceWarnings(result?.warnings);
 
-    if (previousCustomer && customerInvoicesState.customers.includes(previousCustomer)) {
-      customerInvoicesState.selectedCustomer = previousCustomer;
+    if (previousCustomerId && customerInvoicesState.customers.some((customer) => String(customer.id) === String(previousCustomerId))) {
+      customerInvoicesState.selectedCustomerId = previousCustomerId;
     } else {
-      customerInvoicesState.selectedCustomer = customerInvoicesState.customers[0] || '';
+      customerInvoicesState.selectedCustomerId = customerInvoicesState.customers[0]?.id ? String(customerInvoicesState.customers[0].id) : '';
     }
 
     renderCustomerInvoices();
@@ -1721,16 +1769,50 @@ async function loadCustomerWeeklyInvoices() {
       body.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading error">حدث خطأ أثناء تحميل فواتير العملاء</td></tr>';
     }
     if (paymentsBody) {
-      paymentsBody.innerHTML = '<tr><td colspan="2" class="customer-invoices-loading error">حدث خطأ أثناء تحميل المدفوعات</td></tr>';
+      paymentsBody.innerHTML = '<tr><td colspan="3" class="customer-invoices-loading error">حدث خطأ أثناء تحميل المدفوعات</td></tr>';
     }
     showMessage('حدث خطأ أثناء تحميل فواتير العملاء', 'error');
   }
+}
+
+function normalizeCustomerInvoiceCustomers(customers = []) {
+  if (!Array.isArray(customers)) return [];
+
+  return customers
+    .map((customer) => {
+      if (customer && typeof customer === 'object') {
+        const id = parseInt(customer.id ?? customer.customer_id, 10);
+        const name = String(customer.name ?? customer.customer ?? customer.customer_name ?? '').trim();
+        if (Number.isFinite(id) && id > 0 && name) return { id, name };
+        return null;
+      }
+
+      const legacyName = String(customer || '').trim();
+      return legacyName ? { id: legacyName, name: legacyName } : null;
+    })
+    .filter(Boolean);
+}
+
+function filterCustomerInvoiceWarnings(warnings = []) {
+  if (!Array.isArray(warnings)) return [];
+
+  const hiddenPatterns = [
+    'صفوف وقود عملاء قديمة غير مرتبطة بكود عميل',
+    'صفوف زيوت عملاء قديمة غير مرتبطة بكود عميل',
+    'مدفوعات عملاء غير مرتبطة بكود عميل'
+  ];
+
+  return warnings.filter((warning) => {
+    const text = String(warning || '').trim();
+    return text && !hiddenPatterns.some((pattern) => text.includes(pattern));
+  });
 }
 
 function renderCustomerInvoices() {
   const weekLabel = document.getElementById('customer-invoices-week-label');
   const select = document.getElementById('customer-invoices-select');
   const previousInput = document.getElementById('customer-invoices-previous-balance');
+  const editBalanceBtn = document.getElementById('customer-invoices-edit-balance-btn');
   const previousTotalEl = document.getElementById('customer-invoices-previous-total');
   const totalEl = document.getElementById('customer-invoices-total');
   const paymentsTotalEl = document.getElementById('customer-invoices-payments-total');
@@ -1747,25 +1829,17 @@ function renderCustomerInvoices() {
 
   if (select) {
     select.innerHTML = '';
-    customerInvoicesState.customers.forEach((customerName) => {
+    customerInvoicesState.customers.forEach((customer) => {
       const option = document.createElement('option');
-      option.value = customerName;
-      option.textContent = customerName;
+      option.value = String(customer.id);
+      option.textContent = customer.name;
       select.appendChild(option);
     });
-    select.value = customerInvoicesState.selectedCustomer || '';
+    select.value = customerInvoicesState.selectedCustomerId || '';
     select.disabled = customerInvoicesState.customers.length === 0;
   }
 
-  const selectedInvoice = customerInvoicesState.invoicesByCustomer[customerInvoicesState.selectedCustomer] || {
-    total: 0,
-    previous_balance: 0,
-    purchases_total: 0,
-    payments_total: 0,
-    current_balance: 0,
-    items: [],
-    payments: []
-  };
+  const selectedInvoice = getSelectedCustomerInvoice();
   const items = Array.isArray(selectedInvoice.items) ? selectedInvoice.items : [];
   const payments = Array.isArray(selectedInvoice.payments) ? selectedInvoice.payments : [];
   const previousBalance = parseFloat(selectedInvoice.previous_balance) || 0;
@@ -1774,8 +1848,12 @@ function renderCustomerInvoices() {
   const currentBalance = parseFloat(selectedInvoice.current_balance) || 0;
 
   if (previousInput) {
-    previousInput.value = customerInvoicesState.selectedCustomer ? formatPrice(previousBalance) : '';
-    previousInput.disabled = !customerInvoicesState.selectedCustomer;
+    previousInput.value = customerInvoicesState.selectedCustomerId ? formatPrice(previousBalance) : '';
+    previousInput.disabled = !customerInvoicesState.selectedCustomerId;
+  }
+
+  if (editBalanceBtn) {
+    editBalanceBtn.disabled = !customerInvoicesState.selectedCustomerId;
   }
 
   if (previousTotalEl) {
@@ -1831,6 +1909,7 @@ function renderCustomerInvoices() {
   paymentsBody.innerHTML = payments.map((payment) => `
     <tr>
       <td>${escapeHtml(formatDateOnlyDisplay(payment.date))}</td>
+      <td>${escapeHtml(payment.label || (payment.type === 'balance_adjustment' ? 'تصحيح الرصيد السابق' : 'مدفوعات العملاء'))}</td>
       <td>${formatArabicCurrency(parseFloat(payment.amount) || 0)}</td>
     </tr>
   `).join('');
@@ -1870,6 +1949,28 @@ function clearChartCanvas(canvasId) {
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function getMonthKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function getDaysInMonthKey(monthKey) {
+  const [year, month] = String(monthKey || '').split('-').map(value => parseInt(value, 10));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return 0;
+  return new Date(year, month, 0).getDate();
+}
+
+function getCurrentMonthForecastValue(actualQuantity, monthKey, registeredDays, now = new Date()) {
+  if (monthKey !== getMonthKey(now)) return actualQuantity;
+
+  const elapsedDays = Math.max(1, parseInt(registeredDays, 10) || 0);
+  const daysInMonth = getDaysInMonthKey(monthKey);
+  if (!daysInMonth) return actualQuantity;
+
+  return (actualQuantity / elapsedDays) * daysInMonth;
 }
 
 function syncHomeChartHeightToCardRows() {
@@ -3337,6 +3438,7 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
 
   // Group entries by month and fuel type
   const monthlyData = {};
+  const salesDaysByMonth = {};
   const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
   const colors = [
     '#FF6384',
@@ -3361,18 +3463,37 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
 
     if (!monthlyData[month]) {
       monthlyData[month] = {};
+      salesDaysByMonth[month] = new Set();
       fuelTypes.forEach(type => {
         monthlyData[month][type] = 0;
       });
     }
 
+    const quantity = parseFloat(entry.quantity) || 0;
+    if (mode === HOME_CHART_MODE.SALES && quantity > 0) {
+      salesDaysByMonth[month].add(entry.date.substring(0, 10));
+    }
+
     if (Object.prototype.hasOwnProperty.call(monthlyData[month], normalizedFuelType)) {
-      monthlyData[month][normalizedFuelType] += parseFloat(entry.quantity) || 0;
+      monthlyData[month][normalizedFuelType] += quantity;
     }
   });
 
   // Sort months
   const months = Object.keys(monthlyData).sort();
+  const currentMonthKey = getMonthKey();
+  const forecastMonthIndex = mode === HOME_CHART_MODE.SALES ? months.indexOf(currentMonthKey) : -1;
+
+  if (forecastMonthIndex !== -1) {
+    const registeredDays = salesDaysByMonth[currentMonthKey]?.size || 0;
+    fuelTypes.forEach(type => {
+      monthlyData[currentMonthKey][type] = getCurrentMonthForecastValue(
+        monthlyData[currentMonthKey][type] || 0,
+        currentMonthKey,
+        registeredDays
+      );
+    });
+  }
   
   // Create datasets for each fuel type
   const datasets = fuelTypes.map((fuelType, index) => ({
@@ -3381,6 +3502,11 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
     backgroundColor: colors[index % colors.length],
     borderColor: colors[index % colors.length],
     borderWidth: 2,
+    segment: forecastMonthIndex !== -1 ? {
+      borderDash: (context) => (
+        context.p1DataIndex === forecastMonthIndex ? HOME_CHART_FORECAST_DASH : undefined
+      )
+    } : undefined,
     fill: false
   }));
 
@@ -5654,6 +5780,23 @@ function navigateToAddProduct() {
   openAddProductModal();
 }
 
+function getActionEditIconSvg() {
+  return `
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
+    </svg>
+  `;
+}
+
+function getActionDeleteIconSvg() {
+  return `
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+      <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+    </svg>
+  `;
+}
+
 // Format date for display
 function formatUpdateDate(dateString) {
   if (!dateString) return '';
@@ -5740,11 +5883,7 @@ async function loadManageProducts() {
         editBtn.className = 'btn-icon';
         editBtn.title = 'تعديل الاسم';
         editBtn.onclick = () => editProductName('fuel', product.fuel_type, product.id);
-        editBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
-          </svg>
-        `;
+        editBtn.innerHTML = getActionEditIconSvg();
 
         // Delete button
         const deleteBtn = document.createElement('button');
@@ -5752,12 +5891,7 @@ async function loadManageProducts() {
         deleteBtn.title = 'حذف المنتج';
         deleteBtn.style.marginLeft = '0.5rem';
         deleteBtn.onclick = () => deleteFuelProduct(product.fuel_type);
-        deleteBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-          </svg>
-        `;
+        deleteBtn.innerHTML = getActionDeleteIconSvg();
 
         td7.appendChild(editBtn);
         td7.appendChild(deleteBtn);
@@ -5828,11 +5962,7 @@ async function loadManageProducts() {
         editBtn.className = 'btn-icon';
         editBtn.title = 'تعديل الاسم';
         editBtn.onclick = () => editProductName('oil', product.oil_type, product.id);
-        editBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
-          </svg>
-        `;
+        editBtn.innerHTML = getActionEditIconSvg();
 
         // Delete button
         const deleteBtn = document.createElement('button');
@@ -5840,12 +5970,7 @@ async function loadManageProducts() {
         deleteBtn.title = 'حذف المنتج';
         deleteBtn.style.marginLeft = '0.5rem';
         deleteBtn.onclick = () => deleteOilProduct(product.oil_type);
-        deleteBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-          </svg>
-        `;
+        deleteBtn.innerHTML = getActionDeleteIconSvg();
 
         td5.appendChild(editBtn);
         td5.appendChild(deleteBtn);
@@ -11437,7 +11562,7 @@ function renderSavedShiftOilRows(oilData = {}) {
       </td>
     `;
     tableBody.appendChild(row);
-    populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'), data.customer_name || '');
+    populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'), data.customer_id || data.customer_name || '', data.customer_name || '');
     const voucherInput = row.querySelector('input[data-field="voucher"]');
     if (voucherInput) voucherInput.checked = Boolean(data.voucher);
   });
@@ -12273,6 +12398,14 @@ async function loadCustomersSettings() {
           </button>
         </td>
       `;
+      const actionButtons = row.querySelectorAll('.btn-icon');
+      if (actionButtons[0]) {
+        actionButtons[0].title = 'تعديل الاسم';
+        actionButtons[0].innerHTML = getActionEditIconSvg();
+      }
+      if (actionButtons[1]) {
+        actionButtons[1].innerHTML = getActionDeleteIconSvg();
+      }
       tableBody.appendChild(row);
     });
   } catch (error) {
@@ -12455,11 +12588,13 @@ function normalizeCustomerPayments(items) {
       if (!item || typeof item !== 'object') return null;
       const amount = parseFloat(item.amount);
       if (!Number.isFinite(amount) || amount <= 0) return null;
+      const customerId = parseInt(item.customer_id, 10);
       const customerName = String(item.customer_name || item.name || '').trim();
-      if (!customerName) return null;
+      if (!customerName && !(Number.isFinite(customerId) && customerId > 0)) return null;
       const index = parseInt(item.index, 10);
       return {
         index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        customer_id: Number.isFinite(customerId) && customerId > 0 ? customerId : null,
         customer_name: customerName,
         amount
       };
@@ -12503,7 +12638,7 @@ function createCustomerPaymentRow(index, item = {}) {
     <input type="text" inputmode="decimal" autocomplete="off" class="total-input shift-customer-payment-amount summary-numeric-input" id="customer-payment-amount-${index}" value="${Number.isFinite(parseFloat(item.amount)) ? formatPrice(item.amount) : ''}" oninput="handleCustomerPaymentInput(this)">
   `;
 
-  populateCustomerNameSelect(row.querySelector('.shift-customer-payment-name'), item.customer_name || item.name || '');
+  populateCustomerNameSelect(row.querySelector('.shift-customer-payment-name'), item.customer_id || item.customer_name || item.name || '', item.customer_name || item.name || '');
   return row;
 }
 
@@ -12805,6 +12940,7 @@ function collectOilData() {
     const priceInput = document.getElementById(`oil-${oilId}-price`);
     const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
     const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+    const customerOption = getCustomerOptionFromSelect(customerNameSelect);
     const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
     oilData[oilKey] = {
@@ -12819,7 +12955,8 @@ function collectOilData() {
       customers: parseOilQuantity(customersInput?.value),
       price: parseFloat(priceInput?.value) || 0,
       revenue: parseFloat(revenueInput?.value) || 0,
-      customer_name: String(customerNameSelect?.value || '').trim(),
+      customer_id: customerOption?.id || null,
+      customer_name: String(customerOption?.name || '').trim(),
       voucher: Boolean(voucherInput?.checked)
     };
   });
@@ -12841,13 +12978,15 @@ function collectCustomerPayments() {
 
   return Array.from(container.querySelectorAll('.customer-payment-row'))
     .map((row, fallbackIndex) => {
-      const customerName = String(row.querySelector('.shift-customer-payment-name')?.value || '').trim();
+      const customerSelect = row.querySelector('.shift-customer-payment-name');
+      const customerOption = getCustomerOptionFromSelect(customerSelect);
       const amount = parseSummaryNumber(row.querySelector('.shift-customer-payment-amount')?.value);
-      if (!customerName || !Number.isFinite(amount) || amount <= 0) return null;
+      if (!customerOption?.id || !Number.isFinite(amount) || amount <= 0) return null;
       const index = parseInt(row.getAttribute('data-index'), 10);
       return {
         index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
-        customer_name: customerName,
+        customer_id: customerOption.id,
+        customer_name: String(customerOption.name || '').trim(),
         amount
       };
     })
@@ -12947,6 +13086,23 @@ function validateShiftData() {
     }
   });
 
+  const customerRowsTable = document.getElementById('customers-table-body');
+  if (customerRowsTable) {
+    Array.from(customerRowsTable.querySelectorAll('tr[data-customer-row]')).forEach((row, index) => {
+      const quantity = ['diesel', '80', '92', '95'].reduce((sum, field) => (
+        sum + (parseFloat(row.querySelector(`input[data-field="${field}"]`)?.value) || 0)
+      ), 0);
+      if (quantity <= 0) return;
+
+      const voucherInput = row.querySelector('input[data-field="voucher"]');
+      const customerSelect = row.querySelector('select[data-field="name"]');
+      const customerOption = getCustomerOptionFromSelect(customerSelect);
+      if (!voucherInput?.checked && !customerOption?.id) {
+        errors.push(`جدول العملاء (${index + 1}): اختر العميل أو حدد بونات`);
+      }
+    });
+  }
+
   // Validate oil quantities
   const tableBody = document.getElementById('shift-oil-table-body');
   if (tableBody) {
@@ -12958,9 +13114,13 @@ function validateShiftData() {
       const totalInput = document.getElementById(`oil-${oilId}-total`);
       const soldInput = document.getElementById(`oil-${oilId}-sold`);
       const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+      const customersInput = document.getElementById(`oil-${oilId}-customers`);
+      const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+      const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
       const total = parseOilQuantity(totalInput?.value);
       const sold = parseOilQuantity(soldInput?.value);
+      const customerQuantity = parseOilQuantity(customersInput?.value);
       const remainingRaw = String(remainingInput?.value ?? '').trim();
       const remainingParsed = parseFloat(remainingRaw.replace(',', '.'));
       const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
@@ -12972,8 +13132,21 @@ function validateShiftData() {
       if (sold > total && sold > 0) {
         errors.push(`${oilName}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
       }
+
+      if (customerQuantity > 0 && !voucherInput?.checked && !getCustomerOptionFromSelect(customerNameSelect)?.id) {
+        errors.push(`${oilName}: اختر العميل أو حدد بونات لكمية العملاء`);
+      }
     });
   }
+
+  document.querySelectorAll('#shift-customer-payment-rows .customer-payment-row').forEach((row, index) => {
+    const amount = parseSummaryNumber(row.querySelector('.shift-customer-payment-amount')?.value);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const customerOption = getCustomerOptionFromSelect(row.querySelector('.shift-customer-payment-name'));
+    if (!customerOption?.id) {
+      errors.push(`مدفوعات العملاء (${index + 1}): اختر العميل`);
+    }
+  });
 
   return errors;
 }
@@ -13864,7 +14037,7 @@ async function loadShiftData(date, shiftNumber) {
         setInputValue(customersInput, data.customers);
         setInputValue(priceInput, data.price);
         setInputValue(revenueInput, data.revenue);
-        if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, data.customer_name || '');
+        if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, data.customer_id || data.customer_name || '', data.customer_name || '');
         if (voucherInput) voucherInput.checked = Boolean(data.voucher);
       });
     }

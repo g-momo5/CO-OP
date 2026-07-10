@@ -6007,6 +6007,12 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
     const customerKeys = new Set();
     const ledgerByCustomer = {};
     const latestAdjustmentByCustomer = {};
+    const adjustmentsByCustomer = {};
+    const unresolvedRows = {
+      fuel: 0,
+      oil: 0,
+      payments: 0
+    };
     const customersById = new Map();
     const customersByName = new Map();
 
@@ -6093,10 +6099,16 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
       const effectiveDate = normalizeIsoDate(row?.effective_date);
       if (!customer || !effectiveDate) return;
       ensureCustomerInvoice(customer);
-      latestAdjustmentByCustomer[getInvoiceKey(customer)] = {
+      const customerKey = getInvoiceKey(customer);
+      const adjustment = {
         effective_date: effectiveDate,
         balance: toFiniteNumber(row?.balance)
       };
+      if (!adjustmentsByCustomer[customerKey]) {
+        adjustmentsByCustomer[customerKey] = [];
+      }
+      adjustmentsByCustomer[customerKey].push(adjustment);
+      latestAdjustmentByCustomer[customerKey] = adjustment;
     });
 
     for (const shift of shifts) {
@@ -6117,7 +6129,7 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
           ? customersByName.get(voucherCustomerName)
           : resolveInvoiceCustomer(row);
         if (!customer) {
-          warnings.push(`تعذر ربط عميل في وردية ${shiftNumber} بتاريخ ${date}`);
+          unresolvedRows.fuel += 1;
           continue;
         }
 
@@ -6170,7 +6182,7 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
           ? customersByName.get(voucherCustomerName)
           : resolveInvoiceCustomer(data);
         if (!customer) {
-          warnings.push(`تعذر ربط عميل زيت في وردية ${shiftNumber} بتاريخ ${date}`);
+          unresolvedRows.oil += 1;
           return;
         }
 
@@ -6212,7 +6224,11 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
       customerPayments.forEach((payment) => {
         const customer = resolveInvoiceCustomer(payment);
         const amount = toFiniteNumber(payment.amount);
-        if (!customer || amount <= 0) return;
+        if (amount <= 0) return;
+        if (!customer) {
+          unresolvedRows.payments += 1;
+          return;
+        }
 
         const ledger = ensureLedger(customer);
         ledger.paymentEvents.push({ date, amount, shift_number: shiftNumber });
@@ -6232,6 +6248,7 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
     Object.values(invoicesByCustomer).forEach((invoice) => {
       const key = String(invoice.customer_id);
       const adjustment = latestAdjustmentByCustomer[key] || null;
+      const adjustments = adjustmentsByCustomer[key] || [];
       const ledger = ledgerByCustomer[key] || { purchaseEvents: [], paymentEvents: [] };
       const baselineDate = adjustment?.effective_date || '';
       const previousPurchases = ledger.purchaseEvents.reduce((sum, event) => {
@@ -6246,6 +6263,34 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
       }, 0);
 
       invoice.previous_balance = toFiniteNumber(adjustment?.balance) + previousPurchases - previousPayments;
+      if (adjustment?.effective_date === startDate) {
+        const previousAdjustment = adjustments
+          .filter((item) => item.effective_date < startDate)
+          .sort((a, b) => String(a.effective_date).localeCompare(String(b.effective_date)))
+          .pop() || null;
+        const previousBaselineDate = previousAdjustment?.effective_date || '';
+        const balanceBeforeCurrentAdjustment = toFiniteNumber(previousAdjustment?.balance)
+          + ledger.purchaseEvents.reduce((sum, event) => {
+            if (event.date >= startDate) return sum;
+            if (previousBaselineDate && event.date < previousBaselineDate) return sum;
+            return sum + toFiniteNumber(event.total);
+          }, 0)
+          - ledger.paymentEvents.reduce((sum, event) => {
+            if (event.date >= startDate) return sum;
+            if (previousBaselineDate && event.date < previousBaselineDate) return sum;
+            return sum + toFiniteNumber(event.amount);
+          }, 0);
+        const adjustmentDelta = invoice.previous_balance - balanceBeforeCurrentAdjustment;
+        if (Math.abs(adjustmentDelta) > 0.004) {
+          invoice.payments.push({
+            date: startDate,
+            amount: adjustmentDelta,
+            shift_number: 0,
+            type: 'balance_adjustment',
+            label: 'تصحيح الرصيد السابق'
+          });
+        }
+      }
       invoice.purchases_total = toFiniteNumber(invoice.purchases_total);
       invoice.total = invoice.purchases_total;
       invoice.payments_total = toFiniteNumber(invoice.payments_total);
@@ -6276,7 +6321,7 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
         return a.name.localeCompare(b.name, 'ar');
       });
 
-    return { customers, invoicesByCustomer, warnings };
+    return { customers, invoicesByCustomer, warnings, legacyUnresolvedRows: unresolvedRows };
   } catch (error) {
     console.error('Error getting customer weekly invoices:', error);
     throw error;
