@@ -1,5 +1,25 @@
 [[redirects]]
+  from = "/m"
+  to = "/mobile/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/m/"
+  to = "/mobile/index.html"
+  status = 200
+
+[[redirects]]
   from = "/m/*"
+  to = "/mobile/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/mobile"
+  to = "/mobile/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/mobile/"
   to = "/mobile/index.html"
   status = 200
 

@@ -1,4 +1,5 @@
 (() => {
+  const MOBILE_TOKEN_STORAGE_KEY = 'coop_mobile_token';
   const state = {
     token: getTokenFromUrl(),
     apiBase: '/api/mobile-data',
@@ -51,14 +52,37 @@
   function getTokenFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const queryToken = params.get('token');
-    if (queryToken) return queryToken.trim();
+    if (queryToken) {
+      return persistMobileToken(queryToken.trim());
+    }
 
     const parts = window.location.pathname.split('/').filter(Boolean);
     const index = parts.indexOf('m');
     if (index !== -1 && parts[index + 1]) {
-      return decodeURIComponent(parts[index + 1]).trim();
+      return persistMobileToken(decodeURIComponent(parts[index + 1]).trim());
     }
-    return '';
+    return getStoredMobileToken();
+  }
+
+  function persistMobileToken(token) {
+    const cleanToken = String(token || '').trim();
+    if (!cleanToken) return '';
+
+    try {
+      window.localStorage.setItem(MOBILE_TOKEN_STORAGE_KEY, cleanToken);
+    } catch (_error) {
+      // Ignore storage errors; the current URL token is still usable.
+    }
+
+    return cleanToken;
+  }
+
+  function getStoredMobileToken() {
+    try {
+      return String(window.localStorage.getItem(MOBILE_TOKEN_STORAGE_KEY) || '').trim();
+    } catch (_error) {
+      return '';
+    }
   }
 
   function escapeHtml(value) {

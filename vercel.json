@@ -12,7 +12,19 @@
       "destination": "/mobile/index.html"
     },
     {
+      "source": "/m/",
+      "destination": "/mobile/index.html"
+    },
+    {
       "source": "/m/:path*",
+      "destination": "/mobile/index.html"
+    },
+    {
+      "source": "/mobile",
+      "destination": "/mobile/index.html"
+    },
+    {
+      "source": "/mobile/",
       "destination": "/mobile/index.html"
     }
   ],
