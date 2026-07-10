@@ -17,7 +17,7 @@ let navigationHistory = [];
 let isOnline = navigator.onLine !== false;
 let offlineRestricted = {
   screens: ['report', 'charts'],
-  settingsSections: ['invoices-list', 'backup']
+  settingsSections: ['backup']
 };
 const rootScreens = ['home', 'charts', 'report', 'settings'];
 const HOME_CHART_MODE = {
@@ -71,6 +71,7 @@ const screenTitles = {
   'tank-management': 'ادارة التنكات',
   'annual-inventory': 'جرد سنوي',
   'sales-summary': 'ملخص المبيعات',
+  'customer-invoices': 'فواتير العملاء',
   'profit': 'المكسب',
   'expenses': 'المصاريف'
 };
@@ -141,6 +142,18 @@ let invoiceOilProductsLoadingPromise = null;
 let invoiceFuelProductsCache = null;
 let invoiceFuelProductsCacheDate = '';
 let invoiceFuelProductsLoadingPromise = null;
+let fuelInvoiceEditState = null;
+let customerNameOptionsCache = [];
+let customerNameOptionsById = new Map();
+let customerNameOptionsByName = new Map();
+let customerInvoicesState = {
+  weekStart: '',
+  weekEnd: '',
+  selectedCustomer: '',
+  customers: [],
+  invoicesByCustomer: {},
+  warnings: []
+};
 
 function invalidateInvoiceOilProductsCache() {
   invoiceOilProductsCache = null;
@@ -711,6 +724,9 @@ function showScreenWithoutHistory(screenName) {
       initSalesSummaryFilters();
       loadSalesSummary();
       break;
+    case 'customer-invoices':
+      initializeCustomerInvoicesPage();
+      break;
     case 'safe-book':
       initSafeBookFilters();
       loadSafeBookMovements();
@@ -891,6 +907,20 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function escapeJsString(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function escapeInlineJsString(value) {
+  return escapeHtml(escapeJsString(value));
 }
 
 function parseIsoDateParts(dateString) {
@@ -1559,6 +1589,251 @@ async function saveSafeBookMovement() {
     console.error('Error saving safe book movement:', error);
     showMessage(error.message || 'حدث خطأ أثناء إضافة حركة الخزينة', 'error');
   }
+}
+
+function openCustomerInvoices() {
+  if (!customerInvoicesState.weekStart || !customerInvoicesState.weekEnd) {
+    setCustomerInvoiceWeekFromDate(new Date());
+  }
+  showScreen('customer-invoices', 'home');
+}
+
+function getLocalDateFromIso(dateString) {
+  const parts = parseIsoDateParts(dateString);
+  if (!parts) return null;
+  return new Date(parts.year, parts.month - 1, parts.day);
+}
+
+function formatLocalIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getSaturdayWeekRange(date = new Date()) {
+  const baseDate = date instanceof Date && !Number.isNaN(date.getTime()) ? new Date(date) : new Date();
+  baseDate.setHours(12, 0, 0, 0);
+  const daysSinceSaturday = (baseDate.getDay() + 1) % 7;
+  const start = new Date(baseDate);
+  start.setDate(baseDate.getDate() - daysSinceSaturday);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return {
+    weekStart: formatLocalIsoDate(start),
+    weekEnd: formatLocalIsoDate(end)
+  };
+}
+
+function setCustomerInvoiceWeekFromDate(date) {
+  const range = getSaturdayWeekRange(date);
+  customerInvoicesState.weekStart = range.weekStart;
+  customerInvoicesState.weekEnd = range.weekEnd;
+}
+
+async function initializeCustomerInvoicesPage() {
+  if (!customerInvoicesState.weekStart || !customerInvoicesState.weekEnd) {
+    setCustomerInvoiceWeekFromDate(new Date());
+  }
+  await loadCustomerWeeklyInvoices();
+}
+
+async function changeCustomerInvoiceWeek(direction) {
+  const currentStart = getLocalDateFromIso(customerInvoicesState.weekStart) || new Date();
+  currentStart.setDate(currentStart.getDate() + (parseInt(direction, 10) || 0) * 7);
+  setCustomerInvoiceWeekFromDate(currentStart);
+  await loadCustomerWeeklyInvoices();
+}
+
+function handleCustomerInvoiceClientChange() {
+  const select = document.getElementById('customer-invoices-select');
+  customerInvoicesState.selectedCustomer = select?.value || '';
+  renderCustomerInvoices();
+}
+
+async function saveCustomerInvoiceOpeningBalance() {
+  const customerName = customerInvoicesState.selectedCustomer;
+  const input = document.getElementById('customer-invoices-previous-balance');
+  if (!customerName) {
+    showMessage('اختر العميل أولاً', 'warning');
+    return;
+  }
+
+  const balance = parseSummaryNumber(input?.value);
+  try {
+    const result = await ipcRenderer.invoke('upsert-customer-balance-adjustment', {
+      customer_name: customerName,
+      effective_date: customerInvoicesState.weekStart,
+      balance
+    });
+
+    if (!result?.success) {
+      throw new Error(result?.error || 'save_failed');
+    }
+
+    showMessage('تم حفظ الرصيد السابق', 'success');
+    await loadCustomerWeeklyInvoices();
+  } catch (error) {
+    console.error('Error saving customer balance adjustment:', error);
+    showMessage('خطأ في حفظ الرصيد السابق', 'error');
+  }
+}
+
+async function loadCustomerWeeklyInvoices() {
+  const body = document.getElementById('customer-invoices-body');
+  const empty = document.getElementById('customer-invoices-empty');
+  const paymentsBody = document.getElementById('customer-invoices-payments-body');
+  const paymentsEmpty = document.getElementById('customer-invoices-payments-empty');
+  const previousCustomer = customerInvoicesState.selectedCustomer;
+
+  if (body) {
+    body.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading">جاري تحميل فواتير العملاء...</td></tr>';
+  }
+  if (empty) empty.style.display = 'none';
+  if (paymentsBody) {
+    paymentsBody.innerHTML = '<tr><td colspan="2" class="customer-invoices-loading">جاري تحميل المدفوعات...</td></tr>';
+  }
+  if (paymentsEmpty) paymentsEmpty.style.display = 'none';
+
+  try {
+    const result = await ipcRenderer.invoke('get-customer-weekly-invoices', {
+      weekStart: customerInvoicesState.weekStart,
+      weekEnd: customerInvoicesState.weekEnd
+    });
+
+    customerInvoicesState.customers = Array.isArray(result?.customers) ? result.customers : [];
+    customerInvoicesState.invoicesByCustomer = result?.invoicesByCustomer || {};
+    customerInvoicesState.warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+
+    if (previousCustomer && customerInvoicesState.customers.includes(previousCustomer)) {
+      customerInvoicesState.selectedCustomer = previousCustomer;
+    } else {
+      customerInvoicesState.selectedCustomer = customerInvoicesState.customers[0] || '';
+    }
+
+    renderCustomerInvoices();
+  } catch (error) {
+    console.error('Error loading customer weekly invoices:', error);
+    customerInvoicesState.customers = [];
+    customerInvoicesState.invoicesByCustomer = {};
+    customerInvoicesState.warnings = [];
+    if (body) {
+      body.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading error">حدث خطأ أثناء تحميل فواتير العملاء</td></tr>';
+    }
+    if (paymentsBody) {
+      paymentsBody.innerHTML = '<tr><td colspan="2" class="customer-invoices-loading error">حدث خطأ أثناء تحميل المدفوعات</td></tr>';
+    }
+    showMessage('حدث خطأ أثناء تحميل فواتير العملاء', 'error');
+  }
+}
+
+function renderCustomerInvoices() {
+  const weekLabel = document.getElementById('customer-invoices-week-label');
+  const select = document.getElementById('customer-invoices-select');
+  const previousInput = document.getElementById('customer-invoices-previous-balance');
+  const previousTotalEl = document.getElementById('customer-invoices-previous-total');
+  const totalEl = document.getElementById('customer-invoices-total');
+  const paymentsTotalEl = document.getElementById('customer-invoices-payments-total');
+  const currentBalanceEl = document.getElementById('customer-invoices-current-balance');
+  const warningEl = document.getElementById('customer-invoices-warning');
+  const body = document.getElementById('customer-invoices-body');
+  const empty = document.getElementById('customer-invoices-empty');
+  const paymentsBody = document.getElementById('customer-invoices-payments-body');
+  const paymentsEmpty = document.getElementById('customer-invoices-payments-empty');
+
+  if (weekLabel) {
+    weekLabel.textContent = `${formatDateOnlyDisplay(customerInvoicesState.weekStart)} - ${formatDateOnlyDisplay(customerInvoicesState.weekEnd)}`;
+  }
+
+  if (select) {
+    select.innerHTML = '';
+    customerInvoicesState.customers.forEach((customerName) => {
+      const option = document.createElement('option');
+      option.value = customerName;
+      option.textContent = customerName;
+      select.appendChild(option);
+    });
+    select.value = customerInvoicesState.selectedCustomer || '';
+    select.disabled = customerInvoicesState.customers.length === 0;
+  }
+
+  const selectedInvoice = customerInvoicesState.invoicesByCustomer[customerInvoicesState.selectedCustomer] || {
+    total: 0,
+    previous_balance: 0,
+    purchases_total: 0,
+    payments_total: 0,
+    current_balance: 0,
+    items: [],
+    payments: []
+  };
+  const items = Array.isArray(selectedInvoice.items) ? selectedInvoice.items : [];
+  const payments = Array.isArray(selectedInvoice.payments) ? selectedInvoice.payments : [];
+  const previousBalance = parseFloat(selectedInvoice.previous_balance) || 0;
+  const purchasesTotal = parseFloat(selectedInvoice.purchases_total ?? selectedInvoice.total) || 0;
+  const paymentsTotal = parseFloat(selectedInvoice.payments_total) || 0;
+  const currentBalance = parseFloat(selectedInvoice.current_balance) || 0;
+
+  if (previousInput) {
+    previousInput.value = customerInvoicesState.selectedCustomer ? formatPrice(previousBalance) : '';
+    previousInput.disabled = !customerInvoicesState.selectedCustomer;
+  }
+
+  if (previousTotalEl) {
+    previousTotalEl.textContent = formatArabicCurrency(previousBalance);
+  }
+
+  if (totalEl) {
+    totalEl.textContent = formatArabicCurrency(purchasesTotal);
+  }
+
+  if (paymentsTotalEl) {
+    paymentsTotalEl.textContent = formatArabicCurrency(paymentsTotal);
+  }
+
+  if (currentBalanceEl) {
+    currentBalanceEl.textContent = formatArabicCurrency(currentBalance);
+  }
+
+  if (warningEl) {
+    if (customerInvoicesState.warnings.length > 0) {
+      warningEl.textContent = customerInvoicesState.warnings.join(' - ');
+      warningEl.style.display = 'block';
+    } else {
+      warningEl.textContent = '';
+      warningEl.style.display = 'none';
+    }
+  }
+
+  if (!body || !empty || !paymentsBody || !paymentsEmpty) return;
+
+  if (items.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    body.innerHTML = items.map((item) => `
+      <tr>
+        <td>${escapeHtml(formatDateOnlyDisplay(item.date))}</td>
+        <td>${escapeHtml(item.fuel_name || '')}</td>
+        <td>${formatArabicNumber(parseFloat(item.quantity) || 0)}</td>
+        <td>${formatArabicCurrency(parseFloat(item.total) || 0)}</td>
+      </tr>
+    `).join('');
+  }
+
+  if (payments.length === 0) {
+    paymentsBody.innerHTML = '';
+    paymentsEmpty.style.display = 'block';
+    return;
+  }
+
+  paymentsEmpty.style.display = 'none';
+  paymentsBody.innerHTML = payments.map((payment) => `
+    <tr>
+      <td>${escapeHtml(formatDateOnlyDisplay(payment.date))}</td>
+      <td>${formatArabicCurrency(parseFloat(payment.amount) || 0)}</td>
+    </tr>
+  `).join('');
 }
 
 function setupHomeChartToggle() {
@@ -2324,7 +2599,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     currentPurchaseCell.style.textAlign = 'center';
     const purchasePrice = parseFloat(purchase.price);
     currentPurchaseCell.textContent = Number.isFinite(purchasePrice) && purchasePrice > 0
-      ? formatArabicCurrency(purchasePrice)
+      ? formatArabicCurrencyPreserveDecimals(purchase.price)
       : '-';
 
     const newPurchaseCell = document.createElement('td');
@@ -2332,7 +2607,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     const purchaseInput = document.createElement('input');
     purchaseInput.type = 'number';
     purchaseInput.id = `price-fuel-purchase-${product.id || index}`;
-    purchaseInput.step = '0.01';
+    purchaseInput.step = 'any';
     purchaseInput.min = '0';
     purchaseInput.className = 'table-price-input';
     purchaseInput.placeholder = '0.00';
@@ -2576,7 +2851,120 @@ async function renderFuelInvoiceItems(forceReload = false) {
 
 
 
-async function saveFuelInvoice() {
+function setFuelInvoiceEditMode(invoice = null) {
+  fuelInvoiceEditState = invoice
+    ? { original_invoice_number: invoice.invoice_number, invoice }
+    : null;
+
+  const title = document.getElementById('invoice-screen-title');
+  const saveBtn = document.getElementById('fuel-invoice-save-btn');
+  const resetBtn = document.getElementById('fuel-invoice-reset-btn');
+  const cancelBtn = document.getElementById('fuel-invoice-cancel-edit-btn');
+  const oilTab = document.querySelector('#invoice-screen .price-type-tab[data-type="oil"]');
+
+  const isEditing = Boolean(fuelInvoiceEditState);
+  if (title) title.textContent = isEditing ? 'تعديل فاتورة وقود' : 'فاتورة جديدة';
+  if (saveBtn) saveBtn.textContent = isEditing ? 'حفظ التعديل' : 'حفظ فاتورة الوقود';
+  if (resetBtn) resetBtn.textContent = isEditing ? 'استرجاع بيانات الفاتورة' : 'إعادة تعيين';
+  if (cancelBtn) cancelBtn.style.display = isEditing ? '' : 'none';
+  if (oilTab) {
+    oilTab.classList.toggle('disabled', isEditing);
+    oilTab.setAttribute('aria-disabled', isEditing ? 'true' : 'false');
+  }
+}
+
+function getFuelInvoiceInputNumber(value) {
+  const parsed = parseAnnualInventoryValue(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ensureFuelInvoiceItemRow(item) {
+  const fuelItemsList = document.getElementById('fuel-items-list');
+  if (!fuelItemsList) return null;
+
+  const productCode = String(item?.product_code || '').trim();
+  const fuelType = String(item?.fuel_type || '').trim();
+  let row = Array.from(fuelItemsList.querySelectorAll('.fuel-item')).find((element) => (
+    (productCode && element.dataset.fuelCode === productCode)
+    || (!productCode && element.dataset.fuel === fuelType)
+    || (fuelType && element.dataset.fuel === fuelType)
+  ));
+
+  if (!row && fuelType) {
+    row = createFuelInvoiceRow({
+      product_code: productCode,
+      fuel_type: fuelType,
+      purchase_price: parseFloat(item?.purchase_price)
+    });
+    fuelItemsList.appendChild(row);
+    setupFuelCalculationListeners();
+  }
+
+  return row;
+}
+
+async function populateFuelInvoiceFormForEdit(invoice) {
+  const dateInput = document.getElementById('fuel-invoice-date');
+  const numberInput = document.getElementById('fuel-invoice-number');
+  const actualTotalInput = document.getElementById('actual-invoice-total');
+
+  if (dateInput) dateInput.value = invoice.date || getTodayDate();
+  invalidateInvoiceFuelProductsCache();
+  await renderFuelInvoiceItems(true);
+
+  if (numberInput) numberInput.value = invoice.invoice_number || '';
+  if (actualTotalInput) {
+    actualTotalInput.value = invoice.invoice_total > 0
+      ? invoice.invoice_total
+      : invoice.total || '';
+  }
+
+  document.querySelectorAll('#fuel-items-list .fuel-item').forEach((row) => {
+    const quantityInput = row.querySelector('.fuel-quantity');
+    const purchaseInput = row.querySelector('.fuel-purchase-price');
+    const totalInput = row.querySelector('.fuel-total');
+    if (quantityInput) quantityInput.value = '';
+    if (purchaseInput) purchaseInput.value = '';
+    if (totalInput) totalInput.value = '';
+    const netQuantityElement = row.querySelector('.net-quantity span');
+    if (netQuantityElement) netQuantityElement.textContent = '0';
+  });
+
+  (invoice.items || []).forEach((item) => {
+    const row = ensureFuelInvoiceItemRow(item);
+    if (!row) return;
+
+    const quantityInput = row.querySelector('.fuel-quantity');
+    const purchaseInput = row.querySelector('.fuel-purchase-price');
+    if (quantityInput) quantityInput.value = parseFloat(item.quantity) || '';
+    if (purchaseInput) purchaseInput.value = parseFloat(item.purchase_price) || '';
+    calculateFuelItem.call(quantityInput || purchaseInput);
+  });
+
+  calculateInvoiceSummary();
+}
+
+async function editFuelInvoice(invoiceNumber) {
+  const invoice = allInvoices.find(inv => inv.invoice_number === invoiceNumber && inv.type === 'fuel');
+
+  if (!invoice) {
+    showMessage('لم يتم العثور على فاتورة الوقود', 'error');
+    return;
+  }
+
+  setFuelInvoiceEditMode(invoice);
+  await showScreen('invoice', 'settings');
+  await showInvoiceType('fuel');
+  await populateFuelInvoiceFormForEdit(invoice);
+  closeInvoiceDetailsModal();
+}
+
+function cancelFuelInvoiceEdit() {
+  setFuelInvoiceEditMode(null);
+  resetFuelInvoiceForm();
+}
+
+function collectFuelInvoiceFormData() {
   const actualInvoiceTotalInput = document.getElementById('actual-invoice-total');
   const parsedInvoiceTotal = parseAnnualInventoryValue(actualInvoiceTotalInput?.value || '');
 
@@ -2587,17 +2975,14 @@ async function saveFuelInvoice() {
     fuel_items: []
   };
 
-  // Collect fuel items data
   document.querySelectorAll('#fuel-items-list .fuel-item').forEach(item => {
     const fuelType = item.dataset.fuel;
     const fuelCode = item.dataset.fuelCode || '';
-    const quantity = parseFloat(item.querySelector('.fuel-quantity').value.replace(',', '.')) || 0;
-    const purchasePrice = parseFloat(item.querySelector('.fuel-purchase-price').value.replace(',', '.')) || 0;
-    const totalValue = item.querySelector('.fuel-total').value;
-    const total = parseFloat(convertFromArabicNumerals(totalValue).replace(',', '.')) || 0;
+    const quantity = getFuelInvoiceInputNumber(item.querySelector('.fuel-quantity')?.value || '');
+    const purchasePrice = getFuelInvoiceInputNumber(item.querySelector('.fuel-purchase-price')?.value || '');
+    const total = getFuelInvoiceInputNumber(item.querySelector('.fuel-total')?.value || '');
 
     if (quantity > 0) {
-      // Calculate net quantity for gasoline
       let netQuantity = quantity;
       if (fuelType.includes('بنزين')) {
         netQuantity = quantity * 0.995;
@@ -2614,33 +2999,54 @@ async function saveFuelInvoice() {
     }
   });
 
+  if (invoiceData.invoice_total <= 0) {
+    invoiceData.invoice_total = invoiceData.fuel_items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+  }
+
+  return invoiceData;
+}
+
+async function saveFuelInvoice() {
+  const invoiceData = collectFuelInvoiceFormData();
+
   if (invoiceData.fuel_items.length === 0) {
     showMessage('يرجى إدخال بيانات على الأقل لنوع واحد من الوقود', 'error');
     return;
   }
 
-  if (invoiceData.invoice_total <= 0) {
-    invoiceData.invoice_total = invoiceData.fuel_items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
-  }
-
   try {
-    // Save the fuel invoice
-    await ipcRenderer.invoke('add-fuel-invoice', invoiceData);
-
-    // Save each fuel item as a tank movement (IN)
-    for (const item of invoiceData.fuel_items) {
-      await ipcRenderer.invoke('add-fuel-movement', {
-        product_code: item.product_code || null,
-        fuel_type: item.fuel_type,
-        date: invoiceData.date,
-        type: 'in',  // Movimento IN (ingresso nei serbatoi)
-        quantity: item.quantity,
-        invoice_number: invoiceData.invoice_number,
-        notes: `Acquisto - Prezzo: ${item.purchase_price} جنيه/لتر - Totale: ${item.total} جنيه`
+    if (fuelInvoiceEditState) {
+      await ipcRenderer.invoke('update-fuel-invoice', {
+        ...invoiceData,
+        original_invoice_number: fuelInvoiceEditState.original_invoice_number
       });
+      showMessage('تم تعديل فاتورة الوقود بنجاح', 'success');
+      setFuelInvoiceEditMode(null);
+      resetFuelInvoiceForm();
+      showScreen('settings');
+      showSettingsSectionWithoutHistory('invoices-list');
+      loadTodayStats();
+      if (currentScreen === 'home') {
+        loadHomeChart();
+      }
+      return;
+    } else {
+      await ipcRenderer.invoke('add-fuel-invoice', invoiceData);
+
+      for (const item of invoiceData.fuel_items) {
+        await ipcRenderer.invoke('add-fuel-movement', {
+          product_code: item.product_code || null,
+          fuel_type: item.fuel_type,
+          date: invoiceData.date,
+          type: 'in',
+          quantity: item.quantity,
+          invoice_number: invoiceData.invoice_number,
+          notes: `Acquisto - Prezzo: ${item.purchase_price} جنيه/لتر - Totale: ${item.total} جنيه`
+        });
+      }
+      showMessage('تم حفظ فاتورة الوقود بنجاح', 'success');
     }
 
-    showMessage('تم حفظ فاتورة الوقود بنجاح', 'success');
     resetFuelInvoiceForm();
     loadTodayStats();
 
@@ -2649,12 +3055,17 @@ async function saveFuelInvoice() {
       loadHomeChart();
     }
   } catch (error) {
-    showMessage('حدث خطأ أثناء حفظ فاتورة الوقود', 'error');
+    showMessage(fuelInvoiceEditState ? 'حدث خطأ أثناء تعديل فاتورة الوقود' : 'حدث خطأ أثناء حفظ فاتورة الوقود', 'error');
     console.error('Error saving fuel invoice:', error);
   }
 }
 
 function resetFuelInvoiceForm() {
+  if (fuelInvoiceEditState?.invoice) {
+    populateFuelInvoiceFormForEdit(fuelInvoiceEditState.invoice);
+    return;
+  }
+
   // Reset all fuel items
   document.querySelectorAll('#fuel-items-list .fuel-item').forEach(item => {
     const quantityInput = item.querySelector('.fuel-quantity');
@@ -3230,6 +3641,29 @@ function formatArabicCurrency(amount) {
   return convertToArabicNumerals(formatted);
 }
 
+function getStoredDecimalPlaces(value) {
+  const normalized = convertFromArabicNumerals(String(value ?? ''))
+    .trim()
+    .replace(/[٫،,]/g, '.');
+  const match = normalized.match(/^-?\d+\.(\d+)/);
+  return match ? Math.min(match[1].length, 12) : 0;
+}
+
+function formatArabicCurrencyPreserveDecimals(amount) {
+  const numericAmount = parseFloat(amount);
+  if (!Number.isFinite(numericAmount)) return '-';
+
+  const decimalPlaces = getStoredDecimalPlaces(amount);
+  const formatted = new Intl.NumberFormat('ar-EG', {
+    style: 'currency',
+    currency: 'EGP',
+    minimumFractionDigits: decimalPlaces,
+    maximumFractionDigits: decimalPlaces,
+    useGrouping: false
+  }).format(numericAmount);
+  return convertToArabicNumerals(formatted);
+}
+
 // Format currency with forced 2 decimals (use only when explicitly requested)
 function formatArabicCurrencyFixed(amount) {
   const formatted = new Intl.NumberFormat('ar-EG', {
@@ -3360,6 +3794,11 @@ function applyRTLFormatting() {
 }
 
 async function showInvoiceType(type) {
+  if (fuelInvoiceEditState && type !== 'fuel') {
+    showMessage('أكمل تعديل فاتورة الوقود أو ألغِ التعديل أولاً', 'warning');
+    return;
+  }
+
   // Update active tab
   document.querySelectorAll('#invoice-screen .price-type-tab').forEach(tab => {
     tab.classList.remove('active');
@@ -5287,7 +5726,7 @@ async function loadManageProducts() {
         const td5 = document.createElement('td');
         td5.style.textAlign = 'center';
         const purchasePrice = parseFloat(purchase.price);
-        td5.textContent = Number.isFinite(purchasePrice) && purchasePrice > 0 ? formatArabicCurrency(purchasePrice) : '-';
+        td5.textContent = Number.isFinite(purchasePrice) && purchasePrice > 0 ? formatArabicCurrencyPreserveDecimals(purchase.price) : '-';
 
         const td6 = document.createElement('td');
         td6.style.textAlign = 'center';
@@ -7506,10 +7945,6 @@ document.head.appendChild(style);
 let allInvoices = [];
 
 async function loadInvoicesList() {
-  if (!isOnline) {
-    showMessage('عرض قائمة الفواتير يتطلب اتصالاً بالإنترنت', 'warning');
-    return;
-  }
   try {
     // Set default date filters
     const today = new Date().toISOString().split('T')[0];
@@ -7621,14 +8056,19 @@ function displayInvoices(invoices) {
 
   tbody.innerHTML = invoices.map(inv => `
     <tr>
-      <td>${inv.date}</td>
-      <td>${inv.invoice_number}</td>
+      <td>${escapeHtml(inv.date)}</td>
+      <td>${escapeHtml(inv.invoice_number)}</td>
       <td>${inv.type === 'fuel' ? 'وقود' : 'زيوت'}</td>
       <td>${formatArabicNumber(inv.total)} جنيه</td>
       <td>
-        <button class="btn btn-sm btn-primary" onclick="showInvoiceDetails('${inv.type}', '${inv.invoice_number}')">
+        <button class="btn btn-sm btn-primary" onclick="showInvoiceDetails('${escapeInlineJsString(inv.type)}', '${escapeInlineJsString(inv.invoice_number)}')">
           تفاصيل
         </button>
+        ${inv.type === 'fuel' ? `
+          <button class="btn btn-sm btn-secondary" onclick="editFuelInvoice('${escapeInlineJsString(inv.invoice_number)}')">
+            تعديل
+          </button>
+        ` : ''}
       </td>
     </tr>
   `).join('');
@@ -7696,14 +8136,14 @@ async function showInvoiceDetails(type, invoiceNumber) {
         <td>${item.fuel_type}</td>
         <td>${formatArabicNumber(item.quantity)}</td>
         <td>${formatArabicNumber(item.net_quantity || 0)}</td>
-        <td>${formatArabicNumber(item.purchase_price)} جنيه</td>
+        <td>${formatArabicCurrencyPreserveDecimals(item.purchase_price)}</td>
         <td>${formatArabicNumber(item.total)} جنيه</td>
       `;
     } else {
       html += `
         <td>${item.oil_type}</td>
         <td>${formatArabicNumber(item.quantity)}</td>
-        <td>${formatArabicNumber(item.purchase_price)} جنيه</td>
+        <td>${formatArabicCurrencyPreserveDecimals(item.purchase_price)}</td>
         <td>${formatArabicNumber(item.iva)}%</td>
         <td>${formatArabicNumber(item.total_purchase)} جنيه</td>
       `;
@@ -8200,6 +8640,7 @@ let shiftDraftAutoSaveQueued = false;
 let shiftDraftAutoSavePromise = null;
 let summaryRevenueRowCounter = 0;
 let summaryExpenseRowCounter = 0;
+let customerPaymentRowCounter = 0;
 const SHIFT_DRAFT_STATUS_MESSAGES = {
   idle: 'جاهز',
   dirty: 'تغييرات غير محفوظة',
@@ -8340,6 +8781,7 @@ async function persistCurrentShiftDraftToDatabase() {
     oil_total: calculateOilTotal(),
     customer_rows: collectCustomerRowsData(),
     revenue_items: collectRevenueItems(),
+    customer_payments: collectCustomerPayments(),
     expense_items: collectExpenseItems(),
     wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
     total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
@@ -8722,7 +9164,9 @@ function findAdjacentShiftTableField(currentField, direction) {
 
   const navigationContainer = table.classList.contains('shift-fuel-table')
     ? (table.closest('.fuel-tables-left') || table)
-    : table;
+    : table.classList.contains('shift-oil-table')
+      ? (table.closest('.shift-oil-table-container') || table)
+      : table;
   const entries = getShiftTableNavigationEntries(navigationContainer);
   const currentEntry = entries.find((entry) => entry.field === currentField);
   if (!currentEntry) {
@@ -10898,7 +11342,7 @@ function renderSavedShiftOilRows(oilData = {}) {
   if (entries.length === 0) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="11" style="text-align: center; padding: 2rem; color: #999;">
+        <td colspan="13" style="text-align: center; padding: 2rem; color: #999;">
           لا توجد بيانات زيوت محفوظة لهذه الوردية
         </td>
       </tr>
@@ -10977,8 +11421,25 @@ function renderSavedShiftOilRows(oilData = {}) {
                  id="oil-${oilId}-revenue" readonly>
         </div>
       </td>
+      <td>
+        <div class="oil-cell-center">
+          <select class="oil-customer-name-select" id="oil-${oilId}-customer-name"
+                  data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customer_name"
+                  onchange="handleOilCustomerAssignmentInput('${oilId}')"></select>
+        </div>
+      </td>
+      <td>
+        <div class="oil-cell-center">
+          <input type="checkbox" class="oil-voucher-checkbox" id="oil-${oilId}-voucher"
+                 data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="voucher"
+                 onchange="handleOilCustomerAssignmentInput('${oilId}')">
+        </div>
+      </td>
     `;
     tableBody.appendChild(row);
+    populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'), data.customer_name || '');
+    const voucherInput = row.querySelector('input[data-field="voucher"]');
+    if (voucherInput) voucherInput.checked = Boolean(data.voucher);
   });
 }
 
@@ -11063,7 +11524,7 @@ async function loadActiveOils() {
     if (activeOils.length === 0) {
       tableBody.innerHTML = `
         <tr>
-          <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+          <td colspan="13" style="text-align: center; padding: 2rem; color: #999;">
             لا توجد زيوت نشطة
           </td>
         </tr>
@@ -11152,8 +11613,23 @@ async function loadActiveOils() {
                    id="oil-${oilId}-revenue" readonly>
           </div>
         </td>
+        <td>
+          <div class="oil-cell-center">
+            <select class="oil-customer-name-select" id="oil-${oilId}-customer-name"
+                    data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customer_name"
+                    onchange="handleOilCustomerAssignmentInput('${oilId}')"></select>
+          </div>
+        </td>
+        <td>
+          <div class="oil-cell-center">
+            <input type="checkbox" class="oil-voucher-checkbox" id="oil-${oilId}-voucher"
+                   data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="voucher"
+                   onchange="handleOilCustomerAssignmentInput('${oilId}')">
+          </div>
+        </td>
       `;
       tableBody.appendChild(row);
+      populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'));
     });
 
     // Enable drag and drop
@@ -11162,9 +11638,22 @@ async function loadActiveOils() {
     // Initialize prices for all oils
     await loadAllOilPrices();
   } catch (error) {
-    console.error('Error loading active oils:', error);
-    alert('خطأ في تحميل الزيوت النشطة');
+    console.error('Error loading active oils:', error?.stack || error);
+    const tableBody = document.getElementById('shift-oil-table-body');
+    if (tableBody) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="13" style="text-align: center; padding: 2rem; color: #c4291d;">
+            تعذر تحميل الزيوت النشطة
+          </td>
+        </tr>
+      `;
+    }
+    showMessage('تعذر تحميل الزيوت النشطة', 'error');
+    return false;
   }
+
+  return true;
 }
 
 // Enable drag and drop for oil rows
@@ -11309,6 +11798,10 @@ async function calculateOilRow(oilId) {
   calculateOilTotal();
 }
 
+function handleOilCustomerAssignmentInput(_oilId) {
+  markShiftDraftDirty();
+}
+
 // Get oil price by date
 async function getOilPriceByDate(oilName, date) {
   const cachedPrice = getCachedOilPrice(oilName, date);
@@ -11433,23 +11926,79 @@ async function loadCustomerNameOptions() {
   }
 }
 
-// Update datalist options for customer names
+// Update dropdown options for customer names
 function updateCustomerNameOptions(customers = []) {
-  const dataList = document.getElementById('customer-names-list');
-  if (!dataList) return;
-
-  dataList.innerHTML = '';
-
   const seen = new Set();
+  customerNameOptionsCache = [];
+  customerNameOptionsById = new Map();
+  customerNameOptionsByName = new Map();
   customers.forEach(customer => {
+    const id = parseInt(customer?.id, 10);
     const name = (customer?.name || '').trim();
-    if (name && !seen.has(name)) {
-      const option = document.createElement('option');
-      option.value = name;
-      dataList.appendChild(option);
+    if (Number.isFinite(id) && id > 0 && name && !seen.has(id)) {
       seen.add(name);
+      seen.add(id);
+      const option = { id, name };
+      customerNameOptionsCache.push(option);
+      customerNameOptionsById.set(String(id), option);
+      if (!customerNameOptionsByName.has(name)) {
+        customerNameOptionsByName.set(name, option);
+      }
     }
   });
+
+  document.querySelectorAll('.customer-name-select, .oil-customer-name-select, .shift-customer-payment-name').forEach((select) => {
+    populateCustomerNameSelect(select, select.value, select.selectedOptions?.[0]?.dataset?.customerName || '');
+  });
+}
+
+function getCustomerOptionById(value) {
+  return customerNameOptionsById.get(String(value || '').trim()) || null;
+}
+
+function getCustomerOptionByName(value) {
+  return customerNameOptionsByName.get(String(value || '').trim()) || null;
+}
+
+function getCustomerOptionFromSelect(select) {
+  if (!select) return null;
+  const selectedValue = String(select.value || '').trim();
+  const optionById = getCustomerOptionById(selectedValue);
+  if (optionById) return optionById;
+
+  const selectedName = String(select.selectedOptions?.[0]?.dataset?.customerName || select.selectedOptions?.[0]?.textContent || '').trim();
+  return getCustomerOptionByName(selectedName) || (selectedName ? { id: null, name: selectedName } : null);
+}
+
+function populateCustomerNameSelect(select, selectedValue = '', selectedName = '') {
+  if (!select) return;
+
+  const rawValue = String(selectedValue || '').trim();
+  const rawName = String(selectedName || '').trim();
+  const selectedOption = getCustomerOptionById(rawValue) || getCustomerOptionByName(rawValue) || getCustomerOptionByName(rawName);
+  const currentValue = selectedOption?.id ? String(selectedOption.id) : rawValue;
+  const currentName = selectedOption?.name || rawName || rawValue;
+  select.innerHTML = '';
+
+  const emptyOption = document.createElement('option');
+  emptyOption.value = '';
+  emptyOption.textContent = '';
+  select.appendChild(emptyOption);
+
+  const options = [...customerNameOptionsCache];
+  if (currentValue && !getCustomerOptionById(currentValue)) {
+    options.unshift({ id: currentValue, name: currentName });
+  }
+
+  options.forEach((customer) => {
+    const option = document.createElement('option');
+    option.value = String(customer.id);
+    option.textContent = customer.name;
+    option.dataset.customerName = customer.name;
+    select.appendChild(option);
+  });
+
+  select.value = currentValue;
 }
 
 // Initialize customers table with 16 rows
@@ -11478,11 +12027,12 @@ function addCustomerRow(index) {
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="80" oninput="handleCustomerInput(${index})"></td>
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="92" oninput="handleCustomerInput(${index})"></td>
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="95" oninput="handleCustomerInput(${index})"></td>
-    <td><input type="text" class="customer-name-input" list="customer-names-list" data-row="${index}" data-field="name" oninput="handleCustomerInput(${index})"></td>
+    <td><select class="customer-name-select" data-row="${index}" data-field="name" onchange="handleCustomerInput(${index})"></select></td>
     <td><input type="checkbox" class="customer-voucher-checkbox" data-row="${index}" data-field="voucher" onchange="handleCustomerInput(${index})"></td>
   `;
 
   tableBody.appendChild(row);
+  populateCustomerNameSelect(row.querySelector('select[data-field="name"]'));
 }
 
 function normalizeCustomerRowsData(items) {
@@ -11513,10 +12063,11 @@ function normalizeCustomerRowsData(items) {
       const fuel80 = parseFloat(item['80']) || 0;
       const fuel92 = parseFloat(item['92']) || 0;
       const fuel95 = parseFloat(item['95']) || 0;
-      const name = String(item.name || '').trim();
+      const customerId = parseInt(item.customer_id, 10);
+      const name = String(item.name || item.customer_name || '').trim();
       const voucher = toVoucherBoolean(item.voucher);
 
-      if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !voucher) {
+      if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !(Number.isFinite(customerId) && customerId > 0) && !voucher) {
         return null;
       }
 
@@ -11525,6 +12076,7 @@ function normalizeCustomerRowsData(items) {
         '80': fuel80,
         '92': fuel92,
         '95': fuel95,
+        customer_id: Number.isFinite(customerId) && customerId > 0 ? customerId : null,
         name,
         voucher
       };
@@ -11540,13 +12092,16 @@ function collectCustomerRowsData() {
   const rawRows = rows.map((row) => {
     const getInputValue = (selector) => row.querySelector(selector)?.value || '';
     const getCheckboxValue = (selector) => Boolean(row.querySelector(selector)?.checked);
+    const customerSelect = row.querySelector('select[data-field="name"]');
+    const customerOption = getCustomerOptionFromSelect(customerSelect);
 
     return {
       diesel: parseFloat(getInputValue('input[data-field="diesel"]')) || 0,
       '80': parseFloat(getInputValue('input[data-field="80"]')) || 0,
       '92': parseFloat(getInputValue('input[data-field="92"]')) || 0,
       '95': parseFloat(getInputValue('input[data-field="95"]')) || 0,
-      name: String(getInputValue('input[data-field="name"]')).trim(),
+      customer_id: customerOption?.id || null,
+      name: String(customerOption?.name || '').trim(),
       voucher: getCheckboxValue('input[data-field="voucher"]')
     };
   });
@@ -11574,14 +12129,14 @@ function setCustomerRowsData(rowsData = []) {
     const fuel80Input = row.querySelector('input[data-field="80"]');
     const fuel92Input = row.querySelector('input[data-field="92"]');
     const fuel95Input = row.querySelector('input[data-field="95"]');
-    const nameInput = row.querySelector('input[data-field="name"]');
+    const nameInput = row.querySelector('select[data-field="name"]');
     const voucherInput = row.querySelector('input[data-field="voucher"]');
 
     if (dieselInput) dieselInput.value = item.diesel || '';
     if (fuel80Input) fuel80Input.value = item['80'] || '';
     if (fuel92Input) fuel92Input.value = item['92'] || '';
     if (fuel95Input) fuel95Input.value = item['95'] || '';
-    if (nameInput) nameInput.value = item.name || '';
+    if (nameInput) populateCustomerNameSelect(nameInput, item.customer_id || item.name || '', item.name || '');
     if (voucherInput) voucherInput.checked = Boolean(item.voucher);
   });
 
@@ -11661,7 +12216,7 @@ function handleCustomerInput(rowIndex) {
   // Check if input is in the last row
   if (rowIndex === lastRowIndex) {
     // Check if any field in the last row has a value
-    const inputs = lastRow.querySelectorAll('input[type="number"], input[type="text"]');
+    const inputs = lastRow.querySelectorAll('input[type="number"], select[data-field="name"]');
     const hasValue = Array.from(inputs).some(input => input.value.trim() !== '');
 
     if (hasValue) {
@@ -11892,6 +12447,27 @@ function normalizeRevenueItems(items) {
     .sort((a, b) => a.index - b.index);
 }
 
+function normalizeCustomerPayments(items) {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') return null;
+      const amount = parseFloat(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const customerName = String(item.customer_name || item.name || '').trim();
+      if (!customerName) return null;
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        customer_name: customerName,
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
 function createSummaryDynamicRow(type, index, item = {}) {
   const isRevenue = type === 'revenue';
   const row = document.createElement('div');
@@ -11917,6 +12493,20 @@ function createSummaryDynamicRow(type, index, item = {}) {
   return row;
 }
 
+function createCustomerPaymentRow(index, item = {}) {
+  const row = document.createElement('div');
+  row.className = 'total-row summary-dynamic-row customer-payment-row';
+  row.setAttribute('data-index', index);
+
+  row.innerHTML = `
+    <select class="shift-customer-payment-name" id="customer-payment-name-${index}" onchange="handleCustomerPaymentInput(this)"></select>
+    <input type="text" inputmode="decimal" autocomplete="off" class="total-input shift-customer-payment-amount summary-numeric-input" id="customer-payment-amount-${index}" value="${Number.isFinite(parseFloat(item.amount)) ? formatPrice(item.amount) : ''}" oninput="handleCustomerPaymentInput(this)">
+  `;
+
+  populateCustomerNameSelect(row.querySelector('.shift-customer-payment-name'), item.customer_name || item.name || '');
+  return row;
+}
+
 function renderRevenueItems(items = []) {
   const container = document.getElementById('shift-revenue-extra-rows');
   if (!container) return;
@@ -11933,6 +12523,24 @@ function renderRevenueItems(items = []) {
 
   summaryRevenueRowCounter += 1;
   container.appendChild(createSummaryDynamicRow('revenue', summaryRevenueRowCounter));
+}
+
+function renderCustomerPayments(items = []) {
+  const container = document.getElementById('shift-customer-payment-rows');
+  if (!container) return;
+
+  const normalized = normalizeCustomerPayments(items);
+  container.innerHTML = '';
+  customerPaymentRowCounter = 0;
+
+  normalized.forEach((item) => {
+    const index = item.index || (customerPaymentRowCounter + 1);
+    customerPaymentRowCounter = Math.max(customerPaymentRowCounter, index);
+    container.appendChild(createCustomerPaymentRow(index, item));
+  });
+
+  customerPaymentRowCounter += 1;
+  container.appendChild(createCustomerPaymentRow(customerPaymentRowCounter));
 }
 
 function renderExpenseItems(items = []) {
@@ -11978,6 +12586,23 @@ function ensureBlankSummaryRow(type) {
   }
 }
 
+function ensureBlankCustomerPaymentRow() {
+  const container = document.getElementById('shift-customer-payment-rows');
+  if (!container) return;
+
+  const rows = Array.from(container.querySelectorAll('.customer-payment-row'));
+  const hasBlank = rows.some((row) => {
+    const customerName = String(row.querySelector('.shift-customer-payment-name')?.value || '').trim();
+    const amountText = String(row.querySelector('.shift-customer-payment-amount')?.value || '').trim();
+    return !customerName && !amountText;
+  });
+
+  if (hasBlank) return;
+
+  customerPaymentRowCounter += 1;
+  container.appendChild(createCustomerPaymentRow(customerPaymentRowCounter));
+}
+
 function handleSummaryFixedRevenueInput(input) {
   sanitizeSummaryNumericInput(input);
   calculateGrandTotal();
@@ -11998,8 +12623,16 @@ function handleSummaryExpenseInput(input) {
   markShiftDraftDirty();
 }
 
+function handleCustomerPaymentInput(input) {
+  sanitizeSummaryNumericInput(input);
+  ensureBlankCustomerPaymentRow();
+  calculateGrandTotal();
+  markShiftDraftDirty();
+}
+
 function initializeShiftSummaryRows() {
   renderRevenueItems([]);
+  renderCustomerPayments([]);
   renderExpenseItems([]);
 }
 
@@ -12057,7 +12690,12 @@ function calculateTotalRevenue() {
     extraRevenue += item.amount;
   });
 
-  const totalRevenue = totalFuelCash + totalOilRevenue + washLubeRevenue + extraRevenue;
+  let customerPaymentsRevenue = 0;
+  collectCustomerPayments().forEach((item) => {
+    customerPaymentsRevenue += item.amount;
+  });
+
+  const totalRevenue = totalFuelCash + totalOilRevenue + washLubeRevenue + extraRevenue + customerPaymentsRevenue;
   document.getElementById('total-revenue').value = formatPrice(totalRevenue);
 
   calculateNetTotal();
@@ -12166,6 +12804,8 @@ function collectOilData() {
     const customersInput = document.getElementById(`oil-${oilId}-customers`);
     const priceInput = document.getElementById(`oil-${oilId}-price`);
     const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+    const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+    const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
     oilData[oilKey] = {
       product_code: oilCode || null,
@@ -12178,7 +12818,9 @@ function collectOilData() {
       open: parseOilQuantity(openInput?.value),
       customers: parseOilQuantity(customersInput?.value),
       price: parseFloat(priceInput?.value) || 0,
-      revenue: parseFloat(revenueInput?.value) || 0
+      revenue: parseFloat(revenueInput?.value) || 0,
+      customer_name: String(customerNameSelect?.value || '').trim(),
+      voucher: Boolean(voucherInput?.checked)
     };
   });
 
@@ -12191,6 +12833,25 @@ function collectExpenseItems() {
 
 function collectRevenueItems() {
   return getSummaryRowItems('shift-revenue-extra-rows', '.shift-revenue-desc', '.shift-revenue-amount');
+}
+
+function collectCustomerPayments() {
+  const container = document.getElementById('shift-customer-payment-rows');
+  if (!container) return [];
+
+  return Array.from(container.querySelectorAll('.customer-payment-row'))
+    .map((row, fallbackIndex) => {
+      const customerName = String(row.querySelector('.shift-customer-payment-name')?.value || '').trim();
+      const amount = parseSummaryNumber(row.querySelector('.shift-customer-payment-amount')?.value);
+      if (!customerName || !Number.isFinite(amount) || amount <= 0) return null;
+      const index = parseInt(row.getAttribute('data-index'), 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        customer_name: customerName,
+        amount
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeExpenseItems(items) {
@@ -12231,6 +12892,7 @@ function clearShiftExpenseInputs() {
 
 function clearShiftRevenueInputs() {
   renderRevenueItems([]);
+  renderCustomerPayments([]);
 
   const washLubeInput = document.getElementById('total-wash-lube-revenue');
   if (washLubeInput) {
@@ -12326,6 +12988,7 @@ function buildCurrentShiftPayload(date, shiftNumber, isSaved = 1) {
     oil_total: calculateOilTotal(),
     customer_rows: collectCustomerRowsData(),
     revenue_items: collectRevenueItems(),
+    customer_payments: collectCustomerPayments(),
     expense_items: collectExpenseItems(),
     wash_lube_revenue: parseSummaryNumber(document.getElementById('total-wash-lube-revenue')?.value),
     total_expenses: parseSummaryNumber(document.getElementById('total-expenses')?.value),
@@ -12587,6 +13250,8 @@ function clearFieldsAfterSave(oilRemainingValues = {}) {
       const openInput = document.getElementById(`oil-${oilId}-open`);
       const customersInput = document.getElementById(`oil-${oilId}-customers`);
       const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+      const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+      const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
       if (initialInput) initialInput.value = carriedInitial;
       if (addedInput) addedInput.value = '';
@@ -12599,6 +13264,8 @@ function clearFieldsAfterSave(oilRemainingValues = {}) {
       if (openInput) openInput.value = '';
       if (customersInput) customersInput.value = '';
       if (revenueInput) revenueInput.value = '';
+      if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, '');
+      if (voucherInput) voucherInput.checked = false;
     });
   }
 
@@ -12717,6 +13384,32 @@ async function getLastSavedShift() {
   }
 }
 
+async function getPreviousSavedShiftFor(date, shiftNumber) {
+  try {
+    return await ipcRenderer.invoke('get-adjacent-saved-shift', {
+      date,
+      shift_number: shiftNumber,
+      direction: 'previous'
+    });
+  } catch (error) {
+    console.error('Error getting previous saved shift:', error);
+    return null;
+  }
+}
+
+async function getShiftBalanceOverrides(date, shiftNumber) {
+  try {
+    const rows = await ipcRenderer.invoke('get-shift-balance-change-overrides', {
+      date,
+      shift_number: shiftNumber
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    console.error('Error getting shift balance overrides:', error);
+    return [];
+  }
+}
+
 // Calculate next shift date and number based on last shift
 function calculateNextShift(lastShift) {
   if (!lastShift) {
@@ -12745,6 +13438,114 @@ function calculateNextShift(lastShift) {
       shiftNumber: 1
     };
   }
+}
+
+function buildShiftBalanceOverrideSets(changes = []) {
+  const fuel = new Set();
+  const oil = new Set();
+
+  changes.forEach((change) => {
+    const itemType = String(change?.item_type || '').trim();
+    const itemName = String(change?.item_name || '').trim();
+    const fieldName = String(change?.field_name || '').trim();
+    if (!itemName || !fieldName) return;
+
+    if (itemType === 'fuel') {
+      fuel.add(`${itemName}|${fieldName}`);
+    } else if (itemType === 'oil') {
+      oil.add(`${itemName}|${fieldName}`);
+    }
+  });
+
+  return { fuel, oil };
+}
+
+function hasFuelStartOverride(overrides, fuelName, counterIndex) {
+  const itemName = `${fuelName} - عداد ${convertToArabicNumerals(counterIndex)}`;
+  return overrides.fuel.has(`${itemName}|أول الوردية`);
+}
+
+function hasOilInitialOverride(overrides, oilName) {
+  return overrides.oil.has(`${oilName}|رصيد`);
+}
+
+function applyPreviousShiftFuelStartValues(previousShift, overrides) {
+  const legacyData = parseShiftJsonObject(previousShift?.data, {});
+  const fuelData = parseShiftJsonObject(previousShift?.fuel_data || legacyData.fuel_data, {});
+
+  Object.entries(fuelData).forEach(([fuelType, data]) => {
+    const fuelName = getShiftFuelEntryName(fuelType, data);
+    const fuelId = fuelIdMap[fuelName];
+    if (!fuelId) return;
+
+    const counterCount = fuelName === 'سولار' ? 4 : 2;
+    for (let i = 1; i <= counterCount; i += 1) {
+      if (hasFuelStartOverride(overrides, fuelName, i)) continue;
+
+      const firstShiftInput = fuelName === 'سولار'
+        ? document.getElementById(`fuel-diesel-first-${i}`)
+        : document.getElementById(`fuel-${fuelId}-first-${i}`);
+      const lastShiftValue = data?.[`lastShift${i}`];
+
+      if (firstShiftInput && lastShiftValue !== undefined && lastShiftValue !== null) {
+        firstShiftInput.value = getShiftInputDisplayValue(lastShiftValue);
+      }
+    }
+  });
+}
+
+async function applyPreviousShiftOilInitialValues(previousShift, overrides) {
+  const legacyData = parseShiftJsonObject(previousShift?.data, {});
+  const oilData = parseShiftJsonObject(previousShift?.oil_data || legacyData.oil_data, {});
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody || Object.keys(oilData).length === 0) return;
+
+  const oilDataByName = new Map(
+    Object.entries(oilData).map(([oilName, data]) => [normalizeOilName(getShiftOilEntryName(oilName, data)), data])
+  );
+  const oilDataByCode = new Map(
+    Object.entries(oilData)
+      .map(([oilName, data]) => [getShiftOilEntryCode(oilName, data), data])
+      .filter(([code]) => Boolean(code))
+  );
+
+  for (const row of Array.from(tableBody.querySelectorAll('tr[data-oil-id]'))) {
+    const oilId = row.getAttribute('data-oil-id');
+    const oilCode = row.getAttribute('data-oil-code') || '';
+    const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
+    if (!oilId || hasOilInitialOverride(overrides, oilName)) continue;
+
+    const previousOilData = oilDataByCode.get(oilCode) || oilDataByName.get(normalizeOilName(oilName));
+    if (!previousOilData) continue;
+
+    const initialInput = document.getElementById(`oil-${oilId}-initial`);
+    if (initialInput) {
+      initialInput.value = getShiftInputDisplayValue(previousOilData.remaining);
+      await calculateOilRow(oilId);
+    }
+  }
+}
+
+function recalculateShiftFromStartValues() {
+  applyNightShiftGasAutoClose();
+  calculateDieselQuantity();
+  calculateFuelQuantity('بنزين ٩٥');
+  calculateFuelQuantity('بنزين ٩٢');
+  calculateFuelQuantity('بنزين ٨٠');
+  calculateFuelQuantity('غاز سيارات');
+  calculateFuelTotal();
+  calculateOilTotal();
+  calculateNetTotal();
+}
+
+async function applyAutomaticStartValuesForDraft(date, shiftNumber) {
+  const previousShift = await getPreviousSavedShiftFor(date, shiftNumber);
+  if (!previousShift) return;
+
+  const overrides = buildShiftBalanceOverrideSets(await getShiftBalanceOverrides(date, shiftNumber));
+  applyPreviousShiftFuelStartValues(previousShift, overrides);
+  await applyPreviousShiftOilInitialValues(previousShift, overrides);
+  recalculateShiftFromStartValues();
 }
 
 function loadPreviousShiftOilBalances(previousShift) {
@@ -12850,9 +13651,12 @@ async function loadNextShift() {
       disableReadOnlyMode();
     }
   } catch (error) {
-    console.error('Error loading next shift:', error);
-    alert('خطأ في تحميل الوردية التالية');
+    console.error('Error loading next shift:', error?.stack || error);
+    showMessage('تعذر تحميل الوردية التالية', 'error');
+    return false;
   }
+
+  return true;
 }
 
 // Load previous shift end values into current shift first values
@@ -12951,6 +13755,7 @@ async function loadShiftData(date, shiftNumber) {
     const oilData = parseJsonObject(shift.oil_data || legacyData.oil_data, {});
     const customerRows = normalizeCustomerRowsData(legacyData.customer_rows);
     const revenueItems = normalizeRevenueItems(legacyData.revenue_items);
+    const customerPayments = normalizeCustomerPayments(legacyData.customer_payments);
     const washLubeRevenue = parseFloat(
       shift.wash_lube_revenue ?? legacyData.wash_lube_revenue ?? 0
     ) || 0;
@@ -12960,6 +13765,7 @@ async function loadShiftData(date, shiftNumber) {
     const expenseItems = normalizeExpenseItems(legacyData.expense_items);
 
     renderRevenueItems(revenueItems);
+    renderCustomerPayments(customerPayments);
     renderExpenseItems(expenseItems);
 
     // Populate fuel data
@@ -13045,6 +13851,8 @@ async function loadShiftData(date, shiftNumber) {
         const customersInput = document.getElementById(`oil-${oilId}-customers`);
         const priceInput = document.getElementById(`oil-${oilId}-price`);
         const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+        const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+        const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
         setInputValue(initialInput, data.initial);
         setInputValue(addedInput, data.added);
@@ -13056,6 +13864,8 @@ async function loadShiftData(date, shiftNumber) {
         setInputValue(customersInput, data.customers);
         setInputValue(priceInput, data.price);
         setInputValue(revenueInput, data.revenue);
+        if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, data.customer_name || '');
+        if (voucherInput) voucherInput.checked = Boolean(data.voucher);
       });
     }
 
@@ -13081,13 +13891,17 @@ async function loadShiftData(date, shiftNumber) {
       calculateNetTotal();
     }
 
-    // Set current shift state
-    currentShiftData.date = date;
-    currentShiftData.shiftNumber = shiftNumber;
-    currentShiftData.isSaved = shift.is_saved === 1;
-    currentShiftData.hasUnsavedChanges = false;
-    currentShiftData.draftCleanupQueue = [];
-    setShiftDraftStatus('idle');
+	    // Set current shift state
+	    currentShiftData.date = date;
+	    currentShiftData.shiftNumber = shiftNumber;
+	    currentShiftData.isSaved = shift.is_saved === 1;
+	    currentShiftData.hasUnsavedChanges = false;
+	    currentShiftData.draftCleanupQueue = [];
+	    if (shift.is_saved !== 1) {
+	      await applyAutomaticStartValuesForDraft(date, shiftNumber);
+	      currentShiftData.hasUnsavedChanges = false;
+	    }
+	    setShiftDraftStatus('idle');
     if (applyNightShiftGasAutoClose()) {
       calculateGrandTotal();
       currentShiftData.hasUnsavedChanges = false;
@@ -13176,6 +13990,8 @@ function clearShiftForm() {
       const customersInput = document.getElementById(`oil-${oilId}-customers`);
       const priceInput = document.getElementById(`oil-${oilId}-price`);
       const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
+      const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
+      const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
       if (initialInput) initialInput.value = '';
       if (addedInput) addedInput.value = '';
@@ -13189,6 +14005,8 @@ function clearShiftForm() {
       if (customersInput) customersInput.value = '';
       if (priceInput) priceInput.value = '';
       if (revenueInput) revenueInput.value = '';
+      if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, '');
+      if (voucherInput) voucherInput.checked = false;
     });
   }
 
@@ -13357,6 +14175,7 @@ async function loadShiftHistory(date, shiftNumber, messageEl) {
     showScreen('shift-entry', 'home');
     const legacyData = parseShiftJsonObject(existingShift.data, {});
     const oilData = parseShiftJsonObject(existingShift.oil_data || legacyData.oil_data, {});
+    await loadCustomerNameOptions();
     renderSavedShiftOilRows(oilData);
     await loadShiftData(date, shiftNumber);
     initializeShiftHorizontalScrollControls();
@@ -14086,9 +14905,12 @@ async function loadFuelPricesForDate(date) {
     // Always recompute derived fuel rows from current counters and prices.
     recalculateFuelDerivedRows();
   } catch (error) {
-    console.error('Error loading fuel prices for date:', error);
-    alert('خطأ في تحميل أسعار الوقود');
+    console.error('Error loading fuel prices for date:', error?.stack || error);
+    showMessage('تعذر تحميل أسعار الوقود', 'error');
+    return false;
   }
+
+  return true;
 }
 
 // Track if shift listeners are already set up
@@ -14242,6 +15064,8 @@ function bindShiftIdentifierListeners() {
 
 // Initialize shift entry when screen is shown
 async function initializeShiftEntry() {
+  await loadCustomerNameOptions();
+
   // Load active oils
   await loadActiveOils();
   lockResetInlineFields();
@@ -14669,6 +15493,9 @@ ipcRenderer.on('sync-completed', (event, result) => {
   if (result.success) {
     if (result.synced > 0) {
       showMessage(`تمت المزامنة بنجاح: ${result.synced} عملية`, 'success');
+    }
+    if (result.failed > 0) {
+      showMessage(`تعذر مزامنة ${result.failed} عملية. قد توجد تعارضات تحتاج مراجعة.`, 'warning');
     }
     updateConnectionStatus();
     if (currentScreen === 'profit') {

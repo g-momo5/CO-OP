@@ -23,13 +23,11 @@ let isForceClosingWindow = false; // Allow close after explicit user confirmatio
 // Screens and sections that are limited when offline
 const OFFLINE_RESTRICTED = {
   screens: ['report', 'charts'],
-  settingsSections: ['invoices-list', 'backup'],
+  settingsSections: ['backup'],
   reads: [
     'get-sales',
     'get-sales-report',
     'get-sales-summary',
-    'get-fuel-invoices',
-    'get-oil-invoices',
     'get-oil-invoices-report',
     'get-price-history',
     'get-purchase-price-history',
@@ -39,6 +37,18 @@ const OFFLINE_RESTRICTED = {
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const SHIFT_OIL_STOCK_MOVEMENT_PREFIX = 'وارد وردية زيت';
 const SHIFT_OIL_STOCK_EXCLUDED_OIL = 'سايب ١ ك';
+const DEFAULT_VOUCHER_CUSTOMERS = [
+  'الشنهاب',
+  'سعد خليل',
+  'الدجلة',
+  'حسين الرجال',
+  'السمورة',
+  'زراعة سمنود',
+  'المحلة الميكانيكية',
+  'قاصد كريم',
+  'بونات الشركة',
+  'الشرطة'
+];
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE/.test(String(error.message || '')));
@@ -194,6 +204,9 @@ const CHATGPT_CSV_COLUMNS = [
 ];
 
 function normalizeIsoDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
   const normalized = String(value || '').trim().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : '';
 }
@@ -314,6 +327,40 @@ function normalizeRevenueItems(items) {
       return {
         index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
         description: String(item.description || '').trim(),
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function normalizeCustomerPayments(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item, fallbackIndex) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const amount = parseOptionalNumber(item.amount);
+      if (amount === null || amount <= 0) {
+        return null;
+      }
+
+      const customerName = String(item.customer_name || item.name || '').trim();
+      const customerId = parseInt(item.customer_id, 10);
+      if (!customerName && !Number.isFinite(customerId)) {
+        return null;
+      }
+
+      const index = parseInt(item.index, 10);
+      return {
+        index: Number.isFinite(index) && index > 0 ? index : fallbackIndex + 1,
+        customer_id: Number.isFinite(customerId) && customerId > 0 ? customerId : null,
+        customer_name: customerName,
         amount
       };
     })
@@ -747,12 +794,321 @@ function executeInsert(query, params = [], tableName = 'unknown') {
   return dbManager.executeInsert(query, params, tableName);
 }
 
+async function seedDefaultVoucherCustomers() {
+  const cleanNames = [...new Set(DEFAULT_VOUCHER_CUSTOMERS.map((name) => String(name || '').trim()).filter(Boolean))];
+  if (cleanNames.length === 0 || !dbManager?.sqlite) return;
+
+  const insertLocal = dbManager.sqlite.prepare('INSERT OR IGNORE INTO customers (name) VALUES (?)');
+  const insertManyLocal = dbManager.sqlite.transaction((names) => {
+    names.forEach((name) => insertLocal.run(name));
+  });
+  insertManyLocal(cleanNames);
+
+  if (dbManager.isOnline && dbManager.pgPool) {
+    try {
+      for (const name of cleanNames) {
+        await dbManager.pgPool.query(
+          'INSERT INTO customers (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+          [name]
+        );
+      }
+    } catch (error) {
+      console.warn('Unable to seed default voucher customers in PostgreSQL:', error.message);
+    }
+  }
+}
+
+function normalizeCustomerName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function getPositiveInteger(value) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function loadCustomerLookup() {
+  const rows = await executeQuery('SELECT id, name FROM customers ORDER BY id ASC');
+  const byId = new Map();
+  const byName = new Map();
+
+  rows.forEach((row) => {
+    const id = getPositiveInteger(row?.id);
+    const name = normalizeCustomerName(row?.name);
+    if (!id || !name) return;
+    const customer = { id, name };
+    byId.set(id, customer);
+    if (!byName.has(name)) {
+      byName.set(name, customer);
+    }
+  });
+
+  return { byId, byName };
+}
+
+async function ensureCustomerByName(name, lookup = null) {
+  const cleanName = normalizeCustomerName(name);
+  if (!cleanName) return null;
+
+  const activeLookup = lookup || await loadCustomerLookup();
+  const existing = activeLookup.byName.get(cleanName);
+  if (existing) return existing;
+
+  await executeUpdate(
+    'INSERT INTO customers (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+    [cleanName]
+  );
+  const rows = await executeQuery('SELECT id, name FROM customers WHERE name = $1 LIMIT 1', [cleanName]);
+  const row = rows[0];
+  const id = getPositiveInteger(row?.id);
+  if (!id) return null;
+
+  const customer = { id, name: normalizeCustomerName(row.name) };
+  activeLookup.byId.set(customer.id, customer);
+  activeLookup.byName.set(customer.name, customer);
+  return customer;
+}
+
+function collectLegacyCustomerNamesFromShiftData(data = {}) {
+  const names = new Set();
+  const addName = (value) => {
+    const name = normalizeCustomerName(value);
+    if (name) names.add(name);
+  };
+
+  (Array.isArray(data.customer_rows) ? data.customer_rows : []).forEach((row) => {
+    if (!row || typeof row !== 'object') return;
+    if (row.voucher) {
+      addName('بونات الشركة');
+    } else {
+      addName(row.name);
+    }
+  });
+
+  const oilData = parseStoredObject(data.oil_data, {});
+  Object.values(oilData).forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    if (entry.voucher) {
+      addName('بونات الشركة');
+    } else {
+      addName(entry.customer_name);
+    }
+  });
+
+  (Array.isArray(data.customer_payments) ? data.customer_payments : []).forEach((payment) => {
+    if (!payment || typeof payment !== 'object') return;
+    addName(payment.customer_name || payment.name);
+  });
+
+  return names;
+}
+
+function resolveCustomerReference(item = {}, lookup, fallbackName = '') {
+  const existingId = getPositiveInteger(item.customer_id);
+  if (existingId && lookup.byId.has(existingId)) {
+    return lookup.byId.get(existingId);
+  }
+
+  const cleanName = normalizeCustomerName(item.customer_name || item.name || fallbackName);
+  if (cleanName && lookup.byName.has(cleanName)) {
+    return lookup.byName.get(cleanName);
+  }
+
+  return null;
+}
+
+function applyCustomerIdsToShiftData(legacyData = {}, lookup, voucherCustomer) {
+  let changed = false;
+  const nextData = { ...legacyData };
+
+  const customerRows = Array.isArray(nextData.customer_rows) ? nextData.customer_rows : [];
+  const nextCustomerRows = customerRows.map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const isVoucher = row.voucher === true || row.voucher === 1 || String(row.voucher || '').toLowerCase() === 'true';
+    const customer = isVoucher ? voucherCustomer : resolveCustomerReference(row, lookup);
+    if (!customer) return row;
+
+    const nextRow = {
+      ...row,
+      customer_id: customer.id,
+      name: customer.name
+    };
+    if (row.customer_id !== nextRow.customer_id || normalizeCustomerName(row.name) !== nextRow.name) {
+      changed = true;
+    }
+    return nextRow;
+  });
+  if (customerRows.length > 0) {
+    nextData.customer_rows = nextCustomerRows;
+  }
+
+  const oilData = parseStoredObject(nextData.oil_data, {});
+  const nextOilData = {};
+  Object.entries(oilData).forEach(([key, entry]) => {
+    if (!entry || typeof entry !== 'object') {
+      nextOilData[key] = entry;
+      return;
+    }
+
+    const isVoucher = entry.voucher === true || entry.voucher === 1 || String(entry.voucher || '').toLowerCase() === 'true';
+    const customer = isVoucher ? voucherCustomer : resolveCustomerReference(entry, lookup);
+    if (!customer) {
+      nextOilData[key] = entry;
+      return;
+    }
+
+    const nextEntry = {
+      ...entry,
+      customer_id: customer.id,
+      customer_name: customer.name
+    };
+    if (entry.customer_id !== nextEntry.customer_id || normalizeCustomerName(entry.customer_name) !== nextEntry.customer_name) {
+      changed = true;
+    }
+    nextOilData[key] = nextEntry;
+  });
+  if (Object.keys(oilData).length > 0) {
+    nextData.oil_data = nextOilData;
+  }
+
+  const payments = Array.isArray(nextData.customer_payments) ? nextData.customer_payments : [];
+  const nextPayments = payments.map((payment) => {
+    if (!payment || typeof payment !== 'object') return payment;
+    const customer = resolveCustomerReference(payment, lookup);
+    if (!customer) return payment;
+
+    const nextPayment = {
+      ...payment,
+      customer_id: customer.id,
+      customer_name: customer.name
+    };
+    if (payment.customer_id !== nextPayment.customer_id || normalizeCustomerName(payment.customer_name || payment.name) !== nextPayment.customer_name) {
+      changed = true;
+    }
+    return nextPayment;
+  });
+  if (payments.length > 0) {
+    nextData.customer_payments = nextPayments;
+  }
+
+  return { data: nextData, changed };
+}
+
+async function migrateStableCustomerIds() {
+  try {
+    await seedDefaultVoucherCustomers();
+    let lookup = await loadCustomerLookup();
+    const names = new Set(['بونات الشركة']);
+
+    const shiftRows = await executeQuery('SELECT id, data, oil_data FROM shifts ORDER BY id ASC');
+    shiftRows.forEach((row) => {
+      const legacyData = parseStoredObject(row?.data, {});
+      const oilData = parseStoredObject(row?.oil_data || legacyData.oil_data, {});
+      collectLegacyCustomerNamesFromShiftData({ ...legacyData, oil_data: oilData }).forEach((name) => names.add(name));
+    });
+
+    const balanceRows = await executeQuery('SELECT id, customer_id, customer_name FROM customer_balance_adjustments ORDER BY id ASC');
+    balanceRows.forEach((row) => {
+      const name = normalizeCustomerName(row?.customer_name);
+      if (name) names.add(name);
+    });
+
+    for (const name of names) {
+      await ensureCustomerByName(name, lookup);
+    }
+    lookup = await loadCustomerLookup();
+    const voucherCustomer = lookup.byName.get('بونات الشركة') || await ensureCustomerByName('بونات الشركة', lookup);
+    if (!voucherCustomer) return;
+
+    let migratedShifts = 0;
+    for (const row of shiftRows) {
+      const legacyData = parseStoredObject(row?.data, {});
+      const oilData = parseStoredObject(row?.oil_data || legacyData.oil_data, {});
+      const migration = applyCustomerIdsToShiftData({ ...legacyData, oil_data: oilData }, lookup, voucherCustomer);
+      if (!migration.changed) continue;
+
+      await executeUpdate(
+        'UPDATE shifts SET data = $1, oil_data = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [JSON.stringify(migration.data), JSON.stringify(migration.data.oil_data || {}), row.id]
+      );
+      migratedShifts += 1;
+    }
+
+    for (const row of balanceRows) {
+      const existingId = getPositiveInteger(row?.customer_id);
+      const customer = existingId && lookup.byId.has(existingId)
+        ? lookup.byId.get(existingId)
+        : lookup.byName.get(normalizeCustomerName(row?.customer_name));
+      if (!customer) continue;
+
+      await executeUpdate(
+        'UPDATE customer_balance_adjustments SET customer_id = $1, customer_name = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [customer.id, customer.name, row.id]
+      );
+    }
+
+    if (migratedShifts > 0) {
+      console.log(`Migrated customer_id references in ${migratedShifts} shift rows`);
+    }
+  } catch (error) {
+    console.warn('Unable to migrate stable customer ids:', error.message);
+  }
+}
+
+async function isCustomerReferenced(customerId) {
+  const id = getPositiveInteger(customerId);
+  if (!id) return false;
+
+  const balanceRows = await executeQuery(
+    'SELECT id FROM customer_balance_adjustments WHERE customer_id = $1 LIMIT 1',
+    [id]
+  );
+  if (balanceRows.length > 0) return true;
+
+  const shiftRows = await executeQuery('SELECT data, oil_data FROM shifts ORDER BY id ASC');
+  for (const row of shiftRows) {
+    const legacyData = parseStoredObject(row?.data, {});
+    const customerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+    if (customerRows.some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
+
+    const oilData = parseStoredObject(row?.oil_data || legacyData.oil_data, {});
+    if (Object.values(oilData).some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
+
+    const payments = Array.isArray(legacyData.customer_payments) ? legacyData.customer_payments : [];
+    if (payments.some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
+  }
+
+  return false;
+}
+
 function requireOnline(featureName = 'هذه الوظيفة') {
   if (!dbManager?.isOnline) {
     const err = new Error(`${featureName} تتطلب اتصالاً بالإنترنت`);
     err.code = 'OFFLINE_RESTRICTED';
     throw err;
   }
+}
+
+function isDatabaseConnectionError(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return [
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ETIMEDOUT',
+    '57P01',
+    '57P02',
+    '08006'
+  ].includes(code) || [
+    'connection terminated',
+    'connection timeout',
+    'timeout',
+    'network',
+    'no internet',
+    'terminating connection'
+  ].some((fragment) => message.includes(fragment));
 }
 
 function generateProductCode(productType) {
@@ -3886,6 +4242,338 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  function normalizeFuelInvoiceSnapshotRows(rows = []) {
+    return (Array.isArray(rows) ? rows : []).map((row) => ({
+      date: normalizeIsoDate(row?.date),
+      invoice_number: String(row?.invoice_number || '').trim(),
+      product_code: String(row?.product_code || '').trim() || null,
+      fuel_type: String(row?.fuel_type || '').trim(),
+      quantity: toNumber(row?.quantity),
+      net_quantity: toNumber(row?.net_quantity),
+      purchase_price: toNumber(row?.purchase_price),
+      total: toNumber(row?.total),
+      invoice_total: toNumber(row?.invoice_total)
+    })).sort((a, b) => (
+      `${a.product_code || ''}|${a.fuel_type}|${a.quantity}|${a.net_quantity}|${a.purchase_price}|${a.total}`
+        .localeCompare(`${b.product_code || ''}|${b.fuel_type}|${b.quantity}|${b.net_quantity}|${b.purchase_price}|${b.total}`)
+    ));
+  }
+
+  function fuelInvoiceSnapshotsEqual(currentRows = [], expectedRows = []) {
+    return JSON.stringify(normalizeFuelInvoiceSnapshotRows(currentRows))
+      === JSON.stringify(normalizeFuelInvoiceSnapshotRows(expectedRows));
+  }
+
+  function getLocalFuelInvoiceSnapshot(invoiceNumber) {
+    const rows = dbManager.sqlite.prepare(`
+      SELECT date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+      FROM fuel_invoices
+      WHERE invoice_number = ?
+      ORDER BY id ASC
+    `).all(invoiceNumber);
+    return {
+      fuel_invoices: normalizeFuelInvoiceSnapshotRows(rows)
+    };
+  }
+
+  async function getPostgresFuelInvoiceSnapshot(client, invoiceNumber) {
+    const result = await client.query(
+      `SELECT date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+       FROM fuel_invoices
+       WHERE invoice_number = $1
+       ORDER BY id ASC`,
+      [invoiceNumber]
+    );
+    return {
+      fuel_invoices: normalizeFuelInvoiceSnapshotRows(result.rows)
+    };
+  }
+
+  function normalizeFuelInvoiceUpdatePayload(invoiceData = {}) {
+    const originalInvoiceNumber = String(invoiceData?.original_invoice_number || '').trim();
+    const invoiceNumber = String(invoiceData?.invoice_number || '').trim();
+    const date = normalizeIsoDate(invoiceData?.date);
+    const fuelItems = Array.isArray(invoiceData?.fuel_items) ? invoiceData.fuel_items : [];
+    const safeInvoiceTotal = toNumber(invoiceData?.invoice_total);
+
+    if (!originalInvoiceNumber) {
+      throw new Error('رقم الفاتورة الأصلي مطلوب');
+    }
+    if (!invoiceNumber) {
+      throw new Error('رقم الفاتورة مطلوب');
+    }
+    if (!date) {
+      throw new Error('تاريخ الفاتورة غير صالح');
+    }
+    if (fuelItems.length === 0) {
+      throw new Error('لا توجد عناصر وقود للحفظ');
+    }
+
+    return {
+      originalInvoiceNumber,
+      invoiceNumber,
+      date,
+      safeInvoiceTotal,
+      fuelItems
+    };
+  }
+
+  async function replaceFuelInvoicePostgres(client, payload, expectedSnapshot = null) {
+    const { originalInvoiceNumber, invoiceNumber, date, safeInvoiceTotal, fuelItems } = payload;
+    const currentSnapshot = await getPostgresFuelInvoiceSnapshot(client, originalInvoiceNumber);
+
+    if (expectedSnapshot && !fuelInvoiceSnapshotsEqual(currentSnapshot.fuel_invoices, expectedSnapshot.fuel_invoices)) {
+      const error = new Error('تعارض مزامنة: تم تعديل الفاتورة على جهاز آخر قبل المزامنة');
+      error.code = 'FUEL_INVOICE_SYNC_CONFLICT';
+      throw error;
+    }
+
+    if (currentSnapshot.fuel_invoices.length === 0) {
+      throw new Error('لم يتم العثور على الفاتورة الأصلية');
+    }
+
+    await client.query('DELETE FROM fuel_invoices WHERE invoice_number = $1', [originalInvoiceNumber]);
+    await client.query(
+      'DELETE FROM fuel_movements WHERE type = $1 AND invoice_number = $2',
+      ['in', originalInvoiceNumber]
+    );
+
+    const normalizedItems = [];
+    for (const item of fuelItems) {
+      const rawFuelType = String(item?.fuel_type || '').trim();
+      const rawProductCode = String(item?.product_code || '').trim();
+      if (!rawFuelType && !rawProductCode) continue;
+
+      const productResult = await client.query(
+        `SELECT id, product_code, product_name
+         FROM products
+         WHERE product_type = 'fuel'
+           AND (($1::text IS NOT NULL AND product_code = $1) OR product_name = $2)
+         ORDER BY CASE WHEN product_code = $1 THEN 0 ELSE 1 END, id ASC
+         LIMIT 1`,
+        [rawProductCode || null, rawFuelType]
+      );
+      const product = productResult.rows[0] || {};
+      const productCode = product.product_code || rawProductCode || null;
+      const productName = product.product_name || rawFuelType;
+      const quantity = toNumber(item?.quantity);
+      const netQuantity = toNumber(item?.net_quantity) || quantity;
+      const purchasePrice = toNumber(item?.purchase_price);
+      const total = toNumber(item?.total);
+
+      if (!productName || quantity <= 0) continue;
+
+      const invoiceInsert = await client.query(
+        `INSERT INTO fuel_invoices (
+          date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id`,
+        [date, invoiceNumber, productCode, productName, quantity, netQuantity, purchasePrice, total, safeInvoiceTotal]
+      );
+
+      const notes = `Acquisto - Prezzo: ${purchasePrice} جنيه/لتر - Totale: ${total} جنيه`;
+      await client.query(
+        'INSERT INTO fuel_movements (product_code, fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [productCode, productName, date, 'in', quantity, invoiceNumber, notes]
+      );
+
+      normalizedItems.push({
+        id: invoiceInsert.rows[0]?.id,
+        product_id: product.id || null,
+        product_code: productCode,
+        fuel_type: productName,
+        quantity,
+        net_quantity: netQuantity,
+        purchase_price: purchasePrice,
+        total,
+        notes
+      });
+    }
+
+    if (normalizedItems.length === 0) {
+      throw new Error('لا توجد عناصر وقود صالحة للحفظ');
+    }
+
+    return normalizedItems;
+  }
+
+  function replaceFuelInvoiceSqlite(payload, options = {}) {
+    const { originalInvoiceNumber, invoiceNumber, date, safeInvoiceTotal, fuelItems } = payload;
+    const requireExisting = options.requireExisting !== false;
+    const existingSnapshot = getLocalFuelInvoiceSnapshot(originalInvoiceNumber);
+
+    if (requireExisting && existingSnapshot.fuel_invoices.length === 0) {
+      throw new Error('لم يتم العثور على الفاتورة الأصلية');
+    }
+
+    const replaceTransaction = dbManager.sqlite.transaction(() => {
+      const normalizedItems = [];
+      dbManager.sqlite.prepare('DELETE FROM fuel_invoices WHERE invoice_number = ?').run(originalInvoiceNumber);
+      dbManager.sqlite.prepare('DELETE FROM fuel_movements WHERE type = ? AND invoice_number = ?').run('in', originalInvoiceNumber);
+
+      const productByCodeStmt = dbManager.sqlite.prepare(`
+        SELECT id, product_code, product_name
+        FROM products
+        WHERE product_type = 'fuel' AND product_code = ?
+        LIMIT 1
+      `);
+      const productByNameStmt = dbManager.sqlite.prepare(`
+        SELECT id, product_code, product_name
+        FROM products
+        WHERE product_type = 'fuel' AND product_name = ?
+        LIMIT 1
+      `);
+      const invoiceStmt = dbManager.sqlite.prepare(`
+        INSERT INTO fuel_invoices (
+          date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const movementStmt = dbManager.sqlite.prepare(`
+        INSERT INTO fuel_movements (product_code, fuel_type, date, type, quantity, invoice_number, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const item of fuelItems) {
+        const rawFuelType = String(item?.fuel_type || '').trim();
+        const rawProductCode = String(item?.product_code || '').trim();
+        if (!rawFuelType && !rawProductCode) continue;
+
+        const product = (rawProductCode ? productByCodeStmt.get(rawProductCode) : null)
+          || (rawFuelType ? productByNameStmt.get(rawFuelType) : null)
+          || {};
+        const productCode = product.product_code || rawProductCode || null;
+        const productName = product.product_name || rawFuelType;
+        const quantity = toNumber(item?.quantity);
+        const netQuantity = toNumber(item?.net_quantity) || quantity;
+        const purchasePrice = toNumber(item?.purchase_price);
+        const total = toNumber(item?.total);
+
+        if (!productName || quantity <= 0) continue;
+
+        invoiceStmt.run(date, invoiceNumber, productCode, productName, quantity, netQuantity, purchasePrice, total, safeInvoiceTotal);
+        const notes = `Acquisto - Prezzo: ${purchasePrice} جنيه/لتر - Totale: ${total} جنيه`;
+        movementStmt.run(productCode, productName, date, 'in', quantity, invoiceNumber, notes);
+
+        normalizedItems.push({
+          product_id: product.id || null,
+          product_code: productCode,
+          fuel_type: productName,
+          quantity,
+          net_quantity: netQuantity,
+          purchase_price: purchasePrice,
+          total,
+          notes
+        });
+      }
+
+      if (normalizedItems.length === 0) {
+        throw new Error('لا توجد عناصر وقود صالحة للحفظ');
+      }
+
+      return normalizedItems;
+    });
+
+    return {
+      originalSnapshot: existingSnapshot,
+      normalizedItems: replaceTransaction()
+    };
+  }
+
+  function syncFuelInvoiceReplacementToSqlite(payload, normalizedItems) {
+    const { originalInvoiceNumber, invoiceNumber, date, safeInvoiceTotal } = payload;
+    const syncLocal = dbManager.sqlite.transaction((items) => {
+      dbManager.sqlite.prepare('DELETE FROM fuel_invoices WHERE invoice_number = ?').run(originalInvoiceNumber);
+      dbManager.sqlite.prepare('DELETE FROM fuel_movements WHERE type = ? AND invoice_number = ?').run('in', originalInvoiceNumber);
+
+      const invoiceStmt = dbManager.sqlite.prepare(`
+        INSERT INTO fuel_invoices (
+          date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const movementStmt = dbManager.sqlite.prepare(`
+        INSERT INTO fuel_movements (product_code, fuel_type, date, type, quantity, invoice_number, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const item of items) {
+        invoiceStmt.run(
+          date,
+          invoiceNumber,
+          item.product_code,
+          item.fuel_type,
+          item.quantity,
+          item.net_quantity,
+          item.purchase_price,
+          item.total,
+          safeInvoiceTotal
+        );
+        movementStmt.run(item.product_code, item.fuel_type, date, 'in', item.quantity, invoiceNumber, item.notes);
+      }
+    });
+
+    syncLocal(normalizedItems);
+  }
+
+  function findPendingFuelInvoiceReplacement(invoiceNumber) {
+    const rows = dbManager.sqlite.prepare(`
+      SELECT id, data
+      FROM sync_queue
+      WHERE synced = 0 AND operation = 'REPLACE_FUEL_INVOICE'
+      ORDER BY timestamp DESC
+    `).all();
+
+    for (const row of rows) {
+      try {
+        const data = JSON.parse(row.data || '{}');
+        if (
+          data.original_invoice_number === invoiceNumber
+          || data.invoice?.invoice_number === invoiceNumber
+        ) {
+          return { id: row.id, data };
+        }
+      } catch (_error) {
+        // Ignore malformed queue rows; sync manager will report them later.
+      }
+    }
+
+    return null;
+  }
+
+  function upsertFuelInvoiceReplacementSync(payload, normalizedItems, originalSnapshot) {
+    const existing = findPendingFuelInvoiceReplacement(payload.originalInvoiceNumber);
+    const queueData = {
+      original_invoice_number: existing?.data?.original_invoice_number || payload.originalInvoiceNumber,
+      original_snapshot: existing?.data?.original_snapshot || originalSnapshot,
+      invoice: {
+        date: payload.date,
+        invoice_number: payload.invoiceNumber,
+        invoice_total: payload.safeInvoiceTotal,
+        fuel_items: normalizedItems.map((item) => ({
+          product_code: item.product_code || null,
+          fuel_type: item.fuel_type,
+          quantity: item.quantity,
+          net_quantity: item.net_quantity,
+          purchase_price: item.purchase_price,
+          total: item.total
+        }))
+      }
+    };
+
+    if (existing) {
+      dbManager.sqlite.prepare(`
+        UPDATE sync_queue
+        SET data = ?, timestamp = ?, retry_count = 0, error = NULL
+        WHERE id = ?
+      `).run(JSON.stringify(queueData), Date.now(), existing.id);
+      return;
+    }
+
+    dbManager.addToSyncQueue('fuel_invoices', 'REPLACE_FUEL_INVOICE', queueData);
+  }
+
   // Fuel invoice handlers
   ipcMain.handle('add-fuel-invoice', async (event, invoiceData) => {
     try {
@@ -3923,6 +4611,63 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  ipcMain.handle('update-fuel-invoice', async (event, invoiceData) => {
+    try {
+      const payload = normalizeFuelInvoiceUpdatePayload(invoiceData);
+
+      if (dbManager.isOnline && dbManager.pgPool) {
+        try {
+          const client = await dbManager.pgPool.connect();
+          let normalizedItems = [];
+
+          try {
+            await client.query('BEGIN');
+            normalizedItems = await replaceFuelInvoicePostgres(client, payload);
+            await client.query('COMMIT');
+          } catch (error) {
+            try {
+              await client.query('ROLLBACK');
+            } catch (rollbackError) {
+              console.warn('Rollback after fuel invoice update failed:', rollbackError.message);
+            }
+            throw error;
+          } finally {
+            client.release();
+          }
+
+          if (dbManager.sqlite) {
+            try {
+              syncFuelInvoiceReplacementToSqlite(payload, normalizedItems);
+            } catch (syncError) {
+              console.warn('Fuel invoice updated online, but local SQLite refresh failed:', syncError.message);
+            }
+          }
+
+          return { success: true, rows: normalizedItems.length, queued: false };
+        } catch (error) {
+          if (!isDatabaseConnectionError(error)) {
+            throw error;
+          }
+          console.warn('Fuel invoice online update failed due to connection, queueing offline update:', error.message);
+          dbManager.isOnline = false;
+        }
+      }
+
+      const pendingReplacement = findPendingFuelInvoiceReplacement(payload.originalInvoiceNumber);
+      const { originalSnapshot, normalizedItems } = replaceFuelInvoiceSqlite(payload);
+      upsertFuelInvoiceReplacementSync(
+        payload,
+        normalizedItems,
+        pendingReplacement?.data?.original_snapshot || originalSnapshot
+      );
+
+      return { success: true, rows: normalizedItems.length, queued: true };
+    } catch (error) {
+      console.error('Error updating fuel invoice:', error);
+      throw error;
+    }
+  });
+
   // Oil invoice handlers
   ipcMain.handle('add-oil-invoice', async (event, invoiceData) => {
     try {
@@ -3950,7 +4695,6 @@ ipcMain.handle('get-sales-summary', async () => {
 
   ipcMain.handle('get-fuel-invoices', async () => {
     try {
-      requireOnline('عرض فواتير الوقود');
       return await executeQuery('SELECT * FROM fuel_invoices ORDER BY date DESC');
     } catch (error) {
       console.error('Error getting fuel invoices:', error);
@@ -3960,7 +4704,6 @@ ipcMain.handle('get-sales-summary', async () => {
 
   ipcMain.handle('get-oil-invoices', async () => {
     try {
-      requireOnline('عرض فواتير الزيوت');
       return await executeQuery('SELECT * FROM oil_invoices ORDER BY date DESC');
     } catch (error) {
       console.error('Error getting oil invoices:', error);
@@ -4926,6 +5669,7 @@ app.whenReady().then(async () => {
     dbResult = await initializeDatabase();
     emitStartupStatus('Database pronto', 60, 'info');
     await migrateShiftProductDataKeys();
+    await migrateStableCustomerIds();
 
     setupIPCHandlers();
     emitStartupStatus('Canali applicazione pronti', 72, 'info');
@@ -5199,6 +5943,12 @@ ipcMain.handle('add-customer', async (event, { name }) => {
 
 ipcMain.handle('delete-customer', async (event, { id }) => {
   try {
+    if (await isCustomerReferenced(id)) {
+      const error = new Error('لا يمكن حذف العميل لأنه مستخدم في ورديات أو أرصدة محفوظة');
+      error.code = 'CUSTOMER_REFERENCED';
+      throw error;
+    }
+
     const deleteQuery = 'DELETE FROM customers WHERE id = $1';
     return await executeUpdate(deleteQuery, [id]);
   } catch (error) {
@@ -5214,6 +5964,382 @@ ipcMain.handle('update-customer', async (event, { id, name }) => {
   } catch (error) {
     console.error('Error updating customer:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekEnd } = {}) => {
+  try {
+    const startDate = normalizeIsoDate(weekStart);
+    const endDate = normalizeIsoDate(weekEnd);
+    if (!startDate || !endDate || startDate > endDate) {
+      return { customers: [], invoicesByCustomer: {}, warnings: [] };
+    }
+
+    const shifts = await executeQuery(
+      `SELECT id, date, shift_number, data, fuel_data, oil_data
+       FROM shifts
+       WHERE is_saved = 1 AND date <= $1
+       ORDER BY date ASC, shift_number ASC, id ASC`,
+      [endDate]
+    );
+    const customerRows = await executeQuery(
+      'SELECT id, name FROM customers ORDER BY name ASC',
+      []
+    );
+    const balanceRows = await executeQuery(
+      `SELECT id, customer_id, customer_name, effective_date, balance, updated_at
+       FROM customer_balance_adjustments
+       WHERE effective_date <= $1
+       ORDER BY effective_date ASC, updated_at ASC, id ASC`,
+      [startDate]
+    );
+
+    const fuelDefinitions = [
+      { field: 'diesel', name: 'سولار', order: 0 },
+      { field: '80', name: 'بنزين ٨٠', order: 1 },
+      { field: '92', name: 'بنزين ٩٢', order: 2 },
+      { field: '95', name: 'بنزين ٩٥', order: 3 }
+    ];
+    const voucherCustomerName = 'بونات الشركة';
+    const invoicesByCustomer = {};
+    const warnings = [];
+    const warningKeys = new Set();
+    const customerKeys = new Set();
+    const ledgerByCustomer = {};
+    const latestAdjustmentByCustomer = {};
+    const customersById = new Map();
+    const customersByName = new Map();
+
+    customerRows.forEach((customer) => {
+      const id = getPositiveInteger(customer?.id);
+      const name = normalizeCustomerName(customer?.name);
+      if (!id || !name) return;
+      const normalizedCustomer = { id, name };
+      customersById.set(id, normalizedCustomer);
+      if (!customersByName.has(name)) {
+        customersByName.set(name, normalizedCustomer);
+      }
+    });
+
+    const isCurrentWeekDate = (date) => date >= startDate && date <= endDate;
+
+    const toVoucherBoolean = (value) => {
+      if (value === true || value === 1) return true;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+      }
+      return false;
+    };
+
+    const resolveInvoiceCustomer = (item = {}, fallbackName = '') => {
+      const id = getPositiveInteger(item.customer_id);
+      if (id && customersById.has(id)) return customersById.get(id);
+
+      const name = normalizeCustomerName(item.customer_name || item.name || fallbackName);
+      if (name && customersByName.has(name)) return customersByName.get(name);
+
+      return null;
+    };
+
+    const getInvoiceKey = (customer) => String(customer.id);
+
+    const ensureCustomerInvoice = (customer) => {
+      const key = getInvoiceKey(customer);
+      customerKeys.add(key);
+      if (!invoicesByCustomer[key]) {
+        invoicesByCustomer[key] = {
+          customer_id: customer.id,
+          customer: customer.name,
+          total: 0,
+          previous_balance: 0,
+          purchases_total: 0,
+          payments_total: 0,
+          current_balance: 0,
+          items: [],
+          payments: [],
+          itemMap: {}
+        };
+      }
+      return invoicesByCustomer[key];
+    };
+
+    const ensureLedger = (customer) => {
+      const key = getInvoiceKey(customer);
+      customerKeys.add(key);
+      ensureCustomerInvoice(customer);
+      if (!ledgerByCustomer[key]) {
+        ledgerByCustomer[key] = {
+          purchaseEvents: [],
+          paymentEvents: []
+        };
+      }
+      return ledgerByCustomer[key];
+    };
+
+    const addMissingPriceWarning = (date, shiftNumber, fuelName) => {
+      const key = `${date}|${shiftNumber}|${fuelName}`;
+      if (warningKeys.has(key)) return;
+      warningKeys.add(key);
+      warnings.push(`لا يوجد سعر محفوظ لـ ${fuelName} في وردية ${shiftNumber} بتاريخ ${date}`);
+    };
+
+    customersById.forEach((customer) => {
+      ensureCustomerInvoice(customer);
+    });
+
+    balanceRows.forEach((row) => {
+      const customer = resolveInvoiceCustomer(row);
+      const effectiveDate = normalizeIsoDate(row?.effective_date);
+      if (!customer || !effectiveDate) return;
+      ensureCustomerInvoice(customer);
+      latestAdjustmentByCustomer[getInvoiceKey(customer)] = {
+        effective_date: effectiveDate,
+        balance: toFiniteNumber(row?.balance)
+      };
+    });
+
+    for (const shift of shifts) {
+      const date = normalizeIsoDate(shift?.date);
+      const shiftNumber = parseInt(shift?.shift_number, 10) || 0;
+      if (!date) continue;
+      const legacyData = parseStoredObject(shift?.data, {});
+      const fuelData = parseStoredObject(shift?.fuel_data || legacyData.fuel_data, {});
+      const oilData = parseStoredObject(shift?.oil_data || legacyData.oil_data, {});
+      const shiftCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+      const customerPayments = normalizeCustomerPayments(legacyData.customer_payments);
+
+      for (const row of shiftCustomerRows) {
+        if (!row || typeof row !== 'object') continue;
+
+        const isVoucher = toVoucherBoolean(row.voucher);
+        const customer = isVoucher
+          ? customersByName.get(voucherCustomerName)
+          : resolveInvoiceCustomer(row);
+        if (!customer) {
+          warnings.push(`تعذر ربط عميل في وردية ${shiftNumber} بتاريخ ${date}`);
+          continue;
+        }
+
+        for (const fuel of fuelDefinitions) {
+          const quantity = toFiniteNumber(row[fuel.field]);
+          if (quantity <= 0) continue;
+
+          const fuelEntry = findShiftDataEntryByName(fuelData, fuel.name);
+          const rawPrice = fuelEntry ? parseFloat(fuelEntry.price) : NaN;
+          const price = Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : 0;
+          if ((!fuelEntry || price <= 0) && isCurrentWeekDate(date)) {
+            addMissingPriceWarning(date, shiftNumber, fuel.name);
+          }
+
+          const total = quantity * price;
+          const ledger = ensureLedger(customer);
+          ledger.purchaseEvents.push({ date, total });
+
+          if (!isCurrentWeekDate(date)) continue;
+
+          const invoice = ensureCustomerInvoice(customer);
+          const itemKey = `${date}|${fuel.name}`;
+
+          if (!invoice.itemMap[itemKey]) {
+            invoice.itemMap[itemKey] = {
+              date,
+              fuel_name: fuel.name,
+              fuel_order: fuel.order,
+              quantity: 0,
+              total: 0
+            };
+            invoice.items.push(invoice.itemMap[itemKey]);
+          }
+
+          invoice.itemMap[itemKey].quantity += quantity;
+          invoice.itemMap[itemKey].total += total;
+          invoice.purchases_total += total;
+          invoice.total = invoice.purchases_total;
+        }
+      }
+
+      Object.entries(oilData).forEach(([oilKey, data], index) => {
+        if (!data || typeof data !== 'object') return;
+
+        const quantity = toFiniteNumber(data.customers);
+        if (quantity <= 0) return;
+
+        const isVoucher = toVoucherBoolean(data.voucher);
+        const customer = isVoucher
+          ? customersByName.get(voucherCustomerName)
+          : resolveInvoiceCustomer(data);
+        if (!customer) {
+          warnings.push(`تعذر ربط عميل زيت في وردية ${shiftNumber} بتاريخ ${date}`);
+          return;
+        }
+
+        const oilName = getShiftProductDisplayName(oilKey, data);
+        if (!oilName) return;
+
+        const rawPrice = parseFloat(data.price);
+        const price = Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : 0;
+        if (price <= 0 && isCurrentWeekDate(date)) {
+          addMissingPriceWarning(date, shiftNumber, oilName);
+        }
+
+        const total = quantity * price;
+        const ledger = ensureLedger(customer);
+        ledger.purchaseEvents.push({ date, total });
+
+        if (!isCurrentWeekDate(date)) return;
+
+        const invoice = ensureCustomerInvoice(customer);
+        const itemKey = `oil|${date}|${oilName}`;
+
+        if (!invoice.itemMap[itemKey]) {
+          invoice.itemMap[itemKey] = {
+            date,
+            fuel_name: oilName,
+            fuel_order: 1000 + index,
+            quantity: 0,
+            total: 0
+          };
+          invoice.items.push(invoice.itemMap[itemKey]);
+        }
+
+        invoice.itemMap[itemKey].quantity += quantity;
+        invoice.itemMap[itemKey].total += total;
+        invoice.purchases_total += total;
+        invoice.total = invoice.purchases_total;
+      });
+
+      customerPayments.forEach((payment) => {
+        const customer = resolveInvoiceCustomer(payment);
+        const amount = toFiniteNumber(payment.amount);
+        if (!customer || amount <= 0) return;
+
+        const ledger = ensureLedger(customer);
+        ledger.paymentEvents.push({ date, amount, shift_number: shiftNumber });
+
+        if (!isCurrentWeekDate(date)) return;
+
+        const invoice = ensureCustomerInvoice(customer);
+        invoice.payments_total += amount;
+        invoice.payments.push({
+          date,
+          amount,
+          shift_number: shiftNumber
+        });
+      });
+    }
+
+    Object.values(invoicesByCustomer).forEach((invoice) => {
+      const key = String(invoice.customer_id);
+      const adjustment = latestAdjustmentByCustomer[key] || null;
+      const ledger = ledgerByCustomer[key] || { purchaseEvents: [], paymentEvents: [] };
+      const baselineDate = adjustment?.effective_date || '';
+      const previousPurchases = ledger.purchaseEvents.reduce((sum, event) => {
+        if (event.date >= startDate) return sum;
+        if (baselineDate && event.date < baselineDate) return sum;
+        return sum + toFiniteNumber(event.total);
+      }, 0);
+      const previousPayments = ledger.paymentEvents.reduce((sum, event) => {
+        if (event.date >= startDate) return sum;
+        if (baselineDate && event.date < baselineDate) return sum;
+        return sum + toFiniteNumber(event.amount);
+      }, 0);
+
+      invoice.previous_balance = toFiniteNumber(adjustment?.balance) + previousPurchases - previousPayments;
+      invoice.purchases_total = toFiniteNumber(invoice.purchases_total);
+      invoice.total = invoice.purchases_total;
+      invoice.payments_total = toFiniteNumber(invoice.payments_total);
+      invoice.current_balance = invoice.previous_balance + invoice.purchases_total - invoice.payments_total;
+
+      invoice.items.sort((a, b) => (
+        String(a.date).localeCompare(String(b.date))
+        || (a.fuel_order || 0) - (b.fuel_order || 0)
+        || String(a.fuel_name).localeCompare(String(b.fuel_name), 'ar')
+      ));
+      invoice.items.forEach((item) => {
+        delete item.fuel_order;
+      });
+      invoice.payments.sort((a, b) => (
+        String(a.date).localeCompare(String(b.date))
+        || (a.shift_number || 0) - (b.shift_number || 0)
+      ));
+      delete invoice.itemMap;
+    });
+
+    const customers = Array.from(customerKeys)
+      .map((key) => invoicesByCustomer[key])
+      .filter(Boolean)
+      .map((invoice) => ({ id: invoice.customer_id, name: invoice.customer }))
+      .sort((a, b) => {
+        if (a.name === voucherCustomerName) return 1;
+        if (b.name === voucherCustomerName) return -1;
+        return a.name.localeCompare(b.name, 'ar');
+      });
+
+    return { customers, invoicesByCustomer, warnings };
+  } catch (error) {
+    console.error('Error getting customer weekly invoices:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('upsert-customer-balance-adjustment', async (_event, payload = {}) => {
+  try {
+    const payloadCustomerId = getPositiveInteger(payload.customer_id);
+    const payloadCustomerName = normalizeCustomerName(payload.customer_name);
+    const effectiveDate = normalizeIsoDate(payload.effective_date);
+    const balance = toFiniteNumber(payload.balance);
+    let customer = null;
+
+    if (payloadCustomerId) {
+      const rows = await executeQuery('SELECT id, name FROM customers WHERE id = $1 LIMIT 1', [payloadCustomerId]);
+      const row = rows[0];
+      const id = getPositiveInteger(row?.id);
+      if (id) {
+        customer = { id, name: normalizeCustomerName(row.name) };
+      }
+    }
+
+    if (!customer && payloadCustomerName) {
+      customer = await ensureCustomerByName(payloadCustomerName);
+    }
+
+    if (!customer || !effectiveDate) {
+      return { success: false, error: 'invalid_customer_balance_adjustment' };
+    }
+
+    const query = `
+      INSERT INTO customer_balance_adjustments (customer_id, customer_name, effective_date, balance, updated_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (customer_id, effective_date)
+      DO UPDATE SET
+        customer_name = EXCLUDED.customer_name,
+        balance = EXCLUDED.balance,
+        updated_at = CURRENT_TIMESTAMP
+    `;
+
+    await executeUpdate(query, [customer.id, customer.name, effectiveDate, balance]);
+
+    if (dbManager?.isOnline && dbManager?.sqlite) {
+      try {
+        dbManager.sqlite.prepare(`
+          INSERT INTO customer_balance_adjustments (customer_id, customer_name, effective_date, balance, updated_at)
+          VALUES (?, ?, ?, ?, strftime('%s', 'now'))
+          ON CONFLICT(customer_id, effective_date)
+          DO UPDATE SET
+            customer_name = excluded.customer_name,
+            balance = excluded.balance,
+            updated_at = strftime('%s', 'now')
+        `).run(customer.id, customer.name, effectiveDate, balance);
+      } catch (localError) {
+        console.warn('Unable to mirror customer balance adjustment to SQLite:', localError.message);
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error upserting customer balance adjustment:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -5237,6 +6363,11 @@ function buildShiftSnapshotFromPayload(payload = {}) {
       : Array.isArray(legacyData.revenue_items)
         ? legacyData.revenue_items
         : [],
+    customer_payments: Array.isArray(payload.customer_payments)
+      ? payload.customer_payments
+      : Array.isArray(legacyData.customer_payments)
+        ? legacyData.customer_payments
+        : [],
     expense_items: Array.isArray(payload.expense_items)
       ? payload.expense_items
       : Array.isArray(legacyData.expense_items)
@@ -5254,6 +6385,7 @@ function buildShiftSnapshotFromRow(row = {}) {
     ...row,
     customer_rows: undefined,
     revenue_items: undefined,
+    customer_payments: undefined,
     expense_items: undefined
   });
 }
@@ -5266,6 +6398,7 @@ function buildShiftCorrectionDiff(beforeSnapshot, afterSnapshot) {
     'oil_total',
     'customer_rows',
     'revenue_items',
+    'customer_payments',
     'expense_items',
     'wash_lube_revenue',
     'total_expenses',
@@ -5295,6 +6428,7 @@ async function persistShiftRecord(shiftData) {
       oil_total,
       customer_rows,
       revenue_items,
+      customer_payments,
       expense_items,
       wash_lube_revenue,
       total_expenses,
@@ -5317,6 +6451,7 @@ async function persistShiftRecord(shiftData) {
     const safeTotalExpenses = parseFloat(total_expenses) || 0;
     const safeGrandTotal = parseFloat(grand_total) || 0;
     const normalizedRevenueItems = normalizeRevenueItems(revenue_items);
+    const normalizedCustomerPayments = normalizeCustomerPayments(customer_payments);
     const normalizedExpenseItems = normalizeExpenseItems(expense_items);
     const normalizedCustomerRows = Array.isArray(customer_rows)
       ? customer_rows
@@ -5327,11 +6462,12 @@ async function persistShiftRecord(shiftData) {
             const fuel92 = parseFloat(row['92']) || 0;
             const fuel95 = parseFloat(row['95']) || 0;
             const name = String(row.name || '').trim();
+            const customerId = getPositiveInteger(row.customer_id);
             const voucher = Boolean(row.voucher);
-            if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !voucher) {
+            if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !customerId && !voucher) {
               return null;
             }
-            return { diesel, '80': fuel80, '92': fuel92, '95': fuel95, name, voucher };
+            return { diesel, '80': fuel80, '92': fuel92, '95': fuel95, customer_id: customerId, name, voucher };
           })
           .filter(Boolean)
       : [];
@@ -5342,6 +6478,7 @@ async function persistShiftRecord(shiftData) {
       oil_total: safeOilTotal,
       customer_rows: normalizedCustomerRows,
       revenue_items: normalizedRevenueItems,
+      customer_payments: normalizedCustomerPayments,
       expense_items: normalizedExpenseItems,
       wash_lube_revenue: safeWashLubeRevenue,
       total_expenses: safeTotalExpenses,
@@ -5681,6 +6818,27 @@ ipcMain.handle('get-shift-balance-change-history', async (_event, filters = {}) 
     );
   } catch (error) {
     console.error('Error getting shift balance change history:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('get-shift-balance-change-overrides', async (_event, filters = {}) => {
+  try {
+    const shiftDate = normalizeIsoDate(filters?.date);
+    const shiftNumber = parseInt(filters?.shift_number, 10);
+    if (!shiftDate || !Number.isFinite(shiftNumber)) {
+      return [];
+    }
+
+    return await executeQuery(
+      `SELECT id, shift_date, shift_number, item_type, item_name, field_name, old_value, new_value, changed_at
+       FROM shift_balance_change_history
+       WHERE shift_date = $1 AND shift_number = $2
+       ORDER BY changed_at DESC, id DESC`,
+      [shiftDate, shiftNumber]
+    );
+  } catch (error) {
+    console.error('Error getting shift balance change overrides:', error);
     return [];
   }
 });

@@ -60,11 +60,19 @@ class SyncManager {
           failedCount++;
 
           // Update retry count and error
-          this.dbManager.sqlite.prepare(`
-            UPDATE sync_queue
-            SET retry_count = retry_count + 1, error = ?
-            WHERE id = ?
-          `).run(error.message, op.id);
+          if (error.code === 'FUEL_INVOICE_SYNC_CONFLICT') {
+            this.dbManager.sqlite.prepare(`
+              UPDATE sync_queue
+              SET retry_count = 3, error = ?
+              WHERE id = ?
+            `).run(error.message, op.id);
+          } else {
+            this.dbManager.sqlite.prepare(`
+              UPDATE sync_queue
+              SET retry_count = retry_count + 1, error = ?
+              WHERE id = ?
+            `).run(error.message, op.id);
+          }
 
           this.syncErrors.push({
             operation: op,
@@ -108,6 +116,9 @@ class SyncManager {
     const data = JSON.parse(op.data);
 
     switch (op.operation) {
+      case 'REPLACE_FUEL_INVOICE':
+        await this.syncReplaceFuelInvoice(data);
+        break;
       case 'RAW_INSERT':
         await this.syncRawInsert(data);
         break;
@@ -122,6 +133,149 @@ class SyncManager {
         break;
       default:
         throw new Error(`Unknown operation: ${op.operation}`);
+    }
+  }
+
+  normalizeIsoDate(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    const normalized = String(value || '').trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : '';
+  }
+
+  toNumber(value) {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  normalizeFuelInvoiceRows(rows = []) {
+    return (Array.isArray(rows) ? rows : []).map((row) => ({
+      date: this.normalizeIsoDate(row?.date),
+      invoice_number: String(row?.invoice_number || '').trim(),
+      product_code: String(row?.product_code || '').trim() || null,
+      fuel_type: String(row?.fuel_type || '').trim(),
+      quantity: this.toNumber(row?.quantity),
+      net_quantity: this.toNumber(row?.net_quantity),
+      purchase_price: this.toNumber(row?.purchase_price),
+      total: this.toNumber(row?.total),
+      invoice_total: this.toNumber(row?.invoice_total)
+    })).sort((a, b) => (
+      `${a.product_code || ''}|${a.fuel_type}|${a.quantity}|${a.net_quantity}|${a.purchase_price}|${a.total}`
+        .localeCompare(`${b.product_code || ''}|${b.fuel_type}|${b.quantity}|${b.net_quantity}|${b.purchase_price}|${b.total}`)
+    ));
+  }
+
+  fuelInvoiceSnapshotsEqual(currentRows = [], expectedRows = []) {
+    return JSON.stringify(this.normalizeFuelInvoiceRows(currentRows))
+      === JSON.stringify(this.normalizeFuelInvoiceRows(expectedRows));
+  }
+
+  async syncReplaceFuelInvoice(data) {
+    const originalInvoiceNumber = String(data?.original_invoice_number || '').trim();
+    const invoice = data?.invoice || {};
+    const invoiceNumber = String(invoice?.invoice_number || '').trim();
+    const date = this.normalizeIsoDate(invoice?.date);
+    const safeInvoiceTotal = this.toNumber(invoice?.invoice_total);
+    const fuelItems = Array.isArray(invoice?.fuel_items) ? invoice.fuel_items : [];
+    const expectedRows = this.normalizeFuelInvoiceRows(data?.original_snapshot?.fuel_invoices || []);
+
+    if (!originalInvoiceNumber || !invoiceNumber || !date || fuelItems.length === 0) {
+      throw new Error('Invalid fuel invoice replacement sync payload');
+    }
+
+    const client = await this.dbManager.pgPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const currentResult = await client.query(
+        `SELECT date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+         FROM fuel_invoices
+         WHERE invoice_number = $1
+         ORDER BY id ASC`,
+        [originalInvoiceNumber]
+      );
+      const currentRows = this.normalizeFuelInvoiceRows(currentResult.rows);
+
+      if (!this.fuelInvoiceSnapshotsEqual(currentRows, expectedRows)) {
+        const error = new Error('تعارض مزامنة: تم تعديل الفاتورة على جهاز آخر قبل المزامنة');
+        error.code = 'FUEL_INVOICE_SYNC_CONFLICT';
+        throw error;
+      }
+
+      if (currentRows.length === 0) {
+        throw new Error('Fuel invoice no longer exists online');
+      }
+
+      await client.query('DELETE FROM fuel_invoices WHERE invoice_number = $1', [originalInvoiceNumber]);
+      await client.query(
+        'DELETE FROM fuel_movements WHERE type = $1 AND invoice_number = $2',
+        ['in', originalInvoiceNumber]
+      );
+
+      let insertedCount = 0;
+      for (const item of fuelItems) {
+        const rawFuelType = String(item?.fuel_type || '').trim();
+        const rawProductCode = String(item?.product_code || '').trim();
+        if (!rawFuelType && !rawProductCode) continue;
+
+        const productResult = await client.query(
+          `SELECT id, product_code, product_name
+           FROM products
+           WHERE product_type = 'fuel'
+             AND (($1::text IS NOT NULL AND product_code = $1) OR product_name = $2)
+           ORDER BY CASE WHEN product_code = $1 THEN 0 ELSE 1 END, id ASC
+           LIMIT 1`,
+          [rawProductCode || null, rawFuelType]
+        );
+        const product = productResult.rows[0] || {};
+        const productCode = product.product_code || rawProductCode || null;
+        const productName = product.product_name || rawFuelType;
+        const quantity = this.toNumber(item?.quantity);
+        const netQuantity = this.toNumber(item?.net_quantity) || quantity;
+        const purchasePrice = this.toNumber(item?.purchase_price);
+        const total = this.toNumber(item?.total);
+
+        if (!productName || quantity <= 0) continue;
+
+        await client.query(
+          `INSERT INTO fuel_invoices (
+            date, invoice_number, product_code, fuel_type, quantity, net_quantity, purchase_price, total, invoice_total
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [date, invoiceNumber, productCode, productName, quantity, netQuantity, purchasePrice, total, safeInvoiceTotal]
+        );
+
+        await client.query(
+          'INSERT INTO fuel_movements (product_code, fuel_type, date, type, quantity, invoice_number, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+          [
+            productCode,
+            productName,
+            date,
+            'in',
+            quantity,
+            invoiceNumber,
+            `Acquisto - Prezzo: ${purchasePrice} جنيه/لتر - Totale: ${total} جنيه`
+          ]
+        );
+        insertedCount++;
+      }
+
+      if (insertedCount === 0) {
+        throw new Error('Fuel invoice replacement has no valid rows');
+      }
+
+      await client.query('COMMIT');
+      console.log(`Synced fuel invoice replacement: ${originalInvoiceNumber} -> ${invoiceNumber}`);
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.warn('Rollback after fuel invoice replacement sync failed:', rollbackError.message);
+      }
+      throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -256,6 +410,15 @@ class SyncManager {
    */
   getSyncStatus() {
     try {
+      if (!this.dbManager?.sqlite) {
+        return {
+          pending: 0,
+          failed: 0,
+          isSyncing: this.isSyncing,
+          lastSyncTime: this.dbManager?.lastSyncTime || null
+        };
+      }
+
       const pending = this.dbManager.sqlite.prepare(
         'SELECT COUNT(*) as count FROM sync_queue WHERE synced = 0'
       ).get();

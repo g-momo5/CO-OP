@@ -443,6 +443,26 @@ class DatabaseManager {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS customer_balance_adjustments (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER,
+      customer_name TEXT NOT NULL,
+      effective_date TEXT NOT NULL,
+      balance REAL NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(customer_id, effective_date)
+    )`);
+    await this.pgPool.query(`ALTER TABLE customer_balance_adjustments ADD COLUMN IF NOT EXISTS customer_id INTEGER`);
+
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_date ON customer_balance_adjustments(customer_name, effective_date)`);
+      await this.pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_id_date ON customer_balance_adjustments(customer_id, effective_date)`);
+      await this.pgPool.query(`ALTER TABLE customer_balance_adjustments DROP CONSTRAINT IF EXISTS customer_balance_adjustments_customer_name_effective_date_key`);
+    } catch (err) {
+      console.log('Customer balance adjustments index creation:', err.message);
+    }
+
     // Shifts table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS shifts (
       id SERIAL PRIMARY KEY,
@@ -838,6 +858,10 @@ class DatabaseManager {
    */
   getPendingSyncCount() {
     try {
+      if (!this.sqlite) {
+        return 0;
+      }
+
       const stmt = this.sqlite.prepare('SELECT COUNT(*) as count FROM sync_queue WHERE synced = 0');
       const result = stmt.get();
       return result.count;
@@ -858,7 +882,7 @@ class DatabaseManager {
     const tables = [
       'sales', 'purchase_prices', 'products', 'price_history', 'purchase_price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
-      'customers', 'shifts', 'annual_inventories', 'safe_book_movements',
+      'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values'
     ];

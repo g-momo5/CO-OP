@@ -121,10 +121,10 @@
                   </div>
 
                   <!-- Card 10 - Customer Management -->
-                  <div class="action-card" onclick="showMessage('سيتم ربط صفحة إدارة العملاء لاحقًا', 'info')">
+                  <div class="action-card" onclick="openCustomerInvoices()">
                     <div class="card-icon">👥</div>
-                    <h3>إدارة العملاء</h3>
-                    <p>إدارة بيانات العملاء</p>
+                    <h3>فواتير العملاء</h3>
+                    <p>عرض فواتير العملاء الأسبوعية</p>
                   </div>
 
                 </div>
@@ -266,6 +266,84 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Customer Invoices Screen -->
+      <div id="customer-invoices-screen" class="screen">
+        <div class="customer-invoices-page">
+          <div class="customer-invoices-header">
+            <div>
+              <h2>فواتير العملاء</h2>
+              <p class="summary-subtitle">فواتير أسبوعية حسب بيانات عملاء الورديات المحفوظة</p>
+            </div>
+            <div class="customer-invoices-toolbar">
+              <button type="button" class="btn btn-secondary btn-compact" onclick="changeCustomerInvoiceWeek(-1)">الأسبوع السابق</button>
+              <div class="customer-invoices-week" id="customer-invoices-week-label">-</div>
+              <button type="button" class="btn btn-secondary btn-compact" onclick="changeCustomerInvoiceWeek(1)">الأسبوع التالي</button>
+            </div>
+          </div>
+
+          <div class="customer-invoices-controls">
+            <div class="form-group compact">
+              <label for="customer-invoices-select">العميل:</label>
+              <select id="customer-invoices-select" onchange="handleCustomerInvoiceClientChange()"></select>
+            </div>
+            <div class="customer-invoices-balance-edit">
+              <label for="customer-invoices-previous-balance">الرصيد السابق:</label>
+              <input type="text" inputmode="decimal" id="customer-invoices-previous-balance" class="summary-numeric-input" oninput="sanitizeSummaryNumericInput(this)">
+              <button type="button" class="btn btn-primary btn-compact" onclick="saveCustomerInvoiceOpeningBalance()">حفظ الرصيد</button>
+            </div>
+          </div>
+
+          <div class="customer-invoices-summary-grid">
+            <div class="customer-invoices-total-card">
+              <span>الرصيد السابق</span>
+              <strong id="customer-invoices-previous-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card">
+              <span>مشتريات الأسبوع</span>
+              <strong id="customer-invoices-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card">
+              <span>مدفوعات الأسبوع</span>
+              <strong id="customer-invoices-payments-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card current-balance">
+              <span>الرصيد الحالي</span>
+              <strong id="customer-invoices-current-balance">٠ ج.م.‏</strong>
+            </div>
+          </div>
+
+          <div id="customer-invoices-warning" class="customer-invoices-warning" style="display: none;"></div>
+
+          <div class="customer-invoices-table-wrapper">
+            <table class="base-table customer-invoices-table">
+              <thead>
+                <tr>
+                  <th>التاريخ</th>
+                  <th>الاسم</th>
+                  <th>الكمية</th>
+                  <th>الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody id="customer-invoices-body"></tbody>
+            </table>
+            <div id="customer-invoices-empty" class="empty-state" style="display:none;">لا توجد فواتير عملاء في هذا الأسبوع</div>
+          </div>
+
+          <div class="customer-invoices-table-wrapper">
+            <table class="base-table customer-invoices-table">
+              <thead>
+                <tr>
+                  <th>التاريخ</th>
+                  <th>المبلغ المدفوع</th>
+                </tr>
+              </thead>
+              <tbody id="customer-invoices-payments-body"></tbody>
+            </table>
+            <div id="customer-invoices-payments-empty" class="empty-state" style="display:none;">لا توجد مدفوعات لهذا العميل في هذا الأسبوع</div>
           </div>
         </div>
       </div>
@@ -746,7 +824,6 @@
                 <!-- Rows will be generated dynamically -->
               </tbody>
             </table>
-            <datalist id="customer-names-list"></datalist>
           </div>
         </div>
           </div>
@@ -755,7 +832,7 @@
             <div id="shift-oil-section" class="shift-tab-section">
               <div class="shift-content">
                 <!-- Oil Table -->
-                <div class="shift-oil-table-container">
+                <div class="shift-oil-table-container shift-scrollable-table-container">
                   <table class="shift-oil-table">
                     <thead>
                       <tr>
@@ -770,12 +847,14 @@
                         <th>عملاء</th>
                         <th>السعر</th>
                         <th>اجمالى النقدى</th>
+                        <th>العميل</th>
+                        <th>بونات</th>
                       </tr>
                     </thead>
                     <tbody id="shift-oil-table-body">
                       <!-- Oil rows will be loaded dynamically -->
                       <tr>
-                        <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+                        <td colspan="13" style="text-align: center; padding: 2rem; color: #999;">
                           جاري تحميل الزيوت النشطة...
                         </td>
                       </tr>
@@ -837,6 +916,11 @@
 
                   <div id="shift-revenue-extra-rows" class="summary-dynamic-rows"></div>
 
+                  <div class="customer-payments-summary-block">
+                    <div class="summary-mini-title">مدفوعات العملاء</div>
+                    <div id="shift-customer-payment-rows" class="summary-dynamic-rows"></div>
+                  </div>
+
                   <div class="total-row total-divider grand-total">
                     <label>إجمالي الإيرادات:</label>
                     <input type="text" inputmode="decimal" class="total-input auto-calculated highlighted" id="total-revenue" readonly>
@@ -866,7 +950,7 @@
 
       <!-- Invoice Screen -->
       <div id="invoice-screen" class="screen">
-        <h2>فاتورة جديدة</h2>
+        <h2 id="invoice-screen-title">فاتورة جديدة</h2>
         
         <!-- Invoice Type Selection -->
         <div class="price-type-tabs">
@@ -912,8 +996,9 @@
           </div>
 
           <div class="form-actions">
-            <button type="button" class="btn btn-primary" onclick="saveFuelInvoice()">حفظ فاتورة الوقود</button>
-            <button type="button" class="btn btn-secondary" onclick="resetFuelInvoiceForm()">إعادة تعيين</button>
+            <button type="button" class="btn btn-primary" id="fuel-invoice-save-btn" onclick="saveFuelInvoice()">حفظ فاتورة الوقود</button>
+            <button type="button" class="btn btn-secondary" id="fuel-invoice-reset-btn" onclick="resetFuelInvoiceForm()">إعادة تعيين</button>
+            <button type="button" class="btn btn-secondary" id="fuel-invoice-cancel-edit-btn" onclick="cancelFuelInvoiceEdit()" style="display: none;">إلغاء التعديل</button>
           </div>
         </div>
 

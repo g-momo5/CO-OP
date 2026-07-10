@@ -25,6 +25,7 @@ class DatabaseSchema {
     this.createFuelInvoicesTable(db);
     this.createOilInvoicesTable(db);
     this.createCustomersTable(db);
+    this.createCustomerBalanceAdjustmentsTable(db);
     this.createShiftsTable(db);
     this.createAnnualInventoriesTable(db);
     this.createSafeBookMovementsTable(db);
@@ -216,6 +217,27 @@ class DatabaseSchema {
     `);
   }
 
+  static createCustomerBalanceAdjustmentsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS customer_balance_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER,
+        customer_name TEXT NOT NULL,
+        effective_date TEXT NOT NULL,
+        balance REAL NOT NULL DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(customer_id, effective_date)
+      )
+    `);
+
+    const tableInfo = db.prepare("PRAGMA table_info(customer_balance_adjustments)").all();
+    const hasCustomerId = tableInfo.some(col => col.name === 'customer_id');
+    if (!hasCustomerId) {
+      db.exec('ALTER TABLE customer_balance_adjustments ADD COLUMN customer_id INTEGER');
+    }
+  }
+
   static createShiftsTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS shifts (
@@ -389,6 +411,8 @@ class DatabaseSchema {
     // Invoices indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_fuel_invoices_date ON fuel_invoices(date)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_oil_invoices_date ON oil_invoices(date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_date ON customer_balance_adjustments(customer_name, effective_date)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_id_date ON customer_balance_adjustments(customer_id, effective_date)');
 
     // Shifts indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date)');
@@ -683,6 +707,14 @@ class DatabaseSchema {
       if (shiftCorrectionsInfo.length === 0) {
         console.log('Creating shift_corrections table...');
         this.createShiftCorrectionsTable(db);
+      }
+
+      const customerBalanceAdjustmentsInfo = db.prepare("PRAGMA table_info(customer_balance_adjustments)").all();
+      if (customerBalanceAdjustmentsInfo.length === 0) {
+        console.log('Creating customer_balance_adjustments table...');
+        this.createCustomerBalanceAdjustmentsTable(db);
+      } else {
+        ensureColumn('customer_balance_adjustments', customerBalanceAdjustmentsInfo, 'customer_id', 'INTEGER');
       }
 
       if (monthlyProfitInputsInfo.length === 0) {

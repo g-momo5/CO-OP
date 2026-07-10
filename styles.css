@@ -717,6 +717,163 @@ body.modal-scroll-lock {
   padding: 1rem 0;
 }
 
+.customer-invoices-page {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  direction: rtl;
+}
+
+.customer-invoices-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.customer-invoices-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.customer-invoices-week {
+  min-width: 210px;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid #e1e5ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 800;
+  text-align: center;
+}
+
+.customer-invoices-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.customer-invoices-controls select {
+  min-width: 240px;
+}
+
+.customer-invoices-balance-edit {
+  display: grid;
+  grid-template-columns: auto minmax(130px, 180px) auto;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.customer-invoices-balance-edit label {
+  font-weight: 800;
+  color: #2c3e50;
+  align-self: center;
+}
+
+.customer-invoices-balance-edit input {
+  min-width: 0;
+  padding: 0.48rem 0.6rem;
+  border: 1px solid #ccd3da;
+  border-radius: 6px;
+  font-size: 1rem;
+  text-align: center;
+  direction: ltr;
+}
+
+.customer-invoices-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.customer-invoices-total-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+}
+
+.customer-invoices-total-card span {
+  color: #6c757d;
+  font-weight: 700;
+}
+
+.customer-invoices-total-card strong {
+  color: #c4291d;
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+.customer-invoices-total-card.current-balance strong {
+  color: #1f8f3a;
+}
+
+.customer-invoices-warning {
+  padding: 0.75rem 1rem;
+  border: 1px solid #f3d28a;
+  border-radius: 6px;
+  background: #fff7df;
+  color: #7a5600;
+  font-weight: 700;
+}
+
+.customer-invoices-table-wrapper {
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.customer-invoices-table {
+  width: 100%;
+}
+
+.customer-invoices-table th,
+.customer-invoices-table td {
+  text-align: center;
+}
+
+.customer-invoices-table td:nth-child(2),
+.customer-invoices-table th:nth-child(2) {
+  text-align: right;
+}
+
+.customer-invoices-loading {
+  padding: 1.25rem;
+  text-align: center !important;
+  color: #666;
+}
+
+.customer-invoices-loading.error {
+  color: #c4291d;
+}
+
+@media (max-width: 860px) {
+  .customer-invoices-summary-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .customer-invoices-balance-edit {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+}
+
 .safe-book-card {
   margin-top: 0;
   background: transparent;
@@ -2689,12 +2846,17 @@ body.modal-scroll-lock {
 /* Shift Oil Table - Same style as Fuel Tables */
 .shift-oil-table-container {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: visible;
   margin-bottom: 2rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .shift-oil-table {
-  width: auto;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
   border-collapse: collapse;
   direction: rtl;
   background: white;
@@ -2715,6 +2877,7 @@ body.modal-scroll-lock {
   border: none;
   font-size: 16px;
   color: white !important;
+  white-space: nowrap;
 }
 
 .shift-oil-table td {
@@ -2722,6 +2885,7 @@ body.modal-scroll-lock {
   border: none;
   text-align: center !important;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .shift-oil-table td > * {
@@ -2733,6 +2897,7 @@ body.modal-scroll-lock {
   align-items: center;
   justify-content: center;
   width: 100%;
+  min-width: max-content;
 }
 
 .shift-oil-table tbody tr:nth-child(even) {
@@ -2759,13 +2924,36 @@ body.modal-scroll-lock {
   appearance: textfield;
 }
 
+.shift-oil-table select {
+  width: 8rem;
+  display: block;
+  margin: 0 auto !important;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  text-align: center !important;
+  text-align-last: center !important;
+  font-size: 13px;
+  box-sizing: border-box;
+  background-color: #fff;
+}
+
+.shift-oil-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  appearance: auto;
+  -moz-appearance: auto;
+}
+
 .shift-oil-table input::-webkit-outer-spin-button,
 .shift-oil-table input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.shift-oil-table input:focus:not(.auto-calculated) {
+.shift-oil-table input:focus:not(.auto-calculated),
+.shift-oil-table select:focus {
   outline: none;
   border-color: #3498db;
   box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
@@ -2789,18 +2977,30 @@ body.modal-scroll-lock {
 
 /* Oil table row labels */
 .shift-oil-table .oil-name-cell {
+  display: table-cell;
   background: #ecf0f1;
   font-weight: 600;
   text-align: left !important;
-  justify-content: flex-start;
   padding: 4px;
-  min-width: 120px;
-  width: 100%;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  white-space: nowrap;
 }
 
 .shift-oil-table .oil-name-content {
+  display: inline-flex;
   justify-content: flex-start;
   gap: 0.5rem;
+  width: max-content;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.shift-oil-table .oil-name-content strong {
+  display: inline-block;
+  white-space: nowrap;
+  min-width: max-content;
 }
 
 /* Total Cards */
@@ -3401,7 +3601,13 @@ body.modal-scroll-lock {
 }
 
 .invoice-form.active {
-  display: block;
+    display: block;
+}
+
+#invoice-screen .price-type-tab.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 .form-row {
@@ -5863,6 +6069,10 @@ select option {
   max-width: 460px;
 }
 
+#price-edit-modal .modal-content {
+  max-width: 760px;
+}
+
 .modal-oil-balance {
   max-width: 620px;
 }
@@ -5951,6 +6161,7 @@ select option {
 
 .price-edit-table-wrapper {
   margin-bottom: 0;
+  overflow-x: auto;
 }
 
 .price-edit-table th,
@@ -5964,6 +6175,13 @@ select option {
 .price-edit-table td:nth-child(2),
 .price-edit-table td:nth-child(3) {
   width: 130px;
+  text-align: center;
+}
+
+.price-edit-table th:nth-child(5),
+.price-edit-table td:nth-child(5) {
+  width: 128px;
+  min-width: 128px;
   text-align: center;
 }
 
@@ -8191,6 +8409,17 @@ select option {
   text-align: center !important;
 }
 
+.customers-table select {
+  width: 8rem;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  font-size: 13px;
+  text-align: center !important;
+  text-align-last: center;
+  background-color: #fff;
+}
+
 .customers-table input[type="checkbox"] {
   width: 18px;
   height: 18px;
@@ -8204,7 +8433,8 @@ select option {
 }
 
 .customers-table input[type="number"]:focus,
-.customers-table input[type="text"]:focus {
+.customers-table input[type="text"]:focus,
+.customers-table select:focus {
   outline: 2px solid #c4291d;
   outline-offset: -1px;
 }
@@ -8372,6 +8602,35 @@ select option {
 .total-description-input:focus {
   outline: 2px solid #c4291d;
   border-color: #c4291d;
+}
+
+.customer-payments-summary-block {
+  margin-top: 0.2rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed rgba(31, 48, 64, 0.18);
+}
+
+.summary-mini-title {
+  margin-bottom: 0.28rem;
+  color: #1f8f3a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.customer-payment-row {
+  grid-template-columns: minmax(92px, 1fr) minmax(70px, 82px);
+}
+
+.shift-customer-payment-name {
+  min-width: 0;
+  padding: 0.22rem 0.28rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-family: 'Noto Naskh Arabic', serif;
+  text-align: right;
+  background: #fff;
 }
 
 .total-divider {
