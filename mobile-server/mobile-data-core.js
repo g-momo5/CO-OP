@@ -1150,27 +1150,9 @@ async function getMobileData(queryParams = {}) {
   }
 }
 
-function getToken(queryParams = {}, headers = {}) {
-  return String(
-    queryParams.token ||
-    headers['x-mobile-token'] ||
-    headers['X-Mobile-Token'] ||
-    ''
-  ).trim();
-}
-
-async function handleMobileDataRequest({ method = 'GET', query = {}, headers = {} } = {}) {
+async function handleMobileDataRequest({ method = 'GET', query = {} } = {}) {
   if (method !== 'GET') {
     return json(405, { error: 'method_not_allowed' });
-  }
-
-  const secret = String(process.env.MOBILE_SECRET_TOKEN || '').trim();
-  if (!secret) {
-    return json(503, { error: 'mobile_secret_not_configured' });
-  }
-
-  if (getToken(query, headers) !== secret) {
-    return json(401, { error: 'unauthorized' });
   }
 
   try {

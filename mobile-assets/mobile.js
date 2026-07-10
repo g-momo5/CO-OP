@@ -1,7 +1,5 @@
 (() => {
-  const MOBILE_TOKEN_STORAGE_KEY = 'coop_mobile_token';
   const state = {
-    token: getTokenFromUrl(),
     apiBase: '/api/mobile-data',
     currentView: 'overview',
     shiftDays: []
@@ -48,42 +46,6 @@
     ['total_deductions', 'إجمالي الخصومات', 'summary'],
     ['net_profit', 'صافي المكسب', 'net']
   ];
-
-  function getTokenFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const queryToken = params.get('token');
-    if (queryToken) {
-      return persistMobileToken(queryToken.trim());
-    }
-
-    const parts = window.location.pathname.split('/').filter(Boolean);
-    const index = parts.indexOf('m');
-    if (index !== -1 && parts[index + 1]) {
-      return persistMobileToken(decodeURIComponent(parts[index + 1]).trim());
-    }
-    return getStoredMobileToken();
-  }
-
-  function persistMobileToken(token) {
-    const cleanToken = String(token || '').trim();
-    if (!cleanToken) return '';
-
-    try {
-      window.localStorage.setItem(MOBILE_TOKEN_STORAGE_KEY, cleanToken);
-    } catch (_error) {
-      // Ignore storage errors; the current URL token is still usable.
-    }
-
-    return cleanToken;
-  }
-
-  function getStoredMobileToken() {
-    try {
-      return String(window.localStorage.getItem(MOBILE_TOKEN_STORAGE_KEY) || '').trim();
-    } catch (_error) {
-      return '';
-    }
-  }
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -160,7 +122,7 @@
 
   function buildUrl(base, params) {
     const url = new URL(base, window.location.origin);
-    Object.entries({ token: state.token, ...params }).forEach(([key, value]) => {
+    Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
         url.searchParams.set(key, value);
       }
@@ -169,7 +131,6 @@
   }
 
   async function api(view, params = {}) {
-    if (!state.token) throw new Error('token_missing');
     const query = { view, ...params };
     const primaryUrl = buildUrl(state.apiBase, query);
     let response = await fetch(primaryUrl, { method: 'GET', cache: 'no-store' });
@@ -625,9 +586,6 @@
 
   function errorMessage(error) {
     const code = error?.message || '';
-    if (code === 'token_missing') return 'افتح الرابط السري بالشكل /m/TOKEN';
-    if (code === 'unauthorized') return 'الرابط السري غير صحيح.';
-    if (code === 'mobile_secret_not_configured') return 'MOBILE_SECRET_TOKEN غير مضبوط على الاستضافة.';
     if (code === 'server_error') return 'حدث خطأ في قراءة قاعدة البيانات.';
     return 'تعذر تحميل البيانات.';
   }
@@ -658,11 +616,6 @@
   shiftSummaryDialog?.addEventListener('click', (event) => {
     if (event.target === shiftSummaryDialog) closeSummaryModal();
   });
-
-  if (!state.token) {
-    setError('افتح الرابط السري بالشكل /m/TOKEN');
-    return;
-  }
 
   loadView('overview');
 })();
