@@ -288,6 +288,35 @@ class DatabaseManager {
       key TEXT PRIMARY KEY,
       applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS app_devices (
+      device_id TEXT PRIMARY KEY,
+      system_name TEXT NOT NULL,
+      display_name TEXT,
+      app_version TEXT NOT NULL,
+      platform TEXT,
+      arch TEXT,
+      first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS system_name TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS display_name TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS app_version TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS platform TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS arch TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)`);
+    } catch (err) {
+      console.log('App devices index creation:', err.message);
+    }
+
     const seedPurchasePriceRows = await this.pgPool.query(
       `SELECT key FROM app_migrations WHERE key = $1 LIMIT 1`,
       ['seed_manual_fuel_purchase_prices_20260101']
@@ -884,7 +913,8 @@ class DatabaseManager {
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
-      'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values'
+      'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
+      'app_devices'
     ];
 
     for (const table of tables) {

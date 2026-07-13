@@ -34,6 +34,7 @@ class DatabaseSchema {
     this.createMonthlyProfitInputsTable(db);
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
+    this.createAppDevicesTable(db);
     this.createSyncQueueTable(db);
 
     // Create indexes for performance
@@ -72,6 +73,23 @@ class DatabaseSchema {
       )
     `);
 
+  }
+
+  static createAppDevicesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS app_devices (
+        device_id TEXT PRIMARY KEY,
+        system_name TEXT NOT NULL,
+        display_name TEXT,
+        app_version TEXT NOT NULL,
+        platform TEXT,
+        arch TEXT,
+        first_seen_at INTEGER DEFAULT (strftime('%s', 'now')),
+        last_opened_at INTEGER DEFAULT (strftime('%s', 'now')),
+        last_seen_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
   }
 
   static createPurchasePriceHistoryTable(db) {
@@ -420,6 +438,8 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_rows_type_order ON monthly_profit_custom_rows(row_type, display_order)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_month_key ON monthly_profit_custom_values(month_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)');
@@ -733,6 +753,24 @@ class DatabaseSchema {
         console.log('Creating monthly_profit_custom_values table...');
         this.createMonthlyProfitCustomValuesTable(db);
       }
+
+      const appDevicesInfo = db.prepare("PRAGMA table_info(app_devices)").all();
+      if (appDevicesInfo.length === 0) {
+        console.log('Creating app_devices table...');
+        this.createAppDevicesTable(db);
+      } else {
+        ensureColumn('app_devices', appDevicesInfo, 'system_name', 'TEXT');
+        ensureColumn('app_devices', appDevicesInfo, 'display_name', 'TEXT');
+        ensureColumn('app_devices', appDevicesInfo, 'app_version', 'TEXT');
+        ensureColumn('app_devices', appDevicesInfo, 'platform', 'TEXT');
+        ensureColumn('app_devices', appDevicesInfo, 'arch', 'TEXT');
+        ensureColumn('app_devices', appDevicesInfo, 'first_seen_at', 'INTEGER');
+        ensureColumn('app_devices', appDevicesInfo, 'last_opened_at', 'INTEGER');
+        ensureColumn('app_devices', appDevicesInfo, 'last_seen_at', 'INTEGER');
+        ensureColumn('app_devices', appDevicesInfo, 'updated_at', 'INTEGER');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
 
       const annualInventoriesTableInfo = db.prepare("PRAGMA table_info(annual_inventories)").all();
       const hasExpectedItems = annualInventoriesTableInfo.some(col => col.name === 'expected_items');

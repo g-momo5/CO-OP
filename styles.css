@@ -4351,6 +4351,79 @@ body.modal-scroll-lock {
   margin-bottom: 1rem;
 }
 
+.app-devices-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.app-devices-header h3 {
+  margin: 0 0 0.25rem;
+  color: #2c3e50;
+}
+
+.app-devices-header p {
+  margin: 0;
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.app-devices-table th,
+.app-devices-table td {
+  vertical-align: middle;
+}
+
+.app-device-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.app-device-status.online {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.app-device-status.offline {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.app-device-current {
+  display: inline-block;
+  margin-inline-start: 0.35rem;
+  color: #c4291d;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.app-device-current-row {
+  background: #fff8f7;
+}
+
+.app-device-name-input {
+  width: 100%;
+  min-width: 170px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 0.9rem;
+  background: #fff;
+}
+
+.app-device-name-input:disabled {
+  background: #f8f9fa;
+  color: #666;
+}
+
 .monthly-report-settings {
   background: transparent;
   border: none;
@@ -4848,7 +4921,8 @@ body.modal-scroll-lock {
 }
 
 #manage-fuel-section .btn-icon,
-#manage-oil-section .btn-icon {
+#manage-oil-section .btn-icon,
+#settings-section-manage-customers .btn-icon {
   width: auto;
   height: auto;
   padding: 0.25rem;
@@ -4859,7 +4933,8 @@ body.modal-scroll-lock {
 }
 
 #manage-fuel-section .btn-icon:hover,
-#manage-oil-section .btn-icon:hover {
+#manage-oil-section .btn-icon:hover,
+#settings-section-manage-customers .btn-icon:hover {
   background: transparent;
   box-shadow: none;
   transform: none;

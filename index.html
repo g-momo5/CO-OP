@@ -1133,6 +1133,7 @@
               <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
               <li class="settings-menu-item" data-settings-section="excel-expenses-import">استيراد مصاريف Excel</li>
               <li class="settings-menu-item" data-settings-section="balance-history">سجل الأرصدة والعدادات</li>
+              <li class="settings-menu-item" data-settings-section="app-devices">الأجهزة المتصلة</li>
               <li class="settings-menu-item" data-settings-section="invoices-list">عرض الفواتير</li>
               <li class="settings-menu-item" data-settings-section="general">إعدادات عامة</li>
               <li class="settings-menu-item" data-settings-section="backup">النسخ الاحتياطي</li>
@@ -1363,6 +1364,34 @@
                     </tr>
                   </thead>
                   <tbody id="balance-history-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- Connected Devices Section -->
+            <section id="settings-section-app-devices" class="settings-section">
+              <div class="app-devices-header">
+                <div>
+                  <h3>الأجهزة المتصلة</h3>
+                  <p>الأجهزة التي فتحت البرنامج وتقوم بتحديث وجودها عند الاتصال بالإنترنت.</p>
+                </div>
+                <button class="btn btn-secondary" type="button" onclick="loadAppDevices()">تحديث</button>
+              </div>
+              <div id="app-devices-status" class="excel-import-status">جار تحميل الأجهزة...</div>
+              <div class="excel-import-table-wrapper">
+                <table class="base-table app-devices-table">
+                  <thead>
+                    <tr>
+                      <th>الحالة</th>
+                      <th>الاسم</th>
+                      <th>اسم النظام</th>
+                      <th>الإصدار</th>
+                      <th>آخر دخول</th>
+                      <th>آخر اتصال</th>
+                      <th>النظام</th>
+                    </tr>
+                  </thead>
+                  <tbody id="app-devices-table-body"></tbody>
                 </table>
               </div>
             </section>

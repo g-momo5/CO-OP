@@ -720,6 +720,7 @@ async function getHomeChart(queryParams) {
 
   const report = await getReport({ startDate: fromRange.startDate, endDate: toRange.endDate });
   const rowsByFuel = new Map();
+  const salesDaysByMonth = new Map(months.map((month) => [month, new Set()]));
   FUEL_ORDER.forEach((fuelType) => {
     rowsByFuel.set(fuelType, {
       name: fuelType,
@@ -754,6 +755,9 @@ async function getHomeChart(queryParams) {
       const entry = rowsByFuel.get(fuelName);
       entry.byMonth[monthKey] += quantity;
       entry.quantity += quantity;
+      if (quantity > 0) {
+        salesDaysByMonth.get(monthKey)?.add(normalizeDate(row.date));
+      }
     });
   });
 
@@ -761,6 +765,9 @@ async function getHomeChart(queryParams) {
     fromMonth,
     toMonth,
     months,
+    salesDaysByMonth: Object.fromEntries(
+      months.map((month) => [month, salesDaysByMonth.get(month)?.size || 0])
+    ),
     totals: report.fuelTotals || [],
     rows: sortArabicRowsByOrder(Array.from(rowsByFuel.values()), FUEL_ORDER)
   };

@@ -3,6 +3,8 @@ const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 const path = require('path');
 const util = require('util');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
@@ -13,6 +15,7 @@ let dbManager; // DatabaseManager instance (replaces db)
 let syncManager; // SyncManager instance
 let autoUpdater; // Initialized after app is ready
 let connectionCheckInterval; // Interval for checking connection status
+let appDeviceHeartbeatInterval = null;
 let startupPhase = { progress: 0, message: '', level: 'info' };
 let startupConsoleRestore = null;
 let mainWindowReady = false;
@@ -49,6 +52,8 @@ const DEFAULT_VOUCHER_CUSTOMERS = [
   'بونات الشركة',
   'الشرطة'
 ];
+const APP_DEVICE_ONLINE_WINDOW_MS = 5 * 60 * 1000;
+const APP_DEVICE_HEARTBEAT_MS = 60 * 1000;
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE/.test(String(error.message || '')));
@@ -792,6 +797,268 @@ function executeUpdate(query, params = []) {
 
 function executeInsert(query, params = [], tableName = 'unknown') {
   return dbManager.executeInsert(query, params, tableName);
+}
+
+function getAppSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function readAppSettingsFile() {
+  const settingsPath = getAppSettingsPath();
+  if (!fs.existsSync(settingsPath)) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+  } catch (error) {
+    console.warn('Unable to parse settings.json:', error.message);
+    return {};
+  }
+}
+
+function writeAppSettingsFile(settings) {
+  const settingsPath = getAppSettingsPath();
+  const settingsDir = path.dirname(settingsPath);
+  if (!fs.existsSync(settingsDir)) {
+    fs.mkdirSync(settingsDir, { recursive: true });
+  }
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+function createStableDeviceId() {
+  if (typeof crypto.randomUUID === 'function') {
+    return `device_${crypto.randomUUID()}`;
+  }
+  return `device_${crypto.randomBytes(16).toString('hex')}`;
+}
+
+function getCurrentDeviceId() {
+  const settings = readAppSettingsFile();
+  if (typeof settings.appDeviceId === 'string' && settings.appDeviceId.trim()) {
+    return settings.appDeviceId.trim();
+  }
+
+  const deviceId = createStableDeviceId();
+  writeAppSettingsFile({ ...settings, appDeviceId: deviceId });
+  return deviceId;
+}
+
+function getCurrentAppDevicePayload() {
+  return {
+    device_id: getCurrentDeviceId(),
+    system_name: os.hostname() || 'Unknown PC',
+    app_version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch
+  };
+}
+
+function timestampToMs(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.getTime();
+  }
+  if (typeof value === 'number') {
+    return value < 1000000000000 ? value * 1000 : value;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric < 1000000000000 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function normalizeAppDeviceRow(row = {}) {
+  const lastSeenMs = timestampToMs(row.last_seen_at);
+  const lastOpenedMs = timestampToMs(row.last_opened_at);
+  const firstSeenMs = timestampToMs(row.first_seen_at);
+  const updatedMs = timestampToMs(row.updated_at);
+  const now = Date.now();
+
+  return {
+    device_id: String(row.device_id || ''),
+    system_name: String(row.system_name || ''),
+    display_name: String(row.display_name || ''),
+    app_version: String(row.app_version || ''),
+    platform: String(row.platform || ''),
+    arch: String(row.arch || ''),
+    first_seen_at: firstSeenMs ? new Date(firstSeenMs).toISOString() : null,
+    last_opened_at: lastOpenedMs ? new Date(lastOpenedMs).toISOString() : null,
+    last_seen_at: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
+    updated_at: updatedMs ? new Date(updatedMs).toISOString() : null,
+    is_current: String(row.device_id || '') === getCurrentDeviceId(),
+    is_online: Boolean(lastSeenMs && now - lastSeenMs <= APP_DEVICE_ONLINE_WINDOW_MS)
+  };
+}
+
+function upsertCurrentAppDeviceLocal(payload, opened = false) {
+  if (!dbManager?.sqlite) return;
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  dbManager.sqlite.prepare(`
+    INSERT INTO app_devices (
+      device_id, system_name, app_version, platform, arch,
+      first_seen_at, last_opened_at, last_seen_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(device_id) DO UPDATE SET
+      system_name = excluded.system_name,
+      app_version = excluded.app_version,
+      platform = excluded.platform,
+      arch = excluded.arch,
+      last_opened_at = CASE
+        WHEN ? = 1 THEN excluded.last_opened_at
+        ELSE app_devices.last_opened_at
+      END,
+      last_seen_at = excluded.last_seen_at,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.device_id,
+    payload.system_name,
+    payload.app_version,
+    payload.platform,
+    payload.arch,
+    nowSeconds,
+    nowSeconds,
+    nowSeconds,
+    nowSeconds,
+    opened ? 1 : 0
+  );
+}
+
+async function upsertCurrentAppDevice(opened = false) {
+  const payload = getCurrentAppDevicePayload();
+
+  try {
+    upsertCurrentAppDeviceLocal(payload, opened);
+  } catch (error) {
+    console.warn('Unable to update local app device row:', error.message);
+  }
+
+  if (!dbManager?.isOnline || !dbManager?.pgPool) {
+    return { success: false, offline: true, device: payload };
+  }
+
+  try {
+    await dbManager.pgPool.query(`
+      INSERT INTO app_devices (
+        device_id, system_name, app_version, platform, arch,
+        first_seen_at, last_opened_at, last_seen_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (device_id) DO UPDATE SET
+        system_name = EXCLUDED.system_name,
+        app_version = EXCLUDED.app_version,
+        platform = EXCLUDED.platform,
+        arch = EXCLUDED.arch,
+        last_opened_at = CASE
+          WHEN $6::boolean THEN EXCLUDED.last_opened_at
+          ELSE app_devices.last_opened_at
+        END,
+        last_seen_at = EXCLUDED.last_seen_at,
+        updated_at = EXCLUDED.updated_at
+    `, [
+      payload.device_id,
+      payload.system_name,
+      payload.app_version,
+      payload.platform,
+      payload.arch,
+      opened
+    ]);
+    return { success: true, device: payload };
+  } catch (error) {
+    console.warn('Unable to update central app device row:', error.message);
+    return { success: false, error: error.message, device: payload };
+  }
+}
+
+async function getAppDevices() {
+  const currentDeviceId = getCurrentDeviceId();
+  let rows = [];
+  let source = 'local';
+
+  if (dbManager?.isOnline && dbManager?.pgPool) {
+    try {
+      const result = await dbManager.pgPool.query(`
+        SELECT device_id, system_name, display_name, app_version, platform, arch,
+               first_seen_at, last_opened_at, last_seen_at, updated_at
+        FROM app_devices
+      `);
+      rows = result.rows;
+      source = 'central';
+    } catch (error) {
+      console.warn('Unable to load central app devices:', error.message);
+    }
+  }
+
+  if (rows.length === 0 && dbManager?.sqlite) {
+    rows = dbManager.sqlite.prepare(`
+      SELECT device_id, system_name, display_name, app_version, platform, arch,
+             first_seen_at, last_opened_at, last_seen_at, updated_at
+      FROM app_devices
+    `).all();
+    source = 'local';
+  }
+
+  const devices = rows
+    .map(normalizeAppDeviceRow)
+    .sort((a, b) => {
+      if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
+      const aSeen = timestampToMs(a.last_seen_at) || 0;
+      const bSeen = timestampToMs(b.last_seen_at) || 0;
+      return bSeen - aSeen;
+    });
+
+  return {
+    online: Boolean(dbManager?.isOnline),
+    source,
+    currentDeviceId,
+    onlineWindowMs: APP_DEVICE_ONLINE_WINDOW_MS,
+    devices
+  };
+}
+
+async function updateAppDeviceName(deviceId, displayName) {
+  const safeDeviceId = String(deviceId || '').trim();
+  const safeDisplayName = String(displayName || '').trim().slice(0, 100);
+  if (!safeDeviceId) {
+    throw new Error('Invalid device id');
+  }
+  if (!dbManager?.isOnline || !dbManager?.pgPool) {
+    throw new Error('Device names can be updated only while online');
+  }
+
+  await dbManager.pgPool.query(
+    `UPDATE app_devices
+     SET display_name = $2, updated_at = CURRENT_TIMESTAMP
+     WHERE device_id = $1`,
+    [safeDeviceId, safeDisplayName || null]
+  );
+
+  if (dbManager?.sqlite) {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    dbManager.sqlite.prepare(`
+      UPDATE app_devices
+      SET display_name = ?, updated_at = ?
+      WHERE device_id = ?
+    `).run(safeDisplayName || null, nowSeconds, safeDeviceId);
+  }
+
+  return { success: true };
+}
+
+function startAppDeviceHeartbeat() {
+  if (appDeviceHeartbeatInterval) {
+    clearInterval(appDeviceHeartbeatInterval);
+  }
+
+  appDeviceHeartbeatInterval = setInterval(() => {
+    upsertCurrentAppDevice(false).catch((error) => {
+      console.warn('App device heartbeat failed:', error.message);
+    });
+  }, APP_DEVICE_HEARTBEAT_MS);
 }
 
 async function seedDefaultVoucherCustomers() {
@@ -5274,6 +5541,7 @@ ipcMain.handle('get-sales-summary', async () => {
       let generalSettings = null;
       if (fs.existsSync(settingsPath)) {
         generalSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        delete generalSettings.appDeviceId;
       }
 
       const backupData = {
@@ -5606,7 +5874,11 @@ ipcMain.handle('get-sales-summary', async () => {
       // Import general settings
       if (backupData.generalSettings) {
         const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-        fs.writeFileSync(settingsPath, JSON.stringify(backupData.generalSettings, null, 2));
+        const currentSettings = readAppSettingsFile();
+        fs.writeFileSync(settingsPath, JSON.stringify({
+          ...backupData.generalSettings,
+          appDeviceId: currentSettings.appDeviceId || createStableDeviceId()
+        }, null, 2));
       }
 
       return { success: true };
@@ -5614,6 +5886,20 @@ ipcMain.handle('get-sales-summary', async () => {
       console.error('Error importing backup:', error);
       return { success: false, error: error.message };
     }
+  });
+
+  ipcMain.handle('get-app-devices', async () => {
+    await upsertCurrentAppDevice(false);
+    return getAppDevices();
+  });
+
+  ipcMain.handle('update-app-device-name', async (_event, payload = {}) => {
+    const result = await updateAppDeviceName(payload.device_id, payload.display_name);
+    return result;
+  });
+
+  ipcMain.handle('register-current-device', async (_event, payload = {}) => {
+    return upsertCurrentAppDevice(Boolean(payload.opened));
   });
 
   // Sync-related IPC handlers
@@ -5670,8 +5956,10 @@ app.whenReady().then(async () => {
     emitStartupStatus('Database pronto', 60, 'info');
     await migrateShiftProductDataKeys();
     await migrateStableCustomerIds();
+    await upsertCurrentAppDevice(true);
 
     setupIPCHandlers();
+    startAppDeviceHeartbeat();
     emitStartupStatus('Canali applicazione pronti', 72, 'info');
     createWindow({ deferShow: true });
 
@@ -5706,6 +5994,7 @@ app.whenReady().then(async () => {
 
         // Trigger automatic sync
         try {
+          await upsertCurrentAppDevice(false);
           const syncResult = await syncManager.syncAll();
           console.log('✅ Auto-sync completed:', syncResult);
 
@@ -7017,6 +7306,10 @@ app.on('before-quit', async () => {
   if (connectionCheckInterval) {
     clearInterval(connectionCheckInterval);
     connectionCheckInterval = null;
+  }
+  if (appDeviceHeartbeatInterval) {
+    clearInterval(appDeviceHeartbeatInterval);
+    appDeviceHeartbeatInterval = null;
   }
 
   // Close database connections

@@ -108,6 +108,28 @@
     };
   }
 
+  function getMonthKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+
+  function getDaysInMonthKey(monthKey) {
+    const [year, month] = String(monthKey || '').split('-').map((value) => parseInt(value, 10));
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return 0;
+    return new Date(year, month, 0).getDate();
+  }
+
+  function getCurrentMonthForecastValue(actualQuantity, monthKey, registeredDays, now = new Date()) {
+    if (monthKey !== getMonthKey(now)) return actualQuantity;
+
+    const elapsedDays = Math.max(1, parseInt(registeredDays, 10) || 0);
+    const daysInMonth = getDaysInMonthKey(monthKey);
+    if (!daysInMonth) return actualQuantity;
+
+    return (actualQuantity / elapsedDays) * daysInMonth;
+  }
+
   function setLoading() {
     content.innerHTML = '<div class="loading">جار التحميل...</div>';
   }
@@ -227,19 +249,40 @@
       if (homeChart) homeChart.destroy();
 
       const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#2E7D32', '#C2185B'];
-      const rows = (chart.rows || []).filter((row) => Number(row.quantity) > 0);
+      const currentMonthKey = getMonthKey();
+      const forecastMonthIndex = chart.months.indexOf(currentMonthKey);
+      const registeredDays = Number(chart.salesDaysByMonth?.[currentMonthKey]) || 0;
+      const hasForecast = forecastMonthIndex !== -1 && registeredDays > 0;
+      const rows = (chart.rows || []).filter((row) => (
+        chart.months.some((month) => Number(row.byMonth?.[month]) > 0)
+      ));
       homeChart = new window.Chart(canvas.getContext('2d'), {
         type: 'line',
         data: {
           labels: chart.months.map(monthLabel),
-          datasets: rows.map((row, index) => ({
-            label: row.name,
-            data: chart.months.map((month) => Number(row.byMonth?.[month]) || 0),
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length],
-            borderWidth: 2,
-            tension: 0.25
-          }))
+          datasets: rows.map((row, index) => {
+            const data = chart.months.map((month) => Number(row.byMonth?.[month]) || 0);
+            if (hasForecast) {
+              data[forecastMonthIndex] = getCurrentMonthForecastValue(
+                data[forecastMonthIndex],
+                currentMonthKey,
+                registeredDays
+              );
+            }
+            return {
+              label: row.name,
+              data,
+              borderColor: colors[index % colors.length],
+              backgroundColor: colors[index % colors.length],
+              borderWidth: 2,
+              tension: 0.25,
+              segment: hasForecast ? {
+                borderDash: (context) => (
+                  context.p1DataIndex === forecastMonthIndex ? [8, 5] : undefined
+                )
+              } : undefined
+            };
+          })
         },
         options: {
           responsive: true,

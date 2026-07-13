@@ -83,6 +83,7 @@ const settingsSectionTitles = {
   'excel-sales-import': 'استيراد مبيعات Excel',
   'excel-expenses-import': 'استيراد مصاريف Excel',
   'balance-history': 'سجل الأرصدة والعدادات',
+  'app-devices': 'الأجهزة المتصلة',
   'invoices-list': 'عرض الفواتير',
   'general': 'إعدادات عامة',
   'backup': 'النسخ الاحتياطي'
@@ -2876,7 +2877,7 @@ function createFuelInvoiceRow(product) {
   purchaseInput.className = 'fuel-purchase-price';
   purchaseInput.placeholder = 'سعر الشراء';
   if (Number.isFinite(product.purchase_price) && product.purchase_price > 0) {
-    purchaseInput.value = formatPrice(product.purchase_price);
+    purchaseInput.value = formatEditablePricePreserveDecimals(product.purchase_price);
   }
   purchaseGroup.appendChild(purchaseInput);
 
@@ -2916,7 +2917,7 @@ async function refreshFuelInvoicePurchasePricesForDate() {
     if (!purchaseInput) return;
 
     if (Number.isFinite(product?.purchase_price) && product.purchase_price > 0) {
-      purchaseInput.value = formatPrice(product.purchase_price);
+      purchaseInput.value = formatEditablePricePreserveDecimals(product.purchase_price);
     } else {
       purchaseInput.value = '';
     }
@@ -3038,7 +3039,7 @@ async function populateFuelInvoiceFormForEdit(invoice) {
     const quantityInput = row.querySelector('.fuel-quantity');
     const purchaseInput = row.querySelector('.fuel-purchase-price');
     if (quantityInput) quantityInput.value = parseFloat(item.quantity) || '';
-    if (purchaseInput) purchaseInput.value = parseFloat(item.purchase_price) || '';
+    if (purchaseInput) purchaseInput.value = formatEditablePricePreserveDecimals(item.purchase_price);
     calculateFuelItem.call(quantityInput || purchaseInput);
   });
 
@@ -5715,6 +5716,8 @@ function showSettingsSectionWithoutHistory(sectionName) {
       loadExcelSalesImportProducts();
     } else if (sectionName === 'balance-history') {
       loadShiftBalanceHistory();
+    } else if (sectionName === 'app-devices') {
+      loadAppDevices();
     }
   }
 }
@@ -5806,6 +5809,120 @@ function formatUpdateDate(dateString) {
   const day = String(date.getDate()).padStart(2, '0');
   const dateStr = `${day}/${month}/${year}`;
   return ` (${convertToArabicNumerals(dateStr)})`;
+}
+
+function formatAppDeviceDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  const datePart = date.toLocaleDateString('it-IT', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const timePart = date.toLocaleTimeString('it-IT', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  return convertToArabicNumerals(`${datePart} ${timePart}`);
+}
+
+function formatAppDevicePlatform(platform, arch) {
+  const platformName = {
+    darwin: 'macOS',
+    win32: 'Windows',
+    linux: 'Linux'
+  }[platform] || platform || '-';
+  return arch ? `${platformName} ${arch}` : platformName;
+}
+
+function setAppDevicesStatus(message, type = '') {
+  const status = document.getElementById('app-devices-status');
+  if (!status) return;
+  status.textContent = message;
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+}
+
+async function loadAppDevices() {
+  const tbody = document.getElementById('app-devices-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جار التحميل...</td></tr>';
+  setAppDevicesStatus('جار تحميل الأجهزة...');
+
+  try {
+    const result = await ipcRenderer.invoke('get-app-devices');
+    const devices = Array.isArray(result?.devices) ? result.devices : [];
+    const canEdit = Boolean(result?.online && result?.source === 'central');
+
+    if (devices.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#666;">لا توجد أجهزة مسجلة</td></tr>';
+      setAppDevicesStatus('لا توجد أجهزة مسجلة بعد.', 'warning');
+      return;
+    }
+
+    tbody.innerHTML = devices.map((device) => {
+      const displayName = device.display_name || device.system_name || '';
+      const statusClass = device.is_online ? 'online' : 'offline';
+      const statusText = device.is_online ? 'متصل' : 'غير متصل';
+      const currentBadge = device.is_current ? '<span class="app-device-current">هذا الجهاز</span>' : '';
+      return `
+        <tr class="${device.is_current ? 'app-device-current-row' : ''}">
+          <td>
+            <span class="app-device-status ${statusClass}">${statusText}</span>
+            ${currentBadge}
+          </td>
+          <td>
+            <input
+              type="text"
+              class="app-device-name-input"
+              data-device-id="${escapeHtml(device.device_id)}"
+              value="${escapeHtml(displayName)}"
+              placeholder="${escapeHtml(device.system_name || 'اسم الجهاز')}"
+              maxlength="100"
+              ${canEdit ? '' : 'disabled'}
+              onchange="saveAppDeviceDisplayName(this)"
+            >
+          </td>
+          <td>${escapeHtml(device.system_name || '-')}</td>
+          <td>${escapeHtml(device.app_version || '-')}</td>
+          <td>${formatAppDeviceDate(device.last_opened_at)}</td>
+          <td>${formatAppDeviceDate(device.last_seen_at)}</td>
+          <td>${escapeHtml(formatAppDevicePlatform(device.platform, device.arch))}</td>
+        </tr>
+      `;
+    }).join('');
+
+    if (canEdit) {
+      setAppDevicesStatus(`تم تحميل ${convertToArabicNumerals(devices.length)} جهاز. الأجهزة المتصلة هي التي تم تحديثها خلال آخر ٥ دقائق.`, 'success');
+    } else {
+      setAppDevicesStatus('لا يوجد اتصال مركزي الآن. يتم عرض البيانات المحلية فقط ولا يمكن تعديل الأسماء.', 'warning');
+    }
+  } catch (error) {
+    console.error('Error loading app devices:', error);
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#c4291d;">حدث خطأ أثناء تحميل الأجهزة</td></tr>';
+    setAppDevicesStatus('حدث خطأ أثناء تحميل الأجهزة', 'error');
+  }
+}
+
+async function saveAppDeviceDisplayName(input) {
+  if (!input) return;
+  const deviceId = input.dataset.deviceId || '';
+  const displayName = input.value || '';
+  input.disabled = true;
+
+  try {
+    await ipcRenderer.invoke('update-app-device-name', {
+      device_id: deviceId,
+      display_name: displayName
+    });
+    showMessage('تم حفظ اسم الجهاز', 'success');
+    await loadAppDevices();
+  } catch (error) {
+    console.error('Error updating app device name:', error);
+    showMessage(error.message || 'حدث خطأ أثناء حفظ اسم الجهاز', 'error');
+    input.disabled = false;
+  }
 }
 
 // Load manage products tables
@@ -11954,6 +12071,19 @@ function formatPrice(value) {
   if (isNaN(num)) return '0';
   // If the number is a whole number, don't show decimals
   return num % 1 === 0 ? num.toString() : num.toFixed(2);
+}
+
+function formatEditablePricePreserveDecimals(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const raw = String(value).trim().replace(',', '.');
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return '';
+
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    return raw.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  }
+
+  return String(num);
 }
 
 function formatOilCashTotalDisplay(value) {
