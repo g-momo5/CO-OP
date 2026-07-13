@@ -380,6 +380,7 @@ async function attemptAppLogin(username, password) {
     selectedLoginUsername = '';
     applyCurrentUserSession();
     await bootstrapApp();
+    stabilizeHomeLayoutAfterLogin();
   } catch (error) {
     console.error('Login failed:', error);
     setLoginMessage(error.message || 'فشل تسجيل الدخول', 'error');
@@ -391,6 +392,7 @@ function applyCurrentUserSession() {
   document.body.classList.add('auth-ready');
   renderNavCurrentUser();
   applyPermissionLocks();
+  stabilizeHomeLayoutAfterLogin();
 }
 
 function renderNavCurrentUser() {
@@ -433,7 +435,7 @@ function settingsSectionRequiresPermission(sectionName) {
 }
 
 function applyPermissionLocks() {
-  document.querySelectorAll('.admin-only').forEach((element) => {
+  document.querySelectorAll('.settings-menu-item.admin-only, .settings-section.admin-only').forEach((element) => {
     element.style.display = isCurrentUserAdmin() ? '' : 'none';
   });
 
@@ -2501,6 +2503,9 @@ function syncHomeChartHeightToCardRows() {
   const cardsGrid = homeScreen.querySelector('.action-cards-grid');
   if (!chartContainer || !cardsGrid) return;
 
+  const gridRect = cardsGrid.getBoundingClientRect();
+  if (gridRect.width < 280) return;
+
   // Keep mobile sizing delegated to CSS media rules.
   if (window.matchMedia('(max-width: 768px)').matches) {
     chartContainer.style.removeProperty('height');
@@ -2514,6 +2519,7 @@ function syncHomeChartHeightToCardRows() {
   const rowGroups = [];
   cards.forEach((card) => {
     const rect = card.getBoundingClientRect();
+    if (rect.width < 80 || rect.height < 80) return;
     const top = rect.top;
     const existingGroup = rowGroups.find(group => Math.abs(group.top - top) <= rowTolerance);
 
@@ -2529,7 +2535,7 @@ function syncHomeChartHeightToCardRows() {
     .sort((a, b) => a.top - b.top)
     .map(group => group.height);
 
-  if (!sortedRowHeights.length) return;
+  if (sortedRowHeights.length < 2) return;
 
   const targetRows = 2;
   const usedRows = sortedRowHeights.slice(0, targetRows);
@@ -2537,14 +2543,46 @@ function syncHomeChartHeightToCardRows() {
   const gridStyle = window.getComputedStyle(cardsGrid);
   const rowGap = parseFloat(gridStyle.rowGap || gridStyle.gap || '0') || 0;
   const totalGap = rowGap * Math.max(0, usedRows.length - 1);
+  const nextHeight = Math.round(rowsHeight + totalGap);
 
-  chartContainer.style.height = `${Math.round(rowsHeight + totalGap)}px`;
+  if (nextHeight < 220 || nextHeight > 520) return;
+
+  chartContainer.style.height = `${nextHeight}px`;
 }
 
 function scheduleHomeChartHeightSync() {
   window.requestAnimationFrame(() => {
     syncHomeChartHeightToCardRows();
   });
+}
+
+function resizeHomeChartCanvas() {
+  if (charts.monthlyFuelSales && typeof charts.monthlyFuelSales.resize === 'function') {
+    charts.monthlyFuelSales.resize();
+  }
+}
+
+function stabilizeHomeLayoutAfterLogin() {
+  const run = () => {
+    if (currentScreen !== 'home') return;
+    scheduleHomeChartHeightSync();
+    window.requestAnimationFrame(resizeHomeChartCanvas);
+  };
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(run);
+  });
+
+  [80, 180, 360, 700, 1200].forEach((delay) => {
+    setTimeout(run, delay);
+  });
+
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      run();
+      setTimeout(run, 120);
+    }).catch(() => {});
+  }
 }
 
 function updateHomeChartToggleUI() {
