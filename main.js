@@ -23,6 +23,7 @@ let rendererBootstrapReady = false;
 let startupFallbackTimer = null;
 let startupComplete = false;
 let isForceClosingWindow = false; // Allow close after explicit user confirmation
+let currentAppUser = null;
 // Screens and sections that are limited when offline
 const OFFLINE_RESTRICTED = {
   screens: ['report', 'charts'],
@@ -54,6 +55,28 @@ const DEFAULT_VOUCHER_CUSTOMERS = [
 ];
 const APP_DEVICE_ONLINE_WINDOW_MS = 5 * 60 * 1000;
 const APP_DEVICE_HEARTBEAT_MS = 60 * 1000;
+const APP_USER_ROLES = {
+  ADMIN: 'admin',
+  OPERATOR: 'operator'
+};
+const DEFAULT_APP_USERS = [
+  {
+    username: 'admin',
+    display_name: 'admin',
+    role: APP_USER_ROLES.ADMIN,
+    password: 'admin123',
+    avatar_type: 'initial',
+    avatar_value: ''
+  },
+  {
+    username: 'CO-OP',
+    display_name: 'CO-OP',
+    role: APP_USER_ROLES.OPERATOR,
+    password: '',
+    avatar_type: 'asset',
+    avatar_value: 'assets/logo_cpc.ico'
+  }
+];
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE/.test(String(error.message || '')));
@@ -1047,6 +1070,301 @@ async function updateAppDeviceName(deviceId, displayName) {
   }
 
   return { success: true };
+}
+
+function normalizeAppUsername(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeAppRole(value) {
+  return value === APP_USER_ROLES.ADMIN ? APP_USER_ROLES.ADMIN : APP_USER_ROLES.OPERATOR;
+}
+
+function normalizeAvatarType(value) {
+  return ['initial', 'asset', 'data_url'].includes(value) ? value : 'initial';
+}
+
+function normalizeAvatarValue(type, value) {
+  const raw = String(value || '').trim();
+  if (type === 'data_url') {
+    return raw.startsWith('data:image/') ? raw : '';
+  }
+  if (type === 'asset') {
+    return raw || 'assets/logo_cpc.ico';
+  }
+  return raw.slice(0, 4);
+}
+
+function hashAppUserPassword(password, existingSalt = '') {
+  const rawPassword = String(password || '');
+  if (!rawPassword) {
+    return { password_hash: null, password_salt: null };
+  }
+
+  const salt = existingSalt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(rawPassword, salt, 120000, 32, 'sha256').toString('hex');
+  return { password_hash: hash, password_salt: salt };
+}
+
+function verifyAppUserPassword(password, row = {}) {
+  if (!row.password_hash) {
+    return true;
+  }
+  if (!row.password_salt) {
+    return false;
+  }
+
+  const candidate = hashAppUserPassword(password, row.password_salt).password_hash;
+  const expected = Buffer.from(String(row.password_hash), 'hex');
+  const actual = Buffer.from(String(candidate), 'hex');
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function normalizeAppUserRow(row = {}) {
+  const username = normalizeAppUsername(row.username);
+  const displayName = normalizeAppUsername(row.display_name) || username;
+  const avatarType = normalizeAvatarType(row.avatar_type);
+  return {
+    id: row.id,
+    username,
+    display_name: displayName,
+    role: normalizeAppRole(row.role),
+    password_hash: row.password_hash || null,
+    password_salt: row.password_salt || null,
+    avatar_type: avatarType,
+    avatar_value: normalizeAvatarValue(avatarType, row.avatar_value),
+    is_active: Number(row.is_active) === 0 ? 0 : 1,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function publicAppUser(row = {}) {
+  const normalized = normalizeAppUserRow(row);
+  return {
+    id: normalized.id,
+    username: normalized.username,
+    display_name: normalized.display_name,
+    role: normalized.role,
+    avatar_type: normalized.avatar_type,
+    avatar_value: normalized.avatar_value,
+    is_active: normalized.is_active,
+    has_password: Boolean(normalized.password_hash)
+  };
+}
+
+function requireAdminAppUser() {
+  if (!currentAppUser || currentAppUser.role !== APP_USER_ROLES.ADMIN) {
+    throw new Error('هذه الصفحة متاحة للمدير فقط');
+  }
+}
+
+function appUserUpsertSql(pg = true) {
+  const placeholders = pg
+    ? ['$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9']
+    : ['?', '?', '?', '?', '?', '?', '?', '?', '?'];
+
+  return `
+    INSERT INTO app_users (
+      username, display_name, role, password_hash, password_salt,
+      avatar_type, avatar_value, is_active, updated_at
+    )
+    VALUES (${placeholders.join(', ')})
+    ON CONFLICT (username) DO UPDATE SET
+      display_name = excluded.display_name,
+      role = excluded.role,
+      password_hash = excluded.password_hash,
+      password_salt = excluded.password_salt,
+      avatar_type = excluded.avatar_type,
+      avatar_value = excluded.avatar_value,
+      is_active = excluded.is_active,
+      updated_at = excluded.updated_at
+  `;
+}
+
+function appUserParams(record = {}) {
+  const normalized = normalizeAppUserRow(record);
+  const now = new Date().toISOString();
+  return [
+    normalized.username,
+    normalized.display_name,
+    normalized.role,
+    normalized.password_hash,
+    normalized.password_salt,
+    normalized.avatar_type,
+    normalized.avatar_value,
+    normalized.is_active,
+    record.updated_at || now
+  ];
+}
+
+async function upsertAppUserRecord(record = {}, { queueWhenOffline = true } = {}) {
+  const params = appUserParams(record);
+  const username = params[0];
+  if (!username) {
+    throw new Error('يرجى إدخال اسم المستخدم');
+  }
+
+  const pgSql = appUserUpsertSql(true);
+  const sqliteSql = appUserUpsertSql(false);
+  let savedOnline = false;
+
+  if (dbManager?.isOnline && dbManager?.pgPool) {
+    try {
+      await dbManager.pgPool.query(pgSql, params);
+      savedOnline = true;
+    } catch (error) {
+      console.warn('Unable to save app user online:', error.message);
+      dbManager.isOnline = false;
+    }
+  }
+
+  if (dbManager?.sqlite) {
+    dbManager.sqlite.prepare(sqliteSql).run(...params);
+  }
+
+  if (!savedOnline && queueWhenOffline && dbManager?.sqlite) {
+    dbManager.addToSyncQueue('app_users', 'RAW_INSERT', { sql: pgSql, params });
+  }
+}
+
+async function softDeleteAppUser(username) {
+  const safeUsername = normalizeAppUsername(username);
+  if (!safeUsername) {
+    throw new Error('مستخدم غير صالح');
+  }
+
+  const updatedAt = new Date().toISOString();
+  const pgSql = 'UPDATE app_users SET is_active = 0, updated_at = $2 WHERE username = $1';
+  let savedOnline = false;
+
+  if (dbManager?.isOnline && dbManager?.pgPool) {
+    try {
+      await dbManager.pgPool.query(pgSql, [safeUsername, updatedAt]);
+      savedOnline = true;
+    } catch (error) {
+      console.warn('Unable to delete app user online:', error.message);
+      dbManager.isOnline = false;
+    }
+  }
+
+  if (dbManager?.sqlite) {
+    dbManager.sqlite.prepare('UPDATE app_users SET is_active = 0, updated_at = ? WHERE username = ?')
+      .run(updatedAt, safeUsername);
+  }
+
+  if (!savedOnline && dbManager?.sqlite) {
+    dbManager.addToSyncQueue('app_users', 'UPDATE', { sql: pgSql, params: [safeUsername, updatedAt] });
+  }
+}
+
+async function getAppUserRows({ includeInactive = false } = {}) {
+  const where = includeInactive ? '' : 'WHERE is_active != 0';
+  const sql = `
+    SELECT id, username, display_name, role, password_hash, password_salt,
+           avatar_type, avatar_value, is_active, created_at, updated_at
+    FROM app_users
+    ${where}
+    ORDER BY CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC, username ASC
+  `;
+
+  if (dbManager?.isOnline && dbManager?.pgPool) {
+    try {
+      const result = await dbManager.pgPool.query(sql);
+      return result.rows.map(normalizeAppUserRow);
+    } catch (error) {
+      console.warn('Unable to load app users online:', error.message);
+    }
+  }
+
+  if (!dbManager?.sqlite) {
+    return [];
+  }
+
+  return dbManager.sqlite.prepare(sql).all().map(normalizeAppUserRow);
+}
+
+async function getAppUserByUsername(username) {
+  const safeUsername = normalizeAppUsername(username);
+  if (!safeUsername) return null;
+
+  const sql = `
+    SELECT id, username, display_name, role, password_hash, password_salt,
+           avatar_type, avatar_value, is_active, created_at, updated_at
+    FROM app_users
+    WHERE username = $1
+    LIMIT 1
+  `;
+
+  if (dbManager?.isOnline && dbManager?.pgPool) {
+    try {
+      const result = await dbManager.pgPool.query(sql, [safeUsername]);
+      if (result.rows[0]) return normalizeAppUserRow(result.rows[0]);
+    } catch (error) {
+      console.warn('Unable to load app user online:', error.message);
+    }
+  }
+
+  if (!dbManager?.sqlite) return null;
+  const row = dbManager.sqlite.prepare(sql.replace('$1', '?')).get(safeUsername);
+  return row ? normalizeAppUserRow(row) : null;
+}
+
+async function countActiveAdmins(excludingUsername = '') {
+  const exclude = normalizeAppUsername(excludingUsername);
+  const rows = await getAppUserRows();
+  return rows.filter((row) => (
+    row.role === APP_USER_ROLES.ADMIN
+    && row.is_active !== 0
+    && row.username !== exclude
+  )).length;
+}
+
+async function seedDefaultAppUsers() {
+  const legacyAdmin = await getAppUserByUsername('amministratore');
+  const currentAdmin = await getAppUserByUsername('admin');
+  if (legacyAdmin && !currentAdmin) {
+    await upsertAppUserRecord({
+      ...legacyAdmin,
+      username: 'admin',
+      display_name: 'admin',
+      role: APP_USER_ROLES.ADMIN,
+      is_active: 1
+    });
+    await softDeleteAppUser('amministratore');
+  } else if (legacyAdmin && currentAdmin) {
+    await softDeleteAppUser('amministratore');
+  }
+
+  for (const seed of DEFAULT_APP_USERS) {
+    const existing = await getAppUserByUsername(seed.username);
+    if (existing) {
+      if (
+        seed.username === 'CO-OP'
+        && existing.avatar_type === 'asset'
+        && (!existing.avatar_value || existing.avatar_value === 'assets/logo_cpc.png')
+      ) {
+        await upsertAppUserRecord({
+          ...existing,
+          avatar_type: 'asset',
+          avatar_value: seed.avatar_value,
+          is_active: 1
+        });
+      }
+      continue;
+    }
+
+    const passwordFields = hashAppUserPassword(seed.password);
+    await upsertAppUserRecord({
+      username: seed.username,
+      display_name: seed.display_name,
+      role: seed.role,
+      ...passwordFields,
+      avatar_type: seed.avatar_type,
+      avatar_value: seed.avatar_value,
+      is_active: 1
+    });
+  }
 }
 
 function startAppDeviceHeartbeat() {
@@ -5535,6 +5853,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const monthlyProfitInputs = await executeQuery('SELECT * FROM monthly_profit_inputs ORDER BY month_key DESC');
       const monthlyProfitCustomRows = await executeQuery('SELECT * FROM monthly_profit_custom_rows ORDER BY row_type ASC, display_order ASC');
       const monthlyProfitCustomValues = await executeQuery('SELECT * FROM monthly_profit_custom_values ORDER BY month_key DESC');
+      const appUsers = await executeQuery('SELECT * FROM app_users ORDER BY id ASC');
 
       // Get general settings
       const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -5557,6 +5876,7 @@ ipcMain.handle('get-sales-summary', async () => {
         monthlyProfitInputs,
         monthlyProfitCustomRows,
         monthlyProfitCustomValues,
+        appUsers,
         generalSettings
       };
 
@@ -5871,6 +6191,25 @@ ipcMain.handle('get-sales-summary', async () => {
         }
       }
 
+      if (backupData.appUsers) {
+        for (const user of backupData.appUsers) {
+          const username = normalizeAppUsername(user.username);
+          if (!username) continue;
+
+          await upsertAppUserRecord({
+            username,
+            display_name: normalizeAppUsername(user.display_name) || username,
+            role: normalizeAppRole(user.role),
+            password_hash: user.password_hash || null,
+            password_salt: user.password_salt || null,
+            avatar_type: normalizeAvatarType(user.avatar_type),
+            avatar_value: user.avatar_value || '',
+            is_active: Number(user.is_active) === 0 ? 0 : 1,
+            updated_at: user.updated_at || new Date().toISOString()
+          });
+        }
+      }
+
       // Import general settings
       if (backupData.generalSettings) {
         const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -5886,6 +6225,131 @@ ipcMain.handle('get-sales-summary', async () => {
       console.error('Error importing backup:', error);
       return { success: false, error: error.message };
     }
+  });
+
+  ipcMain.handle('get-login-users', async () => {
+    const users = await getAppUserRows();
+    return users.map(publicAppUser);
+  });
+
+  ipcMain.handle('login-app-user', async (_event, payload = {}) => {
+    const username = normalizeAppUsername(payload.username);
+    const password = String(payload.password || '');
+    const user = await getAppUserByUsername(username);
+
+    if (!user || user.is_active === 0) {
+      throw new Error('المستخدم غير موجود');
+    }
+
+    if (!verifyAppUserPassword(password, user)) {
+      throw new Error('كلمة المرور غير صحيحة');
+    }
+
+    currentAppUser = publicAppUser(user);
+    return { success: true, user: currentAppUser };
+  });
+
+  ipcMain.handle('logout-app-user', async () => {
+    currentAppUser = null;
+    return { success: true };
+  });
+
+  ipcMain.handle('get-current-app-user', async () => {
+    return currentAppUser;
+  });
+
+  ipcMain.handle('get-app-users-admin', async () => {
+    requireAdminAppUser();
+    const users = await getAppUserRows();
+    return users.map(publicAppUser);
+  });
+
+  ipcMain.handle('save-app-user-admin', async (_event, payload = {}) => {
+    requireAdminAppUser();
+
+    const mode = payload.mode === 'edit' ? 'edit' : 'create';
+    const originalUsername = normalizeAppUsername(payload.original_username);
+    const username = mode === 'edit' ? originalUsername : normalizeAppUsername(payload.username);
+    const displayName = normalizeAppUsername(payload.display_name) || username;
+    const role = normalizeAppRole(payload.role);
+    const avatarType = normalizeAvatarType(payload.avatar_type);
+    const avatarValue = normalizeAvatarValue(avatarType, payload.avatar_value);
+    const password = String(payload.password || '');
+    const removePassword = Boolean(payload.remove_password);
+
+    if (!username) {
+      throw new Error('يرجى إدخال اسم المستخدم');
+    }
+    if (!displayName) {
+      throw new Error('يرجى إدخال اسم العرض');
+    }
+
+    const existing = await getAppUserByUsername(username);
+    if (mode === 'create' && existing && existing.is_active !== 0) {
+      throw new Error('اسم المستخدم موجود بالفعل');
+    }
+    if (mode === 'edit' && !existing) {
+      throw new Error('المستخدم غير موجود');
+    }
+    if (mode === 'edit' && existing.role === APP_USER_ROLES.ADMIN && role !== APP_USER_ROLES.ADMIN) {
+      const remainingAdmins = await countActiveAdmins(username);
+      if (remainingAdmins < 1) {
+        throw new Error('لا يمكن إزالة آخر مدير');
+      }
+    }
+
+    let passwordFields = {
+      password_hash: existing?.password_hash || null,
+      password_salt: existing?.password_salt || null
+    };
+    if (removePassword) {
+      passwordFields = { password_hash: null, password_salt: null };
+    } else if (password) {
+      passwordFields = hashAppUserPassword(password);
+    }
+
+    await upsertAppUserRecord({
+      username,
+      display_name: displayName,
+      role,
+      ...passwordFields,
+      avatar_type: avatarType,
+      avatar_value: avatarValue,
+      is_active: 1
+    });
+
+    if (currentAppUser?.username === username) {
+      const updated = await getAppUserByUsername(username);
+      currentAppUser = publicAppUser(updated);
+    }
+
+    return { success: true };
+  });
+
+  ipcMain.handle('delete-app-user-admin', async (_event, payload = {}) => {
+    requireAdminAppUser();
+    const username = normalizeAppUsername(payload.username);
+
+    if (!username) {
+      throw new Error('مستخدم غير صالح');
+    }
+    if (currentAppUser?.username === username) {
+      throw new Error('لا يمكن حذف المستخدم الحالي');
+    }
+
+    const user = await getAppUserByUsername(username);
+    if (!user || user.is_active === 0) {
+      return { success: true };
+    }
+    if (user.role === APP_USER_ROLES.ADMIN) {
+      const remainingAdmins = await countActiveAdmins(username);
+      if (remainingAdmins < 1) {
+        throw new Error('لا يمكن حذف آخر مدير');
+      }
+    }
+
+    await softDeleteAppUser(username);
+    return { success: true };
   });
 
   ipcMain.handle('get-app-devices', async () => {
@@ -5954,6 +6418,7 @@ app.whenReady().then(async () => {
     // Initialize database (with 5 second timeout)
     dbResult = await initializeDatabase();
     emitStartupStatus('Database pronto', 60, 'info');
+    await seedDefaultAppUsers();
     await migrateShiftProductDataKeys();
     await migrateStableCustomerIds();
     await upsertCurrentAppDevice(true);

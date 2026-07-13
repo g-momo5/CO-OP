@@ -16,9 +16,21 @@
   <script src="rtl-config.js"></script>
 </head>
 
-<body>
+<body class="auth-locked">
   <!-- Toast Notifications Container -->
   <div id="toast-container" class="toast-container"></div>
+
+  <section id="login-screen" class="login-screen">
+    <div class="login-panel">
+      <div class="login-brand">
+        <img src="assets/logo_cpc.png" alt="CO-OP" class="login-brand-logo">
+        <h1>محطة بنزين سمنود</h1>
+        <p class="login-instructions">اختر الحساب للمتابعة. الحسابات المحمية تطلب كلمة المرور.</p>
+      </div>
+      <div id="login-users" class="login-users"></div>
+      <div id="login-message" class="login-message"></div>
+    </div>
+  </section>
 
   <div class="app-container">
     <!-- Header with Breadcrumb -->
@@ -279,9 +291,14 @@
               <p class="summary-subtitle">فواتير أسبوعية حسب بيانات عملاء الورديات المحفوظة</p>
             </div>
             <div class="customer-invoices-toolbar">
-              <button type="button" class="btn btn-secondary btn-compact" onclick="changeCustomerInvoiceWeek(-1)">الأسبوع السابق</button>
+              <button type="button" class="customer-week-nav-btn" id="customer-invoices-prev-week-btn" title="الأسبوع السابق" aria-label="الأسبوع السابق" onclick="changeCustomerInvoiceWeek(-1)">
+                ‹
+              </button>
               <div class="customer-invoices-week" id="customer-invoices-week-label">-</div>
-              <button type="button" class="btn btn-secondary btn-compact" onclick="changeCustomerInvoiceWeek(1)">الأسبوع التالي</button>
+              <button type="button" class="customer-invoices-current-week-btn" id="customer-invoices-current-week-btn" onclick="goToCurrentCustomerInvoiceWeek()">الأسبوع الحالي</button>
+              <button type="button" class="customer-week-nav-btn" id="customer-invoices-next-week-btn" title="الأسبوع التالي" aria-label="الأسبوع التالي" onclick="changeCustomerInvoiceWeek(1)">
+                ›
+              </button>
             </div>
           </div>
 
@@ -1130,6 +1147,7 @@
             <ul class="settings-menu">
               <li class="settings-menu-item active" data-settings-section="manage-products">إدارة المنتجات</li>
               <li class="settings-menu-item" data-settings-section="manage-customers">إدارة العملاء</li>
+              <li class="settings-menu-item admin-only" data-settings-section="app-users">إدارة المستخدمين</li>
               <li class="settings-menu-item" data-settings-section="excel-sales-import">استيراد مبيعات Excel</li>
               <li class="settings-menu-item" data-settings-section="excel-expenses-import">استيراد مصاريف Excel</li>
               <li class="settings-menu-item" data-settings-section="balance-history">سجل الأرصدة والعدادات</li>
@@ -1239,6 +1257,30 @@
                   <tbody id="manage-customers-table-body">
                     <!-- Customers will be added here dynamically -->
                   </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- Manage Users Section -->
+            <section id="settings-section-app-users" class="settings-section admin-only">
+              <div class="settings-section-header">
+                <h3>إدارة المستخدمين</h3>
+                <button class="btn btn-primary" type="button" onclick="openAppUserModal()">إضافة مستخدم</button>
+              </div>
+              <div class="prices-table-wrapper">
+                <table class="base-table prices-table-full app-users-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 70px;">الصورة</th>
+                      <th>اسم المستخدم</th>
+                      <th>اسم العرض</th>
+                      <th>الصلاحية</th>
+                      <th>كلمة مرور</th>
+                      <th>الحالة</th>
+                      <th>الإجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody id="app-users-table-body"></tbody>
                 </table>
               </div>
             </section>
@@ -2145,7 +2187,7 @@
     <div id="add-customer-modal" class="modal">
       <div class="modal-content" style="max-width: 400px;">
         <div class="modal-header">
-          <h3>إضافة عميل جديد</h3>
+          <h3 id="customer-modal-title">إضافة عميل جديد</h3>
           <button class="close-modal" onclick="closeAddCustomerModal()">&times;</button>
         </div>
         <div class="modal-body">
@@ -2155,8 +2197,57 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-primary" onclick="saveNewCustomer()">حفظ</button>
+          <button class="btn btn-primary" id="customer-modal-save-btn" onclick="saveNewCustomer()">حفظ</button>
           <button class="btn btn-secondary" onclick="closeAddCustomerModal()">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- App User Modal -->
+    <div id="app-user-modal" class="modal">
+      <div class="modal-content" style="max-width: 560px;">
+        <div class="modal-header">
+          <h3 id="app-user-modal-title">إضافة مستخدم</h3>
+          <button class="close-modal" onclick="closeAppUserModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="app-user-form-grid">
+            <div class="app-user-avatar-editor">
+              <div id="app-user-avatar-preview" class="app-user-avatar-preview">?</div>
+              <input type="file" id="app-user-avatar-file" accept="image/*" style="display:none;" onchange="handleAppUserAvatarFile(event)">
+              <button type="button" class="btn btn-secondary btn-compact" onclick="openAppUserAvatarPicker()">تغيير الصورة</button>
+              <button type="button" class="btn btn-secondary btn-compact" onclick="clearAppUserAvatar()">استخدام الحرف</button>
+            </div>
+            <div class="app-user-fields">
+              <div class="form-group">
+                <label for="app-user-username">اسم المستخدم:</label>
+                <input type="text" id="app-user-username" class="form-input" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="app-user-display-name">اسم العرض:</label>
+                <input type="text" id="app-user-display-name" class="form-input" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="app-user-role">الصلاحية:</label>
+                <select id="app-user-role" class="form-input">
+                  <option value="operator">CO-OP</option>
+                  <option value="admin">مدير</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="app-user-password">كلمة المرور الجديدة:</label>
+                <input type="password" id="app-user-password" class="form-input" autocomplete="new-password" placeholder="اتركها فارغة بدون تغيير">
+              </div>
+              <label class="app-user-checkbox">
+                <input type="checkbox" id="app-user-remove-password">
+                إزالة كلمة المرور
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onclick="saveAppUserFromModal()">حفظ</button>
+          <button class="btn btn-secondary" onclick="closeAppUserModal()">إلغاء</button>
         </div>
       </div>
     </div>
@@ -2201,6 +2292,16 @@
       <button class="nav-btn" data-screen="charts">الرسوم البيانية</button>
       <button class="nav-btn" data-screen="report">التقارير</button>
       <button class="nav-btn" data-screen="settings">الإعدادات</button>
+      <div class="nav-user-status" id="nav-user-status" style="display: none;">
+        <div class="nav-user-avatar" id="nav-user-avatar"></div>
+        <span class="nav-user-name" id="nav-user-name"></span>
+        <button type="button" class="nav-user-logout-btn" onclick="logoutAppUser()" title="تسجيل الخروج" aria-label="تسجيل الخروج">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M6 2.5A1.5 1.5 0 0 1 7.5 1h4A1.5 1.5 0 0 1 13 2.5v11A1.5 1.5 0 0 1 11.5 15h-4A1.5 1.5 0 0 1 6 13.5v-2a.5.5 0 0 1 1 0v2a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5v2a.5.5 0 0 1-1 0v-2z"/>
+            <path fill-rule="evenodd" d="M.146 8.354a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L1.707 7.5H9.5a.5.5 0 0 1 0 1H1.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3z"/>
+          </svg>
+        </button>
+      </div>
     </nav>
   </div>
 

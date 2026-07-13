@@ -317,6 +317,36 @@ class DatabaseManager {
       console.log('App devices index creation:', err.message);
     }
 
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS app_users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'operator',
+      password_hash TEXT,
+      password_salt TEXT,
+      avatar_type TEXT NOT NULL DEFAULT 'initial',
+      avatar_value TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text)
+    )`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS username TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS display_name TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operator'`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_salt TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_type TEXT DEFAULT 'initial'`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_value TEXT`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text)`);
+    await this.pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text)`);
+    try {
+      await this.pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active)`);
+    } catch (err) {
+      console.log('App users index creation:', err.message);
+    }
+
     const seedPurchasePriceRows = await this.pgPool.query(
       `SELECT key FROM app_migrations WHERE key = $1 LIMIT 1`,
       ['seed_manual_fuel_purchase_prices_20260101']
@@ -914,7 +944,7 @@ class DatabaseManager {
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
-      'app_devices'
+      'app_devices', 'app_users'
     ];
 
     for (const table of tables) {

@@ -14,6 +14,206 @@ body {
   unicode-bidi: bidi-override;
 }
 
+body.auth-locked {
+  overflow: hidden;
+}
+
+body.auth-locked .app-container {
+  display: none;
+}
+
+body.auth-ready .login-screen {
+  display: none;
+}
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 16%, rgba(196, 41, 29, 0.08), transparent 34%),
+    #f5f6f7;
+  padding: 2rem 2rem 3rem;
+}
+
+.login-panel {
+  width: min(920px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.65rem;
+}
+
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  color: #1f2933;
+}
+
+.login-brand-logo {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 700;
+}
+
+.login-instructions {
+  max-width: 520px;
+  margin: 0.15rem 0 0;
+  color: #66717d;
+  font-size: 0.98rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.login-users {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 2.1rem;
+  width: 100%;
+}
+
+.login-user-card {
+  width: 180px;
+  min-height: 198px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.25rem 0.6rem;
+}
+
+.login-avatar-button {
+  width: 132px;
+  height: 132px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.login-avatar-button:hover,
+.login-user-card.selected .login-avatar-button {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.16);
+}
+
+.login-user-avatar,
+.login-user-avatar.avatar-initial {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  object-fit: cover;
+  background: #c4291d;
+  color: white;
+  font-family: Arial, sans-serif;
+  font-size: 2.75rem;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  padding-top: 42px;
+  border: 4px solid white;
+}
+
+.login-user-avatar.avatar-asset {
+  object-fit: contain;
+  background: white;
+  padding: 12px;
+  align-items: center;
+}
+
+.avatar-initial {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.login-user-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #263238;
+  text-align: center;
+  margin-top: 0.35rem;
+  line-height: 1.2;
+}
+
+.login-password-row {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 0.36rem;
+  direction: ltr;
+  margin-top: 0.1rem;
+}
+
+.login-password-input {
+  width: 132px;
+  height: 32px;
+  border: 1px solid #d8dde3;
+  border-radius: 999px;
+  padding: 0 0.9rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.07);
+  outline: none;
+  text-align: center;
+}
+
+.login-password-input:focus {
+  border-color: #c4291d;
+  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.12);
+}
+
+.login-submit-btn {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: #c4291d;
+  color: white;
+  font-size: 1.35rem;
+  line-height: 32px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 6px 14px rgba(196, 41, 29, 0.24);
+}
+
+.login-submit-btn:hover {
+  background: #a8241a;
+}
+
+.login-message {
+  min-height: 1.5rem;
+  color: #5c6773;
+  font-weight: 600;
+}
+
+.login-message.error,
+.login-loading.error {
+  color: #c4291d;
+}
+
+.login-loading {
+  color: #5c6773;
+  font-weight: 700;
+}
+
 body.safe-book-scroll-lock,
 body.modal-scroll-lock {
   overflow: hidden;
@@ -60,12 +260,15 @@ body.modal-scroll-lock {
 
 /* Connection Status in Navigation Bar */
 .nav-connection-status {
-  position: relative;
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  margin-left: auto;
-  padding: 0 1rem;
-  order: -1;
+  margin: 0;
+  padding: 0;
+  order: 0;
 }
 
 .connection-tooltip {
@@ -112,6 +315,77 @@ body.modal-scroll-lock {
 
 .connection-indicator .status-icon {
   flex-shrink: 0;
+}
+
+.nav-user-status {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  color: #263238;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.nav-user-avatar,
+.nav-user-avatar-img,
+.nav-user-avatar-img.avatar-initial {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  object-fit: cover;
+  background: #c4291d;
+  color: white;
+  font-family: Arial, sans-serif !important;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1;
+  padding-top: 7px;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.nav-user-avatar-img.avatar-asset {
+  object-fit: contain;
+  background: white;
+  padding: 3px;
+  align-items: center;
+}
+
+.nav-user-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  color: #263238;
+}
+
+.nav-user-logout-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #c4291d;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.nav-user-logout-btn:hover {
+  background: rgba(196, 41, 29, 0.1);
+  transform: translateY(-1px);
 }
 
 .connection-online {
@@ -738,6 +1012,63 @@ body.modal-scroll-lock {
   align-items: center;
   gap: 0.65rem;
   flex-wrap: wrap;
+}
+
+.customer-week-nav-btn {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #d7dde4;
+  border-radius: 50%;
+  background: #fff;
+  color: #2c3e50;
+  cursor: pointer;
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1;
+  font-family: Arial, sans-serif;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.customer-week-nav-btn:hover:not(:disabled) {
+  background: #fff5f4;
+  border-color: #c4291d;
+  color: #c4291d;
+  transform: translateY(-1px);
+}
+
+.customer-week-nav-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.customer-invoices-current-week-btn {
+  min-height: 38px;
+  padding: 0.42rem 0.8rem;
+  border: 1px solid #d7dde4;
+  border-radius: 6px;
+  background: #fff;
+  color: #2c3e50;
+  cursor: pointer;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-weight: 800;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.customer-invoices-current-week-btn:hover:not(:disabled) {
+  background: #fff5f4;
+  border-color: #c4291d;
+  color: #c4291d;
+}
+
+.customer-invoices-current-week-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .customer-invoices-week {
@@ -4302,6 +4633,19 @@ body.modal-scroll-lock {
   display: block;
 }
 
+.settings-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.settings-section-header h3 {
+  margin: 0;
+  color: #2c3e50;
+}
+
 .settings-section .form-group {
   margin-bottom: 1rem;
 }
@@ -4349,6 +4693,98 @@ body.modal-scroll-lock {
   color: #666;
   line-height: 1.6;
   margin-bottom: 1rem;
+}
+
+.app-users-table td {
+  vertical-align: middle;
+}
+
+.app-user-table-avatar,
+.app-user-table-avatar.avatar-initial {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: #c4291d;
+  color: white;
+  font-family: Arial, sans-serif;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  padding-top: 12px;
+}
+
+.muted-row {
+  opacity: 0.55;
+}
+
+.app-user-form-grid {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.app-user-avatar-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-user-avatar-preview,
+.app-user-avatar-preview-img,
+.app-user-avatar-preview-img.avatar-initial {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: #c4291d;
+  color: white;
+  font-size: 2.15rem;
+  font-family: Arial, sans-serif;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  padding-top: 37px;
+  border: 4px solid #fff;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.app-user-table-avatar.avatar-asset,
+.app-user-avatar-preview-img.avatar-asset {
+  object-fit: contain;
+  background: white;
+  padding: 6px;
+  align-items: center;
+}
+
+.app-user-fields {
+  min-width: 0;
+}
+
+.app-user-fields .form-input,
+.app-user-fields select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 1rem;
+}
+
+.app-user-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #333;
 }
 
 .app-devices-header {
@@ -4922,7 +5358,8 @@ body.modal-scroll-lock {
 
 #manage-fuel-section .btn-icon,
 #manage-oil-section .btn-icon,
-#settings-section-manage-customers .btn-icon {
+#settings-section-manage-customers .btn-icon,
+#settings-section-app-users .btn-icon {
   width: auto;
   height: auto;
   padding: 0.25rem;
@@ -4934,10 +5371,18 @@ body.modal-scroll-lock {
 
 #manage-fuel-section .btn-icon:hover,
 #manage-oil-section .btn-icon:hover,
-#settings-section-manage-customers .btn-icon:hover {
+#settings-section-manage-customers .btn-icon:hover,
+#settings-section-app-users .btn-icon:hover {
   background: transparent;
   box-shadow: none;
   transform: none;
+}
+
+.app-user-action-buttons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 /* Checkbox styling for oil products table */
@@ -5570,6 +6015,15 @@ canvas,
 /* Ensure all text elements use Arabic font */
 h1, h2, h3, h4, h5, h6, p, span, div, label, button, input, select, textarea {
   font-family: 'Noto Naskh Arabic', Arial, sans-serif !important;
+}
+
+.login-user-avatar.avatar-initial,
+.app-user-table-avatar.avatar-initial,
+.app-user-avatar-preview-img.avatar-initial {
+  font-family: Arial, sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+  font-variant-numeric: normal;
 }
 
 /* RTL-specific spacing adjustments */

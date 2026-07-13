@@ -34,6 +34,7 @@ class DatabaseSchema {
     this.createMonthlyProfitInputsTable(db);
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
+    this.createAppUsersTable(db);
     this.createAppDevicesTable(db);
     this.createSyncQueueTable(db);
 
@@ -90,6 +91,42 @@ class DatabaseSchema {
         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
+  }
+
+  static createAppUsersTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS app_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'operator',
+        password_hash TEXT,
+        password_salt TEXT,
+        avatar_type TEXT NOT NULL DEFAULT 'initial',
+        avatar_value TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const tableInfo = db.prepare("PRAGMA table_info(app_users)").all();
+    const ensureColumn = (columnName, definition) => {
+      if (!tableInfo.some(col => col.name === columnName)) {
+        db.exec(`ALTER TABLE app_users ADD COLUMN ${columnName} ${definition}`);
+      }
+    };
+
+    ensureColumn('username', 'TEXT');
+    ensureColumn('display_name', 'TEXT');
+    ensureColumn('role', "TEXT NOT NULL DEFAULT 'operator'");
+    ensureColumn('password_hash', 'TEXT');
+    ensureColumn('password_salt', 'TEXT');
+    ensureColumn('avatar_type', "TEXT NOT NULL DEFAULT 'initial'");
+    ensureColumn('avatar_value', 'TEXT');
+    ensureColumn('is_active', 'INTEGER DEFAULT 1');
+    ensureColumn('created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
+    ensureColumn('updated_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
   }
 
   static createPurchasePriceHistoryTable(db) {
@@ -440,6 +477,8 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)');
@@ -771,6 +810,25 @@ class DatabaseSchema {
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
+
+      const appUsersInfo = db.prepare("PRAGMA table_info(app_users)").all();
+      if (appUsersInfo.length === 0) {
+        console.log('Creating app_users table...');
+        this.createAppUsersTable(db);
+      } else {
+        ensureColumn('app_users', appUsersInfo, 'username', 'TEXT');
+        ensureColumn('app_users', appUsersInfo, 'display_name', 'TEXT');
+        ensureColumn('app_users', appUsersInfo, 'role', "TEXT NOT NULL DEFAULT 'operator'");
+        ensureColumn('app_users', appUsersInfo, 'password_hash', 'TEXT');
+        ensureColumn('app_users', appUsersInfo, 'password_salt', 'TEXT');
+        ensureColumn('app_users', appUsersInfo, 'avatar_type', "TEXT NOT NULL DEFAULT 'initial'");
+        ensureColumn('app_users', appUsersInfo, 'avatar_value', 'TEXT');
+        ensureColumn('app_users', appUsersInfo, 'is_active', 'INTEGER DEFAULT 1');
+        ensureColumn('app_users', appUsersInfo, 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
+        ensureColumn('app_users', appUsersInfo, 'updated_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active)');
 
       const annualInventoriesTableInfo = db.prepare("PRAGMA table_info(annual_inventories)").all();
       const hasExpectedItems = annualInventoriesTableInfo.some(col => col.name === 'expected_items');

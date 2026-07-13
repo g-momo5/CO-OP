@@ -12,6 +12,17 @@ let charts = {};
 let currentScreen = 'home';
 window.__currentScreen = currentScreen;
 let currentParentScreen = null;
+let currentAppUser = null;
+let appBootstrapped = false;
+let rendererBootstrapNotified = false;
+let loginUsersCache = [];
+let selectedLoginUsername = '';
+let appUserModalState = {
+  mode: 'create',
+  originalUsername: '',
+  avatarType: 'initial',
+  avatarValue: ''
+};
 let oilItemCounter = 0;
 let navigationHistory = [];
 let isOnline = navigator.onLine !== false;
@@ -80,6 +91,7 @@ const screenTitles = {
 const settingsSectionTitles = {
   'manage-products': 'إدارة المنتجات',
   'manage-customers': 'إدارة العملاء',
+  'app-users': 'إدارة المستخدمين',
   'excel-sales-import': 'استيراد مبيعات Excel',
   'excel-expenses-import': 'استيراد مصاريف Excel',
   'balance-history': 'سجل الأرصدة والعدادات',
@@ -219,7 +231,446 @@ function showToast(message, type = 'info', duration = 3000) {
   }, duration);
 }
 
+function isCurrentUserAdmin() {
+  return currentAppUser?.role === 'admin';
+}
+
+function getUserInitial(user = {}) {
+  const name = String(user.display_name || user.username || '?').trim();
+  return name ? name.slice(0, 2).toUpperCase() : '?';
+}
+
+function getUserAvatarHtml(user = {}, className = 'user-avatar') {
+  const avatarType = user.avatar_type || 'initial';
+  let avatarValue = String(user.avatar_value || '').trim();
+  if (user.username === 'CO-OP' && avatarType === 'asset' && (!avatarValue || avatarValue === 'assets/logo_cpc.png')) {
+    avatarValue = 'assets/logo_cpc.ico';
+  }
+  const initial = escapeHtml(getUserInitial(user));
+
+  if ((avatarType === 'asset' || avatarType === 'data_url') && avatarValue) {
+    return `<img class="${className} avatar-${avatarType}" src="${escapeHtml(avatarValue)}" alt="${escapeHtml(user.display_name || user.username || '')}">`;
+  }
+
+  return `<div class="${className} avatar-initial">${initial}</div>`;
+}
+
+function setLoginMessage(message = '', type = '') {
+  const element = document.getElementById('login-message');
+  if (!element) return;
+  element.textContent = message;
+  element.className = `login-message${type ? ` ${type}` : ''}`;
+}
+
+async function initializeLoginScreen() {
+  document.body.classList.add('auth-locked');
+  document.body.classList.remove('auth-ready');
+  await loadLoginUsers();
+  notifyRendererBootstrapComplete();
+}
+
+async function loadLoginUsers() {
+  const container = document.getElementById('login-users');
+  if (container) {
+    container.innerHTML = '<div class="login-loading">جار تحميل المستخدمين...</div>';
+  }
+
+  try {
+    loginUsersCache = await ipcRenderer.invoke('get-login-users');
+    renderLoginUsers();
+    setLoginMessage('');
+  } catch (error) {
+    console.error('Unable to load login users:', error);
+    if (container) {
+      container.innerHTML = '<div class="login-loading error">تعذر تحميل المستخدمين</div>';
+    }
+    setLoginMessage(error.message || 'تعذر تحميل المستخدمين', 'error');
+  }
+}
+
+function renderLoginUsers() {
+  const container = document.getElementById('login-users');
+  if (!container) return;
+
+  if (!Array.isArray(loginUsersCache) || loginUsersCache.length === 0) {
+    container.innerHTML = '<div class="login-loading error">لا توجد حسابات مستخدمين</div>';
+    return;
+  }
+
+  container.innerHTML = loginUsersCache.map((user) => {
+    const isSelected = selectedLoginUsername === user.username;
+    const passwordBox = user.has_password && isSelected ? `
+      <div class="login-password-row">
+        <input
+          type="password"
+          class="login-password-input"
+          id="login-password-input"
+          placeholder="كلمة المرور"
+          autocomplete="current-password"
+        >
+        <button type="button" class="login-submit-btn" data-login-submit="${escapeHtml(user.username)}" aria-label="دخول">←</button>
+      </div>
+    ` : '';
+
+    return `
+      <div class="login-user-card${isSelected ? ' selected' : ''}" data-login-username="${escapeHtml(user.username)}">
+        <button type="button" class="login-avatar-button" aria-label="${escapeHtml(user.display_name)}">
+          ${getUserAvatarHtml(user, 'login-user-avatar')}
+        </button>
+        <div class="login-user-name">${escapeHtml(user.display_name || user.username)}</div>
+        ${passwordBox}
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-login-username]').forEach((card) => {
+    card.addEventListener('click', () => selectLoginUser(card.dataset.loginUsername || ''));
+  });
+
+  container.querySelectorAll('[data-login-submit]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      submitLoginPassword(button.dataset.loginSubmit || '');
+    });
+  });
+
+  if (selectedLoginUsername) {
+    setTimeout(() => {
+      const input = document.getElementById('login-password-input');
+      if (input) {
+        input.addEventListener('click', (event) => event.stopPropagation());
+        input.addEventListener('keydown', (event) => handleLoginPasswordKeydown(event, selectedLoginUsername));
+        input.focus();
+      }
+    }, 0);
+  }
+}
+
+function selectLoginUser(username) {
+  const user = loginUsersCache.find((item) => item.username === username);
+  if (!user) return;
+
+  setLoginMessage('');
+  if (!user.has_password) {
+    attemptAppLogin(username, '');
+    return;
+  }
+
+  selectedLoginUsername = username;
+  renderLoginUsers();
+}
+
+function handleLoginPasswordKeydown(event, username) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    submitLoginPassword(username);
+  }
+}
+
+function submitLoginPassword(username) {
+  const input = document.getElementById('login-password-input');
+  attemptAppLogin(username, input ? input.value : '');
+}
+
+async function attemptAppLogin(username, password) {
+  try {
+    setLoginMessage('');
+    const result = await ipcRenderer.invoke('login-app-user', { username, password });
+    currentAppUser = result.user;
+    selectedLoginUsername = '';
+    applyCurrentUserSession();
+    await bootstrapApp();
+  } catch (error) {
+    console.error('Login failed:', error);
+    setLoginMessage(error.message || 'فشل تسجيل الدخول', 'error');
+  }
+}
+
+function applyCurrentUserSession() {
+  document.body.classList.remove('auth-locked');
+  document.body.classList.add('auth-ready');
+  renderNavCurrentUser();
+  applyPermissionLocks();
+}
+
+function renderNavCurrentUser() {
+  const container = document.getElementById('nav-user-status');
+  const avatar = document.getElementById('nav-user-avatar');
+  const name = document.getElementById('nav-user-name');
+  if (!container || !avatar || !name) return;
+
+  if (!currentAppUser) {
+    container.style.display = 'none';
+    avatar.innerHTML = '';
+    name.textContent = '';
+    return;
+  }
+
+  avatar.innerHTML = getUserAvatarHtml(currentAppUser, 'nav-user-avatar-img');
+  name.textContent = currentAppUser.display_name || currentAppUser.username || '';
+  container.style.display = 'inline-flex';
+}
+
+async function logoutAppUser() {
+  try {
+    await ipcRenderer.invoke('logout-app-user');
+  } catch (error) {
+    console.warn('Logout failed:', error.message);
+  }
+
+  currentAppUser = null;
+  selectedLoginUsername = '';
+  renderNavCurrentUser();
+  document.body.classList.add('auth-locked');
+  document.body.classList.remove('auth-ready');
+  showScreenWithoutHistory('home');
+  updateBreadcrumb('home');
+  await loadLoginUsers();
+}
+
+function settingsSectionRequiresPermission(sectionName) {
+  return sectionName === 'app-users' && !isCurrentUserAdmin();
+}
+
+function applyPermissionLocks() {
+  document.querySelectorAll('.admin-only').forEach((element) => {
+    element.style.display = isCurrentUserAdmin() ? '' : 'none';
+  });
+
+  const activeSection = document.querySelector('.settings-section.active');
+  if (activeSection?.id === 'settings-section-app-users' && !isCurrentUserAdmin()) {
+    showSettingsSectionWithoutHistory('manage-products');
+  }
+}
+
+function setAppUsersStatus(message, type = '') {
+  const status = document.getElementById('app-users-status');
+  if (!status) return;
+  status.textContent = message;
+  status.className = `excel-import-status${type ? ` ${type}` : ''}`;
+}
+
+async function loadAppUsersSettings() {
+  const tbody = document.getElementById('app-users-table-body');
+  if (!tbody) return;
+
+  if (!isCurrentUserAdmin()) {
+    tbody.innerHTML = '';
+    setAppUsersStatus('هذه الصفحة متاحة للمدير فقط', 'error');
+    return;
+  }
+
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جار التحميل...</td></tr>';
+  setAppUsersStatus('جار تحميل المستخدمين...');
+
+  try {
+    const users = await ipcRenderer.invoke('get-app-users-admin');
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">لا توجد حسابات</td></tr>';
+      setAppUsersStatus('لا توجد حسابات مستخدمين', 'warning');
+      return;
+    }
+
+    tbody.innerHTML = '';
+    users.forEach((user) => {
+      const row = document.createElement('tr');
+      if (!user.is_active) row.classList.add('muted-row');
+
+      row.innerHTML = `
+        <td>${getUserAvatarHtml(user, 'app-user-table-avatar')}</td>
+        <td>${escapeHtml(user.username)}</td>
+        <td>${escapeHtml(user.display_name)}</td>
+        <td>${user.role === 'admin' ? 'مدير' : 'CO-OP'}</td>
+        <td>${user.has_password ? 'نعم' : 'لا'}</td>
+        <td>${user.is_active ? 'نشط' : 'محذوف'}</td>
+        <td style="text-align: center;">
+          <div class="app-user-action-buttons">
+            <button type="button" class="btn-icon" title="تعديل">${getActionEditIconSvg()}</button>
+            <button type="button" class="btn-icon btn-icon-danger" title="حذف"${user.is_active ? '' : ' disabled'}>${getActionDeleteIconSvg()}</button>
+          </div>
+        </td>
+      `;
+
+      const buttons = row.querySelectorAll('button');
+      buttons[0]?.addEventListener('click', () => openAppUserModal(user));
+      buttons[1]?.addEventListener('click', () => deleteAppUser(user));
+      tbody.appendChild(row);
+    });
+
+    setAppUsersStatus('');
+  } catch (error) {
+    console.error('Error loading app users:', error);
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#c4291d;">حدث خطأ أثناء تحميل المستخدمين</td></tr>';
+    setAppUsersStatus(error.message || 'حدث خطأ أثناء تحميل المستخدمين', 'error');
+  }
+}
+
+function openAppUserModal(user = null) {
+  if (!isCurrentUserAdmin()) {
+    showMessage('هذه الصفحة متاحة للمدير فقط', 'error');
+    return;
+  }
+
+  const modal = document.getElementById('app-user-modal');
+  if (!modal) return;
+
+  appUserModalState = {
+    mode: user ? 'edit' : 'create',
+    originalUsername: user?.username || '',
+    avatarType: user?.avatar_type || 'initial',
+    avatarValue: user?.avatar_value || ''
+  };
+
+  const title = document.getElementById('app-user-modal-title');
+  const usernameInput = document.getElementById('app-user-username');
+  const displayNameInput = document.getElementById('app-user-display-name');
+  const roleInput = document.getElementById('app-user-role');
+  const passwordInput = document.getElementById('app-user-password');
+  const removePasswordInput = document.getElementById('app-user-remove-password');
+  const fileInput = document.getElementById('app-user-avatar-file');
+
+  if (title) title.textContent = user ? 'تعديل مستخدم' : 'إضافة مستخدم';
+  if (usernameInput) {
+    usernameInput.value = user?.username || '';
+    usernameInput.disabled = Boolean(user);
+  }
+  if (displayNameInput) displayNameInput.value = user?.display_name || '';
+  if (roleInput) roleInput.value = user?.role || 'operator';
+  if (passwordInput) passwordInput.value = '';
+  if (removePasswordInput) removePasswordInput.checked = false;
+  if (fileInput) fileInput.value = '';
+
+  updateAppUserAvatarPreview();
+  modal.classList.add('show');
+  setTimeout(() => (user ? displayNameInput : usernameInput)?.focus(), 0);
+}
+
+function closeAppUserModal() {
+  const modal = document.getElementById('app-user-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+function updateAppUserAvatarPreview() {
+  const preview = document.getElementById('app-user-avatar-preview');
+  const displayNameInput = document.getElementById('app-user-display-name');
+  const usernameInput = document.getElementById('app-user-username');
+  if (!preview) return;
+
+  const user = {
+    username: usernameInput?.value || '',
+    display_name: displayNameInput?.value || usernameInput?.value || '',
+    avatar_type: appUserModalState.avatarType,
+    avatar_value: appUserModalState.avatarValue
+  };
+  preview.innerHTML = getUserAvatarHtml(user, 'app-user-avatar-preview-img');
+}
+
+function openAppUserAvatarPicker() {
+  document.getElementById('app-user-avatar-file')?.click();
+}
+
+function handleAppUserAvatarFile(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    showMessage('يرجى اختيار صورة', 'error');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    appUserModalState.avatarType = 'data_url';
+    appUserModalState.avatarValue = String(reader.result || '');
+    updateAppUserAvatarPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearAppUserAvatar() {
+  appUserModalState.avatarType = 'initial';
+  appUserModalState.avatarValue = '';
+  const fileInput = document.getElementById('app-user-avatar-file');
+  if (fileInput) fileInput.value = '';
+  updateAppUserAvatarPreview();
+}
+
+function setupAppUserModalLivePreview() {
+  const usernameInput = document.getElementById('app-user-username');
+  const displayNameInput = document.getElementById('app-user-display-name');
+  if (usernameInput) usernameInput.addEventListener('input', updateAppUserAvatarPreview);
+  if (displayNameInput) displayNameInput.addEventListener('input', updateAppUserAvatarPreview);
+}
+
+async function saveAppUserFromModal() {
+  const username = document.getElementById('app-user-username')?.value.trim() || '';
+  const displayName = document.getElementById('app-user-display-name')?.value.trim() || '';
+  const role = document.getElementById('app-user-role')?.value || 'operator';
+  const password = document.getElementById('app-user-password')?.value || '';
+  const removePassword = document.getElementById('app-user-remove-password')?.checked || false;
+
+  if (!username) {
+    showMessage('يرجى إدخال اسم المستخدم', 'error');
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('save-app-user-admin', {
+      mode: appUserModalState.mode,
+      original_username: appUserModalState.originalUsername,
+      username,
+      display_name: displayName || username,
+      role,
+      password,
+      remove_password: removePassword,
+      avatar_type: appUserModalState.avatarType,
+      avatar_value: appUserModalState.avatarValue
+    });
+    closeAppUserModal();
+    showMessage('تم حفظ المستخدم', 'success');
+    await loadAppUsersSettings();
+    await loadLoginUsers();
+    const current = await ipcRenderer.invoke('get-current-app-user');
+    if (current) {
+      currentAppUser = current;
+      renderNavCurrentUser();
+      applyPermissionLocks();
+    }
+  } catch (error) {
+    console.error('Error saving app user:', error);
+    showMessage(error.message || 'حدث خطأ أثناء حفظ المستخدم', 'error');
+  }
+}
+
+async function deleteAppUser(user) {
+  if (!user?.username) return;
+  const confirmed = confirm(`هل تريد حذف المستخدم "${user.display_name || user.username}"؟`);
+  if (!confirmed) return;
+
+  try {
+    await ipcRenderer.invoke('delete-app-user-admin', { username: user.username });
+    showMessage('تم حذف المستخدم', 'success');
+    await loadAppUsersSettings();
+    await loadLoginUsers();
+  } catch (error) {
+    console.error('Error deleting app user:', error);
+    showMessage(error.message || 'حدث خطأ أثناء حذف المستخدم', 'error');
+  }
+}
+
+function notifyRendererBootstrapComplete() {
+  if (rendererBootstrapNotified) {
+    return;
+  }
+  rendererBootstrapNotified = true;
+  ipcRenderer.send('renderer-bootstrap-complete');
+}
+
 async function bootstrapApp() {
+  if (appBootstrapped) {
+    return;
+  }
+  appBootstrapped = true;
+
   try {
     // RTL configuration is handled by rtl-config.js before bootstrap runs.
     initializeApp();
@@ -240,7 +691,7 @@ async function bootstrapApp() {
   } catch (error) {
     console.error('Renderer bootstrap failed:', error);
   } finally {
-    ipcRenderer.send('renderer-bootstrap-complete');
+    notifyRendererBootstrapComplete();
 
     // Check for updates on startup if enabled
     setTimeout(() => {
@@ -254,7 +705,7 @@ async function bootstrapApp() {
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
-  bootstrapApp();
+  initializeLoginScreen();
 });
 
 function updateModalScrollLock() {
@@ -377,6 +828,11 @@ function setupEventListeners() {
     item.addEventListener('click', () => {
       const section = item.dataset.settingsSection;
 
+      if (settingsSectionRequiresPermission(section)) {
+        showMessage('هذه الصفحة متاحة للمدير فقط', 'error');
+        return;
+      }
+
       if (settingsSectionRequiresOnline(section)) {
         showMessage('هذه الصفحة من الإعدادات تتطلب اتصالاً بالإنترنت', 'warning');
         return;
@@ -403,6 +859,7 @@ function setupEventListeners() {
   // Ensure header renders at full height on initial load
   handleHeaderScroll();
   initializeModalScrollLock();
+  setupAppUserModalLivePreview();
 
   // Modal click outside to close
   document.addEventListener('click', (e) => {
@@ -429,6 +886,11 @@ function setupEventListeners() {
     const addProductModal = document.getElementById('add-product-modal');
     if (e.target === addProductModal) {
       closeAddProductModal();
+    }
+
+    const appUserModal = document.getElementById('app-user-modal');
+    if (e.target === appUserModal) {
+      closeAppUserModal();
     }
   });
 
@@ -1633,17 +2095,73 @@ function setCustomerInvoiceWeekFromDate(date) {
   customerInvoicesState.weekEnd = range.weekEnd;
 }
 
+function getCurrentCustomerInvoiceWeekRange() {
+  return getSaturdayWeekRange(new Date());
+}
+
+function isCustomerInvoiceCurrentWeek() {
+  const currentRange = getCurrentCustomerInvoiceWeekRange();
+  return customerInvoicesState.weekStart === currentRange.weekStart;
+}
+
+function updateCustomerInvoiceWeekNavigationState() {
+  const nextButton = document.getElementById('customer-invoices-next-week-btn');
+  const currentWeekButton = document.getElementById('customer-invoices-current-week-btn');
+  const isCurrentWeek = isCustomerInvoiceCurrentWeek();
+
+  if (nextButton) {
+    nextButton.disabled = isCurrentWeek;
+    nextButton.setAttribute('aria-disabled', isCurrentWeek ? 'true' : 'false');
+  }
+
+  if (currentWeekButton) {
+    currentWeekButton.disabled = isCurrentWeek;
+    currentWeekButton.setAttribute('aria-disabled', isCurrentWeek ? 'true' : 'false');
+  }
+}
+
+function clampCustomerInvoiceWeekToPresent() {
+  const currentRange = getCurrentCustomerInvoiceWeekRange();
+  if (!customerInvoicesState.weekStart || customerInvoicesState.weekStart > currentRange.weekStart) {
+    customerInvoicesState.weekStart = currentRange.weekStart;
+    customerInvoicesState.weekEnd = currentRange.weekEnd;
+  }
+}
+
 async function initializeCustomerInvoicesPage() {
   if (!customerInvoicesState.weekStart || !customerInvoicesState.weekEnd) {
     setCustomerInvoiceWeekFromDate(new Date());
   }
+  clampCustomerInvoiceWeekToPresent();
+  updateCustomerInvoiceWeekNavigationState();
   await loadCustomerWeeklyInvoices();
 }
 
 async function changeCustomerInvoiceWeek(direction) {
   const currentStart = getLocalDateFromIso(customerInvoicesState.weekStart) || new Date();
   currentStart.setDate(currentStart.getDate() + (parseInt(direction, 10) || 0) * 7);
-  setCustomerInvoiceWeekFromDate(currentStart);
+  const targetRange = getSaturdayWeekRange(currentStart);
+  const currentRange = getCurrentCustomerInvoiceWeekRange();
+
+  if (targetRange.weekStart > currentRange.weekStart) {
+    setCustomerInvoiceWeekFromDate(new Date());
+  } else {
+    customerInvoicesState.weekStart = targetRange.weekStart;
+    customerInvoicesState.weekEnd = targetRange.weekEnd;
+  }
+
+  updateCustomerInvoiceWeekNavigationState();
+  await loadCustomerWeeklyInvoices();
+}
+
+async function goToCurrentCustomerInvoiceWeek() {
+  if (isCustomerInvoiceCurrentWeek()) {
+    updateCustomerInvoiceWeekNavigationState();
+    return;
+  }
+
+  setCustomerInvoiceWeekFromDate(new Date());
+  updateCustomerInvoiceWeekNavigationState();
   await loadCustomerWeeklyInvoices();
 }
 
@@ -1827,6 +2345,7 @@ function renderCustomerInvoices() {
   if (weekLabel) {
     weekLabel.textContent = `${formatDateOnlyDisplay(customerInvoicesState.weekStart)} - ${formatDateOnlyDisplay(customerInvoicesState.weekEnd)}`;
   }
+  updateCustomerInvoiceWeekNavigationState();
 
   if (select) {
     select.innerHTML = '';
@@ -5681,6 +6200,10 @@ function switchShiftTab(tab) {
 
 // Show settings section without adding to history
 function showSettingsSectionWithoutHistory(sectionName) {
+  if (settingsSectionRequiresPermission(sectionName)) {
+    showMessage('هذه الصفحة متاحة للمدير فقط', 'error');
+    sectionName = 'manage-products';
+  }
   if (settingsSectionRequiresOnline(sectionName)) {
     showMessage('هذه الصفحة من الإعدادات تتطلب اتصالاً بالإنترنت', 'warning');
     return;
@@ -5706,6 +6229,8 @@ function showSettingsSectionWithoutHistory(sectionName) {
       loadManageProducts();
     } else if (sectionName === 'manage-customers') {
       loadCustomersSettings();
+    } else if (sectionName === 'app-users') {
+      loadAppUsersSettings();
     } else if (sectionName === 'general') {
       loadGeneralSettings();
       loadUpdateSettings();
@@ -11679,9 +12204,11 @@ function renderSavedShiftOilRows(oilData = {}) {
       </td>
     `;
     tableBody.appendChild(row);
-    populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'), data.customer_id || data.customer_name || '', data.customer_name || '');
+    const isVoucherAssignment = isVoucherCustomerAssignment(data.customer_id, data.customer_name, data.voucher);
+    populateCustomerNameSelect(row.querySelector('select[data-field="customer_name"]'), isVoucherAssignment ? '' : (data.customer_id || data.customer_name || ''), isVoucherAssignment ? '' : (data.customer_name || ''));
     const voucherInput = row.querySelector('input[data-field="voucher"]');
-    if (voucherInput) voucherInput.checked = Boolean(data.voucher);
+    if (voucherInput) voucherInput.checked = isVoucherAssignment;
+    syncOilVoucherState(oilId, { clearCustomer: isVoucherAssignment });
   });
 }
 
@@ -12041,6 +12568,8 @@ async function calculateOilRow(oilId) {
 }
 
 function handleOilCustomerAssignmentInput(_oilId) {
+  const voucherInput = document.getElementById(`oil-${_oilId}-voucher`);
+  syncOilVoucherState(_oilId, { clearCustomer: Boolean(voucherInput?.checked) });
   markShiftDraftDirty();
 }
 
@@ -12171,6 +12700,43 @@ function calculateOilTotal() {
 
 // ============= CUSTOMERS TABLE FUNCTIONS =============
 
+const VOUCHER_CUSTOMER_NAME = 'بونات الشركة';
+
+function normalizeCustomerDisplayName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function toVoucherBoolean(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+  }
+  return false;
+}
+
+function isVoucherCustomerName(value) {
+  return normalizeCustomerDisplayName(value) === VOUCHER_CUSTOMER_NAME;
+}
+
+function getCustomerOptionNameById(value) {
+  return getCustomerOptionById(value)?.name || '';
+}
+
+function isVoucherCustomerAssignment(customerId, customerName, voucher = false) {
+  return toVoucherBoolean(voucher)
+    || isVoucherCustomerName(customerName)
+    || isVoucherCustomerName(getCustomerOptionNameById(customerId));
+}
+
+function isShiftAssignmentCustomerSelect(select) {
+  return Boolean(select?.classList?.contains('customer-name-select') || select?.classList?.contains('oil-customer-name-select'));
+}
+
+function shouldKeepShiftAssignmentReadOnly() {
+  return shiftViewMode === 'history';
+}
+
 // Load customer names for the dropdown used in the shift customers table
 async function loadCustomerNameOptions() {
   try {
@@ -12205,6 +12771,7 @@ function updateCustomerNameOptions(customers = []) {
   document.querySelectorAll('.customer-name-select, .oil-customer-name-select, .shift-customer-payment-name').forEach((select) => {
     populateCustomerNameSelect(select, select.value, select.selectedOptions?.[0]?.dataset?.customerName || '');
   });
+  syncShiftVoucherControls();
 }
 
 function getCustomerOptionById(value) {
@@ -12231,8 +12798,11 @@ function populateCustomerNameSelect(select, selectedValue = '', selectedName = '
   const rawValue = String(selectedValue || '').trim();
   const rawName = String(selectedName || '').trim();
   const selectedOption = getCustomerOptionById(rawValue) || getCustomerOptionByName(rawValue) || getCustomerOptionByName(rawName);
-  const currentValue = selectedOption?.id ? String(selectedOption.id) : rawValue;
-  const currentName = selectedOption?.name || rawName || rawValue;
+  const excludeVoucherCustomer = isShiftAssignmentCustomerSelect(select);
+  const selectedIsVoucherCustomer = excludeVoucherCustomer
+    && (isVoucherCustomerName(selectedOption?.name) || isVoucherCustomerName(rawName) || isVoucherCustomerName(rawValue));
+  const currentValue = selectedIsVoucherCustomer ? '' : (selectedOption?.id ? String(selectedOption.id) : rawValue);
+  const currentName = selectedIsVoucherCustomer ? '' : (selectedOption?.name || rawName || rawValue);
   select.innerHTML = '';
 
   const emptyOption = document.createElement('option');
@@ -12240,7 +12810,9 @@ function populateCustomerNameSelect(select, selectedValue = '', selectedName = '
   emptyOption.textContent = '';
   select.appendChild(emptyOption);
 
-  const options = [...customerNameOptionsCache];
+  const options = customerNameOptionsCache.filter((customer) => (
+    !excludeVoucherCustomer || !isVoucherCustomerName(customer.name)
+  ));
   if (currentValue && !getCustomerOptionById(currentValue)) {
     options.unshift({ id: currentValue, name: currentName });
   }
@@ -12254,6 +12826,47 @@ function populateCustomerNameSelect(select, selectedValue = '', selectedName = '
   });
 
   select.value = currentValue;
+}
+
+function syncCustomerVoucherState(row, { clearCustomer = false } = {}) {
+  if (!row) return;
+  const customerSelect = row.querySelector('select[data-field="name"]');
+  const voucherInput = row.querySelector('input[data-field="voucher"]');
+  if (!customerSelect || !voucherInput) return;
+
+  if (voucherInput.checked) {
+    if (clearCustomer || isVoucherCustomerAssignment(customerSelect.value, customerSelect.selectedOptions?.[0]?.dataset?.customerName || '')) {
+      customerSelect.value = '';
+    }
+    customerSelect.disabled = true;
+  } else {
+    customerSelect.disabled = shouldKeepShiftAssignmentReadOnly();
+  }
+}
+
+function syncOilVoucherState(oilId, { clearCustomer = false } = {}) {
+  if (!oilId) return;
+  const customerSelect = document.getElementById(`oil-${oilId}-customer-name`);
+  const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
+  if (!customerSelect || !voucherInput) return;
+
+  if (voucherInput.checked) {
+    if (clearCustomer || isVoucherCustomerAssignment(customerSelect.value, customerSelect.selectedOptions?.[0]?.dataset?.customerName || '')) {
+      customerSelect.value = '';
+    }
+    customerSelect.disabled = true;
+  } else {
+    customerSelect.disabled = shouldKeepShiftAssignmentReadOnly();
+  }
+}
+
+function syncShiftVoucherControls() {
+  document.querySelectorAll('#customers-table-body tr[data-customer-row]').forEach((row) => {
+    syncCustomerVoucherState(row);
+  });
+  document.querySelectorAll('#shift-oil-table-body tr[data-oil-id]').forEach((row) => {
+    syncOilVoucherState(row.getAttribute('data-oil-id'));
+  });
 }
 
 // Initialize customers table with 16 rows
@@ -12291,15 +12904,6 @@ function addCustomerRow(index) {
 }
 
 function normalizeCustomerRowsData(items) {
-  const toVoucherBoolean = (value) => {
-    if (value === true || value === 1) return true;
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-    }
-    return false;
-  };
-
   let normalizedItems = items;
   if (typeof normalizedItems === 'string') {
     try {
@@ -12320,7 +12924,7 @@ function normalizeCustomerRowsData(items) {
       const fuel95 = parseFloat(item['95']) || 0;
       const customerId = parseInt(item.customer_id, 10);
       const name = String(item.name || item.customer_name || '').trim();
-      const voucher = toVoucherBoolean(item.voucher);
+      const voucher = isVoucherCustomerAssignment(customerId, name, item.voucher);
 
       if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !(Number.isFinite(customerId) && customerId > 0) && !voucher) {
         return null;
@@ -12331,8 +12935,8 @@ function normalizeCustomerRowsData(items) {
         '80': fuel80,
         '92': fuel92,
         '95': fuel95,
-        customer_id: Number.isFinite(customerId) && customerId > 0 ? customerId : null,
-        name,
+        customer_id: voucher ? null : (Number.isFinite(customerId) && customerId > 0 ? customerId : null),
+        name: voucher ? '' : name,
         voucher
       };
     })
@@ -12349,15 +12953,16 @@ function collectCustomerRowsData() {
     const getCheckboxValue = (selector) => Boolean(row.querySelector(selector)?.checked);
     const customerSelect = row.querySelector('select[data-field="name"]');
     const customerOption = getCustomerOptionFromSelect(customerSelect);
+    const voucher = getCheckboxValue('input[data-field="voucher"]');
 
     return {
       diesel: parseFloat(getInputValue('input[data-field="diesel"]')) || 0,
       '80': parseFloat(getInputValue('input[data-field="80"]')) || 0,
       '92': parseFloat(getInputValue('input[data-field="92"]')) || 0,
       '95': parseFloat(getInputValue('input[data-field="95"]')) || 0,
-      customer_id: customerOption?.id || null,
-      name: String(customerOption?.name || '').trim(),
-      voucher: getCheckboxValue('input[data-field="voucher"]')
+      customer_id: voucher ? null : (customerOption?.id || null),
+      name: voucher ? '' : String(customerOption?.name || '').trim(),
+      voucher
     };
   });
 
@@ -12393,6 +12998,7 @@ function setCustomerRowsData(rowsData = []) {
     if (fuel95Input) fuel95Input.value = item['95'] || '';
     if (nameInput) populateCustomerNameSelect(nameInput, item.customer_id || item.name || '', item.name || '');
     if (voucherInput) voucherInput.checked = Boolean(item.voucher);
+    syncCustomerVoucherState(row, { clearCustomer: Boolean(item.voucher) });
   });
 
   updateCustomerColumnSums();
@@ -12464,6 +13070,10 @@ function handleCustomerInput(rowIndex) {
   const tableBody = document.getElementById('customers-table-body');
   if (!tableBody) return;
 
+  const activeRow = tableBody.querySelector(`tr[data-customer-row="${rowIndex}"]`);
+  const activeVoucherInput = activeRow?.querySelector('input[data-field="voucher"]');
+  syncCustomerVoucherState(activeRow, { clearCustomer: Boolean(activeVoucherInput?.checked) });
+
   const allRows = tableBody.querySelectorAll('tr[data-customer-row]');
   const lastRow = allRows[allRows.length - 1];
   const lastRowIndex = parseInt(lastRow.getAttribute('data-customer-row'));
@@ -12493,6 +13103,8 @@ function handleCustomerInput(rowIndex) {
 
 // ============= CUSTOMERS MANAGEMENT FUNCTIONS =============
 
+let editingCustomerId = null;
+
 // Load and display customers in settings
 async function loadCustomersSettings() {
   try {
@@ -12511,20 +13123,15 @@ async function loadCustomersSettings() {
 
     customers.forEach((customer, index) => {
       const row = document.createElement('tr');
+      const customerId = parseInt(customer.id, 10);
+      const customerName = String(customer.name || '').trim();
       row.innerHTML = `
         <td style="text-align: center;">${index + 1}</td>
-        <td>${customer.name}</td>
+        <td>${escapeHtml(customerName)}</td>
         <td style="text-align: center;">
-          <button class="btn-icon" title="تعديل العميل" onclick="editCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}')">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/>
-            </svg>
+          <button type="button" class="btn-icon" title="تعديل العميل">
           </button>
-          <button class="btn-icon btn-icon-danger" title="حذف العميل" style="margin-left: 0.5rem;" onclick="deleteCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}')">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-              <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-            </svg>
+          <button type="button" class="btn-icon btn-icon-danger" title="حذف العميل" style="margin-left: 0.5rem;">
           </button>
         </td>
       `;
@@ -12532,9 +13139,11 @@ async function loadCustomersSettings() {
       if (actionButtons[0]) {
         actionButtons[0].title = 'تعديل الاسم';
         actionButtons[0].innerHTML = getActionEditIconSvg();
+        actionButtons[0].addEventListener('click', () => editCustomer(customerId, customerName));
       }
       if (actionButtons[1]) {
         actionButtons[1].innerHTML = getActionDeleteIconSvg();
+        actionButtons[1].addEventListener('click', () => deleteCustomer(customerId, customerName));
       }
       tableBody.appendChild(row);
     });
@@ -12548,9 +13157,14 @@ async function loadCustomersSettings() {
 function addNewCustomer() {
   const modal = document.getElementById('add-customer-modal');
   const input = document.getElementById('customer-name-input');
+  const title = document.getElementById('customer-modal-title');
+  const saveBtn = document.getElementById('customer-modal-save-btn');
 
   if (modal && input) {
+    editingCustomerId = null;
     input.value = '';
+    if (title) title.textContent = 'إضافة عميل جديد';
+    if (saveBtn) saveBtn.textContent = 'حفظ';
     modal.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
   }
@@ -12561,6 +13175,7 @@ function closeAddCustomerModal() {
   const modal = document.getElementById('add-customer-modal');
   if (modal) {
     modal.style.display = 'none';
+    editingCustomerId = null;
     const input = document.getElementById('customer-name-input');
     if (input) {
       input.value = '';
@@ -12579,6 +13194,14 @@ async function saveNewCustomer() {
   }
 
   try {
+    if (editingCustomerId) {
+      await ipcRenderer.invoke('update-customer', { id: editingCustomerId, name });
+      closeAddCustomerModal();
+      await loadCustomersSettings();
+      showMessage('تم تحديث اسم العميل بنجاح', 'success');
+      return;
+    }
+
     // Save customer
     const result = await ipcRenderer.invoke('add-customer', { name });
     console.log('Customer added successfully, ID:', result);
@@ -12592,8 +13215,8 @@ async function saveNewCustomer() {
     // Show success message
     showMessage('تم إضافة العميل بنجاح', 'success');
   } catch (error) {
-    console.error('Error adding customer:', error);
-    showMessage(error.message || 'خطأ في إضافة العميل', 'error');
+    console.error('Error saving customer:', error);
+    showMessage(error.message || (editingCustomerId ? 'خطأ في تحديث العميل' : 'خطأ في إضافة العميل'), 'error');
   }
 }
 
@@ -12615,19 +13238,26 @@ async function deleteCustomer(id, name) {
 
 // Edit customer
 function editCustomer(id, currentName) {
-  const newName = prompt('تعديل اسم العميل:', currentName);
+  const customerId = parseInt(id, 10);
+  const modal = document.getElementById('add-customer-modal');
+  const input = document.getElementById('customer-name-input');
+  const title = document.getElementById('customer-modal-title');
+  const saveBtn = document.getElementById('customer-modal-save-btn');
 
-  if (newName === null) {
-    // User cancelled
+  if (!modal || !input || !Number.isFinite(customerId) || customerId <= 0) {
+    showMessage('تعذر فتح تعديل العميل', 'error');
     return;
   }
 
-  if (!newName || !newName.trim()) {
-    showMessage('الرجاء إدخال اسم صحيح', 'error');
-    return;
-  }
-
-  updateCustomerName(id, newName.trim());
+  editingCustomerId = customerId;
+  input.value = String(currentName || '').trim();
+  if (title) title.textContent = 'تعديل اسم العميل';
+  if (saveBtn) saveBtn.textContent = 'حفظ التعديل';
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 100);
 }
 
 // Update customer name
@@ -13072,6 +13702,7 @@ function collectOilData() {
     const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
     const customerOption = getCustomerOptionFromSelect(customerNameSelect);
     const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
+    const voucher = Boolean(voucherInput?.checked);
 
     oilData[oilKey] = {
       product_code: oilCode || null,
@@ -13085,9 +13716,9 @@ function collectOilData() {
       customers: parseOilQuantity(customersInput?.value),
       price: parseFloat(priceInput?.value) || 0,
       revenue: parseFloat(revenueInput?.value) || 0,
-      customer_id: customerOption?.id || null,
-      customer_name: String(customerOption?.name || '').trim(),
-      voucher: Boolean(voucherInput?.checked)
+      customer_id: voucher ? null : (customerOption?.id || null),
+      customer_name: voucher ? '' : String(customerOption?.name || '').trim(),
+      voucher
     };
   });
 
@@ -13569,6 +14200,7 @@ function clearFieldsAfterSave(oilRemainingValues = {}) {
       if (revenueInput) revenueInput.value = '';
       if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, '');
       if (voucherInput) voucherInput.checked = false;
+      syncOilVoucherState(oilId);
     });
   }
 
@@ -14167,8 +14799,10 @@ async function loadShiftData(date, shiftNumber) {
         setInputValue(customersInput, data.customers);
         setInputValue(priceInput, data.price);
         setInputValue(revenueInput, data.revenue);
-        if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, data.customer_id || data.customer_name || '', data.customer_name || '');
-        if (voucherInput) voucherInput.checked = Boolean(data.voucher);
+        const isVoucherAssignment = isVoucherCustomerAssignment(data.customer_id, data.customer_name, data.voucher);
+        if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, isVoucherAssignment ? '' : (data.customer_id || data.customer_name || ''), isVoucherAssignment ? '' : (data.customer_name || ''));
+        if (voucherInput) voucherInput.checked = isVoucherAssignment;
+        syncOilVoucherState(oilId, { clearCustomer: isVoucherAssignment });
       });
     }
 
@@ -14310,6 +14944,7 @@ function clearShiftForm() {
       if (revenueInput) revenueInput.value = '';
       if (customerNameSelect) populateCustomerNameSelect(customerNameSelect, '');
       if (voucherInput) voucherInput.checked = false;
+      syncOilVoucherState(oilId);
     });
   }
 
