@@ -323,12 +323,14 @@ body.modal-scroll-lock {
   top: 50%;
   transform: translateY(-50%);
   align-items: center;
+  flex-direction: row-reverse;
   gap: 0.45rem;
   margin: 0;
   padding: 0;
   color: #263238;
   font-weight: 700;
   min-width: 0;
+  height: 32px;
 }
 
 .nav-user-avatar,
@@ -352,6 +354,16 @@ body.modal-scroll-lock {
   unicode-bidi: isolate;
 }
 
+.nav-user-avatar {
+  background: transparent;
+  padding: 0;
+  align-items: center;
+}
+
+.nav-user-avatar .nav-user-avatar-img {
+  flex: 0 0 auto;
+}
+
 .nav-user-avatar-img.avatar-asset {
   object-fit: contain;
   background: white;
@@ -360,11 +372,15 @@ body.modal-scroll-lock {
 }
 
 .nav-user-name {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.88rem;
+  line-height: 1;
   color: #263238;
 }
 
@@ -376,16 +392,24 @@ body.modal-scroll-lock {
   background: transparent;
   color: #c4291d;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  line-height: 0;
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
 .nav-user-logout-btn:hover {
   background: rgba(196, 41, 29, 0.1);
   transform: translateY(-1px);
+}
+
+.nav-user-logout-btn svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  transform: scaleX(-1) translateY(-1px);
 }
 
 .connection-online {
