@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-// Read the main.js file
-const mainJsPath = path.join(__dirname, 'main.js');
+// Read the Electron main process file
+const mainJsPath = path.join(__dirname, 'src', 'main.js');
 let content = fs.readFileSync(mainJsPath, 'utf8');
 
 // Replace all ternary operators with PostgreSQL versions (? with $N)

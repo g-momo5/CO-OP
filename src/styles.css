@@ -734,6 +734,11 @@ body.modal-scroll-lock {
   width: 100%;
 }
 
+.home-company-vouchers-card {
+  width: min(280px, 44%);
+  align-self: flex-start;
+}
+
 /* Right Column - Action Cards (40%) */
 .home-cards-column {
   flex: 4;
@@ -1197,6 +1202,80 @@ body.modal-scroll-lock {
 .customer-invoices-table td:nth-child(2),
 .customer-invoices-table th:nth-child(2) {
   text-align: right;
+}
+
+.customer-invoices-table tr.selected-row td {
+  background: #fff5f4;
+  color: #c4291d;
+  font-weight: 800;
+}
+
+.company-vouchers-page {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  direction: rtl;
+}
+
+.company-vouchers-summary-grid {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.company-vouchers-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(520px, 1.4fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.company-vouchers-months-wrapper tbody tr {
+  cursor: pointer;
+}
+
+.company-vouchers-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.company-vouchers-detail-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1rem;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.company-vouchers-detail-header h3 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.company-vouchers-pay-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.company-vouchers-pay-form input {
+  min-height: 34px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d7dde4;
+  border-radius: 6px;
+  font-family: 'Noto Naskh Arabic', serif;
+}
+
+@media (max-width: 980px) {
+  .company-vouchers-layout,
+  .company-vouchers-summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .customer-invoices-loading {
@@ -5555,6 +5634,11 @@ body.modal-scroll-lock {
     margin-top: 0;
   }
 
+  .home-company-vouchers-card {
+    width: 100%;
+    align-self: stretch;
+  }
+
   .chart-wrapper {
     min-height: 320px;
   }
@@ -8900,7 +8984,7 @@ select option {
   text-align: center;
   background: white;
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
@@ -8925,9 +9009,25 @@ select option {
 }
 
 .customers-table tbody td {
+  position: relative;
   padding: 2px;
   border: none;
   text-align: center !important;
+}
+
+.customers-table tfoot td {
+  padding: 5px 4px;
+  background: #ecf0f1;
+  color: #2c3e50;
+  border-top: 1px solid #d9dee4;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center !important;
+}
+
+.customers-table tfoot td[colspan] {
+  text-align: right !important;
+  padding-right: 0.65rem;
 }
 
 .customers-table input[type="number"] {
@@ -8957,6 +9057,54 @@ select option {
   text-align: center !important;
 }
 
+.customers-table input.customer-name-select {
+  width: 8rem;
+  background-color: #fff;
+}
+
+.shift-customer-combobox {
+  position: relative;
+  width: 8rem;
+}
+
+.shift-customer-assignment-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 80;
+  display: none;
+  width: 100%;
+  max-height: 10.5rem;
+  overflow-y: auto;
+  padding: 3px;
+  border: 1px solid #d7dce2;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}
+
+.shift-customer-assignment-option {
+  display: block;
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0.22rem 0.42rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #1f2933;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  text-align: right;
+  cursor: pointer;
+}
+
+.shift-customer-assignment-option:hover,
+.shift-customer-assignment-option.active {
+  background: #f3f5f7;
+  color: #c4291d;
+}
+
 .customers-table select {
   width: 8rem;
   padding: 4px;
@@ -8976,7 +9124,14 @@ select option {
   margin: 0;
 }
 
-.customers-table td:last-child {
+.customers-table .customer-voucher-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
+.customers-table td:last-child,
+.customers-table td:nth-last-child(2),
+.customers-table td:nth-last-child(3) {
   width: 2.5rem;
 }
 

@@ -74,7 +74,7 @@ const DEFAULT_APP_USERS = [
     role: APP_USER_ROLES.OPERATOR,
     password: '',
     avatar_type: 'asset',
-    avatar_value: 'assets/logo_cpc.ico'
+    avatar_value: '../assets/logo_cpc.ico'
   }
 ];
 
@@ -482,8 +482,8 @@ function buildShiftExpenseSnapshot(shiftRow) {
 
 function getAppIconPath() {
   return process.platform === 'darwin'
-    ? path.join(__dirname, 'assets', 'logo_cpc.icns')
-    : path.join(__dirname, 'assets', 'logo_cpc.png');
+    ? path.join(__dirname, '..', 'assets', 'logo_cpc.icns')
+    : path.join(__dirname, '..', 'assets', 'logo_cpc.png');
 }
 
 function clearStartupFallbackTimer() {
@@ -665,7 +665,7 @@ function createSplashWindow() {
       resolve(splashWindow);
     });
 
-    splashWindow.loadFile('loading.html').catch((error) => {
+    splashWindow.loadFile(path.join(__dirname, 'loading.html')).catch((error) => {
       if (!resolved) {
         reject(error);
       }
@@ -720,7 +720,7 @@ function createWindow({ deferShow = false } = {}) {
     mainWindowReady = true;
   }
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   // Handle close on macOS/windows with confirmation outside home screen
   mainWindow.on('close', (e) => {
@@ -1090,7 +1090,7 @@ function normalizeAvatarValue(type, value) {
     return raw.startsWith('data:image/') ? raw : '';
   }
   if (type === 'asset') {
-    return raw || 'assets/logo_cpc.ico';
+    return raw || '../assets/logo_cpc.ico';
   }
   return raw.slice(0, 4);
 }
@@ -1342,7 +1342,7 @@ async function seedDefaultAppUsers() {
       if (
         seed.username === 'CO-OP'
         && existing.avatar_type === 'asset'
-        && (!existing.avatar_value || existing.avatar_value === 'assets/logo_cpc.png')
+        && (!existing.avatar_value || existing.avatar_value === 'assets/logo_cpc.png' || existing.avatar_value === '../assets/logo_cpc.png')
       ) {
         await upsertAppUserRecord({
           ...existing,
@@ -6687,8 +6687,16 @@ ipcMain.handle('get-customers', async () => {
 
 ipcMain.handle('add-customer', async (event, { name }) => {
   try {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) {
+      throw new Error('اسم العميل مطلوب');
+    }
+    const existingRows = await executeQuery('SELECT id FROM customers WHERE name = $1 LIMIT 1', [cleanName]);
+    if (existingRows.length > 0) {
+      throw new Error('يوجد عميل بنفس الاسم بالفعل');
+    }
     const insertQuery = 'INSERT INTO customers (name) VALUES ($1)';
-    return await executeInsert(insertQuery, [name], 'customers');
+    return await executeInsert(insertQuery, [cleanName], 'customers');
   } catch (error) {
     console.error('Error adding customer:', error);
     throw error;
@@ -6713,10 +6721,253 @@ ipcMain.handle('delete-customer', async (event, { id }) => {
 
 ipcMain.handle('update-customer', async (event, { id, name }) => {
   try {
+    const customerId = parseInt(id, 10);
+    const cleanName = String(name || '').trim();
+    if (!Number.isFinite(customerId) || customerId <= 0) {
+      throw new Error('معرف العميل غير صالح');
+    }
+    if (!cleanName) {
+      throw new Error('اسم العميل مطلوب');
+    }
+
+    const existingCustomer = await executeQuery('SELECT id FROM customers WHERE id = $1 LIMIT 1', [customerId]);
+    if (existingCustomer.length === 0) {
+      throw new Error('العميل غير موجود');
+    }
+
+    const duplicateRows = await executeQuery('SELECT id FROM customers WHERE name = $1 AND id <> $2 LIMIT 1', [cleanName, customerId]);
+    if (duplicateRows.length > 0) {
+      throw new Error('يوجد عميل آخر بنفس الاسم');
+    }
+
     const updateQuery = 'UPDATE customers SET name = $1 WHERE id = $2';
-    return await executeUpdate(updateQuery, [name, id]);
+    const updatedRows = await executeUpdate(updateQuery, [cleanName, customerId]);
+    if (updatedRows < 1) {
+      throw new Error('لم يتم تحديث أي عميل');
+    }
+    return { success: true, updatedRows };
   } catch (error) {
     console.error('Error updating customer:', error);
+    throw error;
+  }
+});
+
+function normalizeCompanyVoucherType(item = {}) {
+  const rawType = String(item.voucher_type || item.voucherType || '').trim().toLowerCase();
+  if (['company', 'company_voucher', 'بون الشركة', 'بونات الشركة'].includes(rawType)) return 'company';
+  if (['new', 'new_voucher', 'بون جديد'].includes(rawType)) return 'new';
+  if (['difference', 'difference_voucher', 'له فرق'].includes(rawType)) return 'difference';
+  if (item.new_voucher === true || item.new_voucher === 1 || String(item.new_voucher || '').toLowerCase() === 'true') return 'new';
+  if (item.difference_voucher === true || item.difference_voucher === 1 || String(item.difference_voucher || '').toLowerCase() === 'true') return 'difference';
+  if (item.voucher === true || item.voucher === 1 || String(item.voucher || '').toLowerCase() === 'true') return 'company';
+  if (normalizeCustomerName(item.customer_name || item.name) === 'بونات الشركة') return 'company';
+  return '';
+}
+
+function getCompanyVoucherMonth(date) {
+  const normalizedDate = normalizeIsoDate(date);
+  return normalizedDate ? normalizedDate.slice(0, 7) : '';
+}
+
+function ensureCompanyVoucherMonth(summaryByMonth, month) {
+  if (!summaryByMonth[month]) {
+    summaryByMonth[month] = {
+      month,
+      new_total: 0,
+      difference_total: 0,
+      direct_total: 0,
+      company_total: 0,
+      company_paid: 0,
+      company_remaining: 0,
+      paid_at: '',
+      notes: '',
+      items: []
+    };
+  }
+  return summaryByMonth[month];
+}
+
+function addCompanyVoucherSummaryLine(summaryByMonth, { date, shiftNumber, source, voucherType, label, quantity, price, total }) {
+  const month = getCompanyVoucherMonth(date);
+  if (!month || total <= 0) return;
+
+  const summary = ensureCompanyVoucherMonth(summaryByMonth, month);
+  if (voucherType === 'company') {
+    summary.company_total += total;
+  } else if (voucherType === 'difference') {
+    summary.difference_total += total;
+    summary.direct_total += total;
+  } else if (voucherType === 'new') {
+    summary.new_total += total;
+    summary.direct_total += total;
+  }
+
+  summary.items.push({
+    date,
+    shift_number: shiftNumber,
+    source,
+    voucher_type: voucherType,
+    label,
+    quantity,
+    price,
+    total
+  });
+}
+
+async function getCompanyVoucherSettlementRows() {
+  try {
+    return await executeQuery(
+      'SELECT voucher_month, paid_amount, paid_at, notes FROM company_voucher_settlements ORDER BY voucher_month ASC',
+      []
+    );
+  } catch (error) {
+    if (/company_voucher_settlements/i.test(error.message || '')) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+ipcMain.handle('get-company-vouchers-summary', async () => {
+  try {
+    const shifts = await executeQuery(
+      `SELECT id, date, shift_number, data, fuel_data, oil_data
+       FROM shifts
+       WHERE is_saved = 1
+       ORDER BY date ASC, shift_number ASC, id ASC`,
+      []
+    );
+    const settlements = await getCompanyVoucherSettlementRows();
+    const settlementsByMonth = new Map(
+      settlements.map((row) => [String(row.voucher_month || ''), row])
+    );
+    const summaryByMonth = {};
+    const fuelDefinitions = [
+      { field: 'diesel', name: 'سولار', order: 0 },
+      { field: '80', name: 'بنزين ٨٠', order: 1 },
+      { field: '92', name: 'بنزين ٩٢', order: 2 },
+      { field: '95', name: 'بنزين ٩٥', order: 3 }
+    ];
+
+    shifts.forEach((shift) => {
+      const date = normalizeIsoDate(shift?.date);
+      const shiftNumber = parseInt(shift?.shift_number, 10) || 0;
+      if (!date) return;
+
+      const legacyData = parseStoredObject(shift?.data, {});
+      const fuelData = parseStoredObject(shift?.fuel_data || legacyData.fuel_data, {});
+      const oilData = parseStoredObject(shift?.oil_data || legacyData.oil_data, {});
+      const shiftCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+
+      shiftCustomerRows.forEach((row) => {
+        if (!row || typeof row !== 'object') return;
+        const voucherType = normalizeCompanyVoucherType(row);
+        if (!voucherType) return;
+
+        fuelDefinitions.forEach((fuel) => {
+          const quantity = toFiniteNumber(row[fuel.field]);
+          if (quantity <= 0) return;
+          const fuelEntry = findShiftDataEntryByName(fuelData, fuel.name);
+          const price = fuelEntry ? toFiniteNumber(fuelEntry.price) : 0;
+          const total = quantity * price;
+          addCompanyVoucherSummaryLine(summaryByMonth, {
+            date,
+            shiftNumber,
+            source: 'fuel',
+            voucherType,
+            label: fuel.name,
+            quantity,
+            price,
+            total
+          });
+        });
+      });
+
+      Object.entries(oilData).forEach(([oilKey, data]) => {
+        if (!data || typeof data !== 'object') return;
+        const voucherType = normalizeCompanyVoucherType(data);
+        if (voucherType !== 'company') return;
+        const quantity = toFiniteNumber(data.customers);
+        if (quantity <= 0) return;
+        const price = toFiniteNumber(data.price);
+        const total = quantity * price;
+        addCompanyVoucherSummaryLine(summaryByMonth, {
+          date,
+          shiftNumber,
+          source: 'oil',
+          voucherType,
+          label: getShiftProductDisplayName(oilKey, data),
+          quantity,
+          price,
+          total
+        });
+      });
+    });
+
+    settlementsByMonth.forEach((settlement, month) => {
+      ensureCompanyVoucherMonth(summaryByMonth, month);
+    });
+
+    const months = Object.values(summaryByMonth)
+      .map((summary) => {
+        const settlement = settlementsByMonth.get(summary.month) || {};
+        const paidAmount = toFiniteNumber(settlement.paid_amount);
+        return {
+          ...summary,
+          company_paid: paidAmount,
+          company_remaining: summary.company_total - paidAmount,
+          paid_at: String(settlement.paid_at || ''),
+          notes: String(settlement.notes || ''),
+          items: summary.items.sort((a, b) => (
+            String(a.date).localeCompare(String(b.date))
+            || (a.shift_number || 0) - (b.shift_number || 0)
+            || String(a.label || '').localeCompare(String(b.label || ''))
+          ))
+        };
+      })
+      .sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
+    return { months };
+  } catch (error) {
+    console.error('Error building company vouchers summary:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('save-company-voucher-settlement', async (_event, payload = {}) => {
+  try {
+    const voucherMonth = String(payload.voucher_month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(voucherMonth)) {
+      throw new Error('شهر البونات غير صالح');
+    }
+
+    const paidAmount = toFiniteNumber(payload.paid_amount);
+    const paidAt = normalizeIsoDate(payload.paid_at) || null;
+    const notes = String(payload.notes || '').trim();
+    const existingRows = await executeQuery(
+      'SELECT id FROM company_voucher_settlements WHERE voucher_month = $1 LIMIT 1',
+      [voucherMonth]
+    );
+
+    if (existingRows.length > 0) {
+      await executeUpdate(
+        `UPDATE company_voucher_settlements
+         SET paid_amount = $1, paid_at = $2, notes = $3, updated_at = CURRENT_TIMESTAMP
+         WHERE voucher_month = $4`,
+        [paidAmount, paidAt, notes, voucherMonth]
+      );
+    } else {
+      await executeInsert(
+        `INSERT INTO company_voucher_settlements (voucher_month, paid_amount, paid_at, notes)
+         VALUES ($1, $2, $3, $4)`,
+        [voucherMonth, paidAmount, paidAt, notes],
+        'company_voucher_settlements'
+      );
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error saving company voucher settlement:', error);
     throw error;
   }
 });
@@ -6878,7 +7129,11 @@ ipcMain.handle('get-customer-weekly-invoices', async (_event, { weekStart, weekE
       for (const row of shiftCustomerRows) {
         if (!row || typeof row !== 'object') continue;
 
-        const isVoucher = toVoucherBoolean(row.voucher);
+        const voucherType = normalizeCompanyVoucherType(row);
+        if (voucherType && voucherType !== 'company') {
+          continue;
+        }
+        const isVoucher = voucherType === 'company' || toVoucherBoolean(row.voucher);
         const customer = isVoucher
           ? customersByName.get(voucherCustomerName)
           : resolveInvoiceCustomer(row);
@@ -7262,11 +7517,24 @@ async function persistShiftRecord(shiftData) {
             const fuel95 = parseFloat(row['95']) || 0;
             const name = String(row.name || '').trim();
             const customerId = getPositiveInteger(row.customer_id);
-            const voucher = Boolean(row.voucher);
-            if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !customerId && !voucher) {
+            const voucherType = normalizeCompanyVoucherType(row);
+            const voucher = voucherType === 'company';
+            const isVoucherRow = Boolean(voucherType);
+            if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !customerId && !isVoucherRow) {
               return null;
             }
-            return { diesel, '80': fuel80, '92': fuel92, '95': fuel95, customer_id: customerId, name, voucher };
+            return {
+              diesel,
+              '80': fuel80,
+              '92': fuel92,
+              '95': fuel95,
+              customer_id: isVoucherRow ? null : customerId,
+              name: isVoucherRow ? '' : name,
+              voucher,
+              voucher_type: voucherType,
+              new_voucher: voucherType === 'new',
+              difference_voucher: voucherType === 'difference'
+            };
           })
           .filter(Boolean)
       : [];

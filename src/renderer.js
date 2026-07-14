@@ -84,6 +84,7 @@ const screenTitles = {
   'annual-inventory': 'جرد سنوي',
   'sales-summary': 'ملخص المبيعات',
   'customer-invoices': 'فواتير العملاء',
+  'company-vouchers': 'بونات الشركة',
   'profit': 'المكسب',
   'expenses': 'المصاريف'
 };
@@ -168,6 +169,10 @@ let customerInvoicesState = {
   invoicesByCustomer: {},
   warnings: []
 };
+let companyVouchersState = {
+  months: [],
+  selectedMonth: ''
+};
 
 function invalidateInvoiceOilProductsCache() {
   invoiceOilProductsCache = null;
@@ -244,7 +249,9 @@ function getUserAvatarHtml(user = {}, className = 'user-avatar') {
   const avatarType = user.avatar_type || 'initial';
   let avatarValue = String(user.avatar_value || '').trim();
   if (user.username === 'CO-OP' && avatarType === 'asset' && (!avatarValue || avatarValue === 'assets/logo_cpc.png')) {
-    avatarValue = 'assets/logo_cpc.ico';
+    avatarValue = '../assets/logo_cpc.ico';
+  } else if (avatarType === 'asset' && avatarValue.startsWith('assets/')) {
+    avatarValue = `../${avatarValue}`;
   }
   const initial = escapeHtml(getUserInitial(user));
 
@@ -1193,6 +1200,9 @@ function showScreenWithoutHistory(screenName) {
     case 'customer-invoices':
       initializeCustomerInvoicesPage();
       break;
+    case 'company-vouchers':
+      loadCompanyVouchersPage();
+      break;
     case 'safe-book':
       initSafeBookFilters();
       loadSafeBookMovements();
@@ -1277,6 +1287,41 @@ function openNewShiftEntry() {
   currentShiftData.draftCleanupQueue = [];
 
   showScreen('shift-entry', 'home');
+  scheduleDieselLastShiftFocus();
+}
+
+function focusDieselLastShiftFirstCell() {
+  if (currentScreen !== 'shift-entry' || shiftViewMode !== 'edit') {
+    return false;
+  }
+
+  switchShiftTab('fuel');
+
+  const input = document.getElementById('fuel-diesel-last-1');
+  if (!input || input.disabled || input.readOnly) {
+    return false;
+  }
+
+  input.focus();
+  if (typeof input.select === 'function') {
+    input.select();
+  }
+  return document.activeElement === input;
+}
+
+function scheduleDieselLastShiftFocus() {
+  const delays = [0, 80, 200, 400];
+
+  delays.forEach((delay) => {
+    setTimeout(() => {
+      if (delay === 0 && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(focusDieselLastShiftFirstCell);
+        return;
+      }
+
+      focusDieselLastShiftFirstCell();
+    }, delay);
+  });
 }
 
 function syncSafeBookScrollMode() {
@@ -2062,6 +2107,166 @@ function openCustomerInvoices() {
     setCustomerInvoiceWeekFromDate(new Date());
   }
   showScreen('customer-invoices', 'home');
+}
+
+function formatVoucherMonthLabel(month) {
+  const value = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(value)) return value || '-';
+  const [year, monthNumber] = value.split('-');
+  return `${monthNumber}/${year}`;
+}
+
+function getSelectedCompanyVoucherMonth() {
+  return companyVouchersState.months.find((item) => item.month === companyVouchersState.selectedMonth) || null;
+}
+
+function getCompanyVoucherTypeLabel(type) {
+  if (type === 'company') return 'بون الشركة';
+  if (type === 'new') return 'بون جديد';
+  if (type === 'difference') return 'له فرق';
+  return '-';
+}
+
+async function loadCompanyVouchersPage() {
+  const monthsBody = document.getElementById('company-vouchers-months-body');
+  const detailsBody = document.getElementById('company-vouchers-details-body');
+  if (monthsBody) {
+    monthsBody.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading">جاري تحميل البونات...</td></tr>';
+  }
+  if (detailsBody) {
+    detailsBody.innerHTML = '';
+  }
+
+  try {
+    const result = await ipcRenderer.invoke('get-company-vouchers-summary');
+    companyVouchersState.months = Array.isArray(result?.months) ? result.months : [];
+    if (!companyVouchersState.months.some((item) => item.month === companyVouchersState.selectedMonth)) {
+      companyVouchersState.selectedMonth = companyVouchersState.months[0]?.month || '';
+    }
+    renderCompanyVouchersPage();
+  } catch (error) {
+    console.error('Error loading company vouchers:', error);
+    if (monthsBody) {
+      monthsBody.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading error">حدث خطأ أثناء تحميل البونات</td></tr>';
+    }
+    showMessage('حدث خطأ أثناء تحميل بونات الشركة', 'error');
+  }
+}
+
+function selectCompanyVoucherMonth(month) {
+  companyVouchersState.selectedMonth = String(month || '');
+  renderCompanyVouchersPage();
+}
+
+function renderCompanyVouchersPage() {
+  const directTotalEl = document.getElementById('company-vouchers-direct-total');
+  const companyTotalEl = document.getElementById('company-vouchers-company-total');
+  const paidTotalEl = document.getElementById('company-vouchers-paid-total');
+  const remainingTotalEl = document.getElementById('company-vouchers-remaining-total');
+  const monthsBody = document.getElementById('company-vouchers-months-body');
+  const empty = document.getElementById('company-vouchers-empty');
+  const selectedMonthTitle = document.getElementById('company-vouchers-selected-month');
+  const paidAmountInput = document.getElementById('company-vouchers-paid-amount');
+  const paidDateInput = document.getElementById('company-vouchers-paid-date');
+  const notesInput = document.getElementById('company-vouchers-notes');
+  const detailsBody = document.getElementById('company-vouchers-details-body');
+  const detailsEmpty = document.getElementById('company-vouchers-details-empty');
+
+  const totals = companyVouchersState.months.reduce((acc, item) => {
+    acc.direct += parseFloat(item.direct_total) || 0;
+    acc.company += parseFloat(item.company_total) || 0;
+    acc.paid += parseFloat(item.company_paid) || 0;
+    acc.remaining += parseFloat(item.company_remaining) || 0;
+    return acc;
+  }, { direct: 0, company: 0, paid: 0, remaining: 0 });
+
+  if (directTotalEl) directTotalEl.textContent = formatPrice(totals.direct);
+  if (companyTotalEl) companyTotalEl.textContent = formatPrice(totals.company);
+  if (paidTotalEl) paidTotalEl.textContent = formatPrice(totals.paid);
+  if (remainingTotalEl) remainingTotalEl.textContent = formatPrice(totals.remaining);
+
+  if (monthsBody) {
+    monthsBody.innerHTML = '';
+    companyVouchersState.months.forEach((item) => {
+      const row = document.createElement('tr');
+      row.className = item.month === companyVouchersState.selectedMonth ? 'selected-row' : '';
+      row.innerHTML = `
+        <td>${escapeHtml(formatVoucherMonthLabel(item.month))}</td>
+        <td>${formatPrice(item.direct_total || 0)}</td>
+        <td>${formatPrice(item.company_total || 0)}</td>
+        <td>${formatPrice(item.company_remaining || 0)}</td>
+      `;
+      row.addEventListener('click', () => selectCompanyVoucherMonth(item.month));
+      monthsBody.appendChild(row);
+    });
+  }
+  if (empty) {
+    empty.style.display = companyVouchersState.months.length === 0 ? 'block' : 'none';
+  }
+
+  const selectedMonth = getSelectedCompanyVoucherMonth();
+  if (selectedMonthTitle) {
+    selectedMonthTitle.textContent = selectedMonth ? formatVoucherMonthLabel(selectedMonth.month) : '-';
+  }
+  if (paidAmountInput) {
+    paidAmountInput.value = selectedMonth ? formatPrice(selectedMonth.company_paid || 0) : '';
+    paidAmountInput.disabled = !selectedMonth;
+  }
+  if (paidDateInput) {
+    paidDateInput.value = selectedMonth?.paid_at || '';
+    paidDateInput.disabled = !selectedMonth;
+  }
+  if (notesInput) {
+    notesInput.value = selectedMonth?.notes || '';
+    notesInput.disabled = !selectedMonth;
+  }
+
+  const items = Array.isArray(selectedMonth?.items) ? selectedMonth.items : [];
+  if (detailsBody) {
+    detailsBody.innerHTML = '';
+    items.forEach((item) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${escapeHtml(formatDateOnlyDisplay(item.date))}</td>
+        <td>${escapeHtml(String(item.shift_number || ''))}</td>
+        <td>${escapeHtml(getCompanyVoucherTypeLabel(item.voucher_type))}</td>
+        <td>${escapeHtml(item.label || '-')}</td>
+        <td>${formatPrice(item.quantity || 0)}</td>
+        <td>${formatPrice(item.price || 0)}</td>
+        <td>${formatPrice(item.total || 0)}</td>
+      `;
+      detailsBody.appendChild(row);
+    });
+  }
+  if (detailsEmpty) {
+    detailsEmpty.style.display = items.length === 0 ? 'block' : 'none';
+  }
+}
+
+async function saveCompanyVoucherSettlement() {
+  const selectedMonth = getSelectedCompanyVoucherMonth();
+  if (!selectedMonth) {
+    showMessage('اختر شهر البونات أولاً', 'error');
+    return;
+  }
+
+  const paidAmount = parseSummaryNumber(document.getElementById('company-vouchers-paid-amount')?.value);
+  const paidAt = document.getElementById('company-vouchers-paid-date')?.value || '';
+  const notes = document.getElementById('company-vouchers-notes')?.value || '';
+
+  try {
+    await ipcRenderer.invoke('save-company-voucher-settlement', {
+      voucher_month: selectedMonth.month,
+      paid_amount: paidAmount,
+      paid_at: paidAt,
+      notes
+    });
+    showMessage('تم حفظ تحصيل بون الشركة', 'success');
+    await loadCompanyVouchersPage();
+  } catch (error) {
+    console.error('Error saving company voucher settlement:', error);
+    showMessage(error.message || 'حدث خطأ أثناء حفظ التحصيل', 'error');
+  }
 }
 
 function getLocalDateFromIso(dateString) {
@@ -9141,7 +9346,7 @@ function showDownloadToast() {
   toast.innerHTML = `
     <div class="download-toast-header">
       <div class="download-toast-title">
-        <img src="assets/scaricamento.png" class="download-toast-icon" alt="Download">
+        <img src="../assets/scaricamento.png" class="download-toast-icon" alt="Download">
         <span>جاري تنزيل التحديث</span>
       </div>
       <button class="download-toast-close" onclick="closeDownloadToast()">&times;</button>
@@ -9258,7 +9463,7 @@ function updateDownloadProgress(percent) {
         if (toastText) toastText.textContent = 'التحديث جاهز للتثبيت';
         if (toastIcon) {
           toastIcon.style.animation = 'none';
-          toastIcon.src = 'assets/scaricato.png';
+          toastIcon.src = '../assets/scaricato.png';
         }
 
         // Auto-close after 3 seconds and show install notification
@@ -9961,6 +10166,16 @@ function pickShiftVerticalTableField(currentEntry, candidates) {
   return best?.field || null;
 }
 
+function findAdjacentFuelSectionField(currentField, direction) {
+  if (!(currentField instanceof Element)) return null;
+
+  const wrapper = currentField.closest('.fuel-tables-wrapper');
+  if (!wrapper) return null;
+
+  const fields = getShiftNavigableFields(wrapper);
+  return findAdjacentShiftField(currentField, fields, direction);
+}
+
 function findAdjacentShiftTableField(currentField, direction) {
   const table = currentField?.closest?.('.shift-fuel-table, .shift-oil-table, .customers-table');
   if (!table) {
@@ -9987,7 +10202,13 @@ function findAdjacentShiftTableField(currentField, direction) {
       ? sameRow.find((entry) => entry.startCol > currentEntry.startCol)
       : [...sameRow].reverse().find((entry) => entry.endCol < currentEntry.endCol);
 
-    return { handled: true, field: nextEntry?.field || null };
+    const field = nextEntry?.field || (
+      table.classList.contains('shift-fuel-table')
+        ? findAdjacentFuelSectionField(currentField, direction)
+        : null
+    );
+
+    return { handled: true, field };
   }
 
   if (direction === 'ArrowDown' || direction === 'ArrowUp') {
@@ -10003,6 +10224,7 @@ function findAdjacentShiftTableField(currentField, direction) {
         return { handled: true, field };
       }
     }
+
   }
 
   return { handled: true, field: null };
@@ -12739,6 +12961,12 @@ function calculateOilTotal() {
 // ============= CUSTOMERS TABLE FUNCTIONS =============
 
 const VOUCHER_CUSTOMER_NAME = 'بونات الشركة';
+const CUSTOMER_VOUCHER_TYPES = {
+  company: 'company',
+  new: 'new',
+  difference: 'difference'
+};
+const DEFAULT_CUSTOMER_ROWS_COUNT = 8;
 
 function normalizeCustomerDisplayName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
@@ -12765,6 +12993,41 @@ function isVoucherCustomerAssignment(customerId, customerName, voucher = false) 
   return toVoucherBoolean(voucher)
     || isVoucherCustomerName(customerName)
     || isVoucherCustomerName(getCustomerOptionNameById(customerId));
+}
+
+function normalizeCustomerVoucherType(item = {}) {
+  const rawType = String(item.voucher_type || item.voucherType || '').trim().toLowerCase();
+  if (['company', 'company_voucher', 'بون الشركة', 'بونات الشركة'].includes(rawType)) return CUSTOMER_VOUCHER_TYPES.company;
+  if (['new', 'new_voucher', 'بون جديد'].includes(rawType)) return CUSTOMER_VOUCHER_TYPES.new;
+  if (['difference', 'difference_voucher', 'له فرق'].includes(rawType)) return CUSTOMER_VOUCHER_TYPES.difference;
+  if (toVoucherBoolean(item.new_voucher)) return CUSTOMER_VOUCHER_TYPES.new;
+  if (toVoucherBoolean(item.difference_voucher)) return CUSTOMER_VOUCHER_TYPES.difference;
+  if (toVoucherBoolean(item.voucher)) return CUSTOMER_VOUCHER_TYPES.company;
+  if (isVoucherCustomerName(item.customer_name || item.name) || isVoucherCustomerName(getCustomerOptionNameById(item.customer_id))) return CUSTOMER_VOUCHER_TYPES.company;
+  return '';
+}
+
+function getCustomerRowVoucherType(row) {
+  return String(row?.querySelector('input[data-voucher-type]:checked')?.dataset?.voucherType || '').trim();
+}
+
+function hasCustomerRowVoucherType(row) {
+  return Boolean(getCustomerRowVoucherType(row));
+}
+
+function handleCustomerVoucherInput(rowIndex, voucherType) {
+  const tableBody = document.getElementById('customers-table-body');
+  const row = tableBody?.querySelector(`tr[data-customer-row="${rowIndex}"]`);
+  if (!row) return;
+
+  const activeInput = row.querySelector(`input[data-voucher-type="${voucherType}"]`);
+  if (activeInput?.checked) {
+    row.querySelectorAll('input[data-voucher-type]').forEach((input) => {
+      if (input !== activeInput) input.checked = false;
+    });
+  }
+
+  handleCustomerInput(rowIndex);
 }
 
 function isShiftAssignmentCustomerSelect(select) {
@@ -12806,8 +13069,8 @@ function updateCustomerNameOptions(customers = []) {
     }
   });
 
-  document.querySelectorAll('.customer-name-select, .oil-customer-name-select, .shift-customer-payment-name').forEach((select) => {
-    populateCustomerNameSelect(select, select.value, select.selectedOptions?.[0]?.dataset?.customerName || '');
+  document.querySelectorAll('.customer-name-select, .oil-customer-name-select, .shift-customer-payment-name').forEach((field) => {
+    populateCustomerNameSelect(field, field.value, field.selectedOptions?.[0]?.dataset?.customerName || field.value || '');
   });
   syncShiftVoucherControls();
 }
@@ -12820,18 +13083,159 @@ function getCustomerOptionByName(value) {
   return customerNameOptionsByName.get(String(value || '').trim()) || null;
 }
 
-function getCustomerOptionFromSelect(select) {
-  if (!select) return null;
-  const selectedValue = String(select.value || '').trim();
+function getCustomerOptionFromSelect(field) {
+  if (!field) return null;
+  const selectedValue = String(field.value || '').trim();
   const optionById = getCustomerOptionById(selectedValue);
   if (optionById) return optionById;
 
-  const selectedName = String(select.selectedOptions?.[0]?.dataset?.customerName || select.selectedOptions?.[0]?.textContent || '').trim();
+  const selectedName = String(field.selectedOptions?.[0]?.dataset?.customerName || field.selectedOptions?.[0]?.textContent || selectedValue || '').trim();
   return getCustomerOptionByName(selectedName) || (selectedName ? { id: null, name: selectedName } : null);
+}
+
+function populateCustomerNameInput(input, selectedValue = '', selectedName = '') {
+  if (!input) return;
+
+  const rawValue = String(selectedValue || '').trim();
+  const rawName = String(selectedName || '').trim();
+  const selectedOption = getCustomerOptionById(rawValue) || getCustomerOptionByName(rawValue) || getCustomerOptionByName(rawName);
+  input.value = selectedOption?.name || rawName || rawValue;
+}
+
+function getShiftCustomerAssignmentMenu(input) {
+  return input?.closest?.('.shift-customer-combobox')?.querySelector('.shift-customer-assignment-menu') || null;
+}
+
+function getFilteredShiftCustomerAssignmentOptions(input) {
+  const query = String(input?.value || '').trim().toLowerCase();
+  if (!query) {
+    return customerNameOptionsCache;
+  }
+
+  return customerNameOptionsCache.filter((customer) => (
+    String(customer.name || '').toLowerCase().includes(query)
+  ));
+}
+
+function setShiftCustomerAssignmentActiveOption(menu, nextIndex) {
+  if (!menu) return;
+  const items = Array.from(menu.querySelectorAll('.shift-customer-assignment-option'));
+  if (items.length === 0) return;
+
+  const activeIndex = Math.max(0, Math.min(nextIndex, items.length - 1));
+  menu.dataset.activeIndex = String(activeIndex);
+  items.forEach((item, index) => {
+    item.classList.toggle('active', index === activeIndex);
+    if (index === activeIndex) {
+      item.scrollIntoView({ block: 'nearest' });
+    }
+  });
+}
+
+function selectShiftCustomerAssignment(input, customerName) {
+  if (!input) return;
+  input.value = String(customerName || '').trim();
+  hideShiftCustomerAssignmentMenu(input, true);
+
+  const rowIndex = parseInt(input.dataset.row, 10);
+  if (Number.isFinite(rowIndex)) {
+    handleCustomerInput(rowIndex);
+  }
+}
+
+function showShiftCustomerAssignmentMenu(input) {
+  const menu = getShiftCustomerAssignmentMenu(input);
+  if (!menu || !input || input.disabled || input.readOnly) return;
+
+  const options = getFilteredShiftCustomerAssignmentOptions(input);
+  menu.innerHTML = '';
+
+  if (options.length === 0) {
+    menu.style.display = 'none';
+    return;
+  }
+
+  options.forEach((customer, index) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'shift-customer-assignment-option';
+    item.textContent = customer.name;
+    item.dataset.customerId = String(customer.id);
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      selectShiftCustomerAssignment(input, customer.name);
+    });
+    menu.appendChild(item);
+    if (index === 0) {
+      item.classList.add('active');
+    }
+  });
+
+  menu.dataset.activeIndex = '0';
+  menu.style.display = 'block';
+}
+
+function hideShiftCustomerAssignmentMenu(input, immediate = false) {
+  const menu = getShiftCustomerAssignmentMenu(input);
+  if (!menu) return;
+
+  const hide = () => {
+    menu.style.display = 'none';
+    menu.innerHTML = '';
+    menu.dataset.activeIndex = '0';
+  };
+
+  if (immediate) {
+    hide();
+    return;
+  }
+
+  setTimeout(hide, 120);
+}
+
+function handleShiftCustomerAssignmentKeydown(event, input) {
+  const menu = getShiftCustomerAssignmentMenu(input);
+  const isOpen = menu && menu.style.display !== 'none' && menu.children.length > 0;
+
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!isOpen) {
+      showShiftCustomerAssignmentMenu(input);
+      return;
+    }
+
+    const currentIndex = parseInt(menu.dataset.activeIndex, 10) || 0;
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    setShiftCustomerAssignmentActiveOption(menu, currentIndex + delta);
+    return;
+  }
+
+  if (event.key === 'Enter' && isOpen) {
+    const activeIndex = parseInt(menu.dataset.activeIndex, 10) || 0;
+    const activeItem = menu.querySelectorAll('.shift-customer-assignment-option')[activeIndex];
+    if (activeItem) {
+      event.preventDefault();
+      event.stopPropagation();
+      selectShiftCustomerAssignment(input, activeItem.textContent);
+    }
+    return;
+  }
+
+  if (event.key === 'Escape' && isOpen) {
+    event.preventDefault();
+    event.stopPropagation();
+    hideShiftCustomerAssignmentMenu(input, true);
+  }
 }
 
 function populateCustomerNameSelect(select, selectedValue = '', selectedName = '') {
   if (!select) return;
+
+  if (select instanceof HTMLInputElement) {
+    populateCustomerNameInput(select, selectedValue, selectedName);
+    return;
+  }
 
   const rawValue = String(selectedValue || '').trim();
   const rawName = String(selectedName || '').trim();
@@ -12868,14 +13272,14 @@ function populateCustomerNameSelect(select, selectedValue = '', selectedName = '
 
 function syncCustomerVoucherState(row, { clearCustomer = false } = {}) {
   if (!row) return;
-  const customerSelect = row.querySelector('select[data-field="name"]');
-  const voucherInput = row.querySelector('input[data-field="voucher"]');
-  if (!customerSelect || !voucherInput) return;
+  const customerSelect = row.querySelector('[data-field="name"]');
+  if (!customerSelect) return;
 
-  if (voucherInput.checked) {
-    if (clearCustomer || isVoucherCustomerAssignment(customerSelect.value, customerSelect.selectedOptions?.[0]?.dataset?.customerName || '')) {
+  if (hasCustomerRowVoucherType(row)) {
+    if (clearCustomer || isVoucherCustomerAssignment(customerSelect.value, customerSelect.selectedOptions?.[0]?.dataset?.customerName || customerSelect.value || '')) {
       customerSelect.value = '';
     }
+    hideShiftCustomerAssignmentMenu(customerSelect, true);
     customerSelect.disabled = true;
   } else {
     customerSelect.disabled = shouldKeepShiftAssignmentReadOnly();
@@ -12915,8 +13319,8 @@ function initializeCustomersTable() {
   // Clear existing rows
   tableBody.innerHTML = '';
 
-  // Add 16 initial rows
-  for (let i = 0; i < 16; i++) {
+  // Add a compact set of blank rows; more rows are appended automatically.
+  for (let i = 0; i < DEFAULT_CUSTOMER_ROWS_COUNT; i++) {
     addCustomerRow(i);
   }
 }
@@ -12933,12 +13337,24 @@ function addCustomerRow(index) {
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="80" oninput="handleCustomerInput(${index})"></td>
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="92" oninput="handleCustomerInput(${index})"></td>
     <td><input type="number" step="0.01" class="customer-fuel-input" data-row="${index}" data-field="95" oninput="handleCustomerInput(${index})"></td>
-    <td><select class="customer-name-select" data-row="${index}" data-field="name" onchange="handleCustomerInput(${index})"></select></td>
-    <td><input type="checkbox" class="customer-voucher-checkbox" data-row="${index}" data-field="voucher" onchange="handleCustomerInput(${index})"></td>
+    <td>
+      <div class="shift-customer-combobox">
+        <input type="text" class="customer-name-select" data-row="${index}" data-field="name" autocomplete="off"
+               onfocus="showShiftCustomerAssignmentMenu(this)"
+               oninput="handleCustomerInput(${index}); showShiftCustomerAssignmentMenu(this)"
+               onkeydown="handleShiftCustomerAssignmentKeydown(event, this)"
+               onblur="hideShiftCustomerAssignmentMenu(this)"
+               onchange="handleCustomerInput(${index})">
+        <div class="shift-customer-assignment-menu" role="listbox"></div>
+      </div>
+    </td>
+    <td><input type="checkbox" class="customer-voucher-checkbox" data-row="${index}" data-field="voucher" data-voucher-type="company" onchange="handleCustomerVoucherInput(${index}, 'company')"></td>
+    <td><input type="checkbox" class="customer-voucher-checkbox" data-row="${index}" data-field="new_voucher" data-voucher-type="new" onchange="handleCustomerVoucherInput(${index}, 'new')"></td>
+    <td><input type="checkbox" class="customer-voucher-checkbox" data-row="${index}" data-field="difference_voucher" data-voucher-type="difference" onchange="handleCustomerVoucherInput(${index}, 'difference')"></td>
   `;
 
   tableBody.appendChild(row);
-  populateCustomerNameSelect(row.querySelector('select[data-field="name"]'));
+  populateCustomerNameSelect(row.querySelector('[data-field="name"]'));
 }
 
 function normalizeCustomerRowsData(items) {
@@ -12962,9 +13378,11 @@ function normalizeCustomerRowsData(items) {
       const fuel95 = parseFloat(item['95']) || 0;
       const customerId = parseInt(item.customer_id, 10);
       const name = String(item.name || item.customer_name || '').trim();
-      const voucher = isVoucherCustomerAssignment(customerId, name, item.voucher);
+      const voucherType = normalizeCustomerVoucherType(item);
+      const voucher = voucherType === CUSTOMER_VOUCHER_TYPES.company || isVoucherCustomerAssignment(customerId, name, item.voucher);
+      const isVoucherRow = Boolean(voucherType || voucher);
 
-      if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !(Number.isFinite(customerId) && customerId > 0) && !voucher) {
+      if (diesel === 0 && fuel80 === 0 && fuel92 === 0 && fuel95 === 0 && !name && !(Number.isFinite(customerId) && customerId > 0) && !isVoucherRow) {
         return null;
       }
 
@@ -12973,9 +13391,12 @@ function normalizeCustomerRowsData(items) {
         '80': fuel80,
         '92': fuel92,
         '95': fuel95,
-        customer_id: voucher ? null : (Number.isFinite(customerId) && customerId > 0 ? customerId : null),
-        name: voucher ? '' : name,
-        voucher
+        customer_id: isVoucherRow ? null : (Number.isFinite(customerId) && customerId > 0 ? customerId : null),
+        name: isVoucherRow ? '' : name,
+        voucher: voucherType === CUSTOMER_VOUCHER_TYPES.company || voucher,
+        voucher_type: voucherType || (voucher ? CUSTOMER_VOUCHER_TYPES.company : ''),
+        new_voucher: voucherType === CUSTOMER_VOUCHER_TYPES.new,
+        difference_voucher: voucherType === CUSTOMER_VOUCHER_TYPES.difference
       };
     })
     .filter(Boolean);
@@ -12989,18 +13410,23 @@ function collectCustomerRowsData() {
   const rawRows = rows.map((row) => {
     const getInputValue = (selector) => row.querySelector(selector)?.value || '';
     const getCheckboxValue = (selector) => Boolean(row.querySelector(selector)?.checked);
-    const customerSelect = row.querySelector('select[data-field="name"]');
+    const customerSelect = row.querySelector('[data-field="name"]');
     const customerOption = getCustomerOptionFromSelect(customerSelect);
-    const voucher = getCheckboxValue('input[data-field="voucher"]');
+    const voucherType = getCustomerRowVoucherType(row);
+    const isVoucherRow = Boolean(voucherType);
+    const voucher = voucherType === CUSTOMER_VOUCHER_TYPES.company;
 
     return {
       diesel: parseFloat(getInputValue('input[data-field="diesel"]')) || 0,
       '80': parseFloat(getInputValue('input[data-field="80"]')) || 0,
       '92': parseFloat(getInputValue('input[data-field="92"]')) || 0,
       '95': parseFloat(getInputValue('input[data-field="95"]')) || 0,
-      customer_id: voucher ? null : (customerOption?.id || null),
-      name: voucher ? '' : String(customerOption?.name || '').trim(),
-      voucher
+      customer_id: isVoucherRow ? null : (customerOption?.id || null),
+      name: isVoucherRow ? '' : String(customerOption?.name || '').trim(),
+      voucher,
+      voucher_type: voucherType,
+      new_voucher: voucherType === CUSTOMER_VOUCHER_TYPES.new,
+      difference_voucher: voucherType === CUSTOMER_VOUCHER_TYPES.difference
     };
   });
 
@@ -13012,7 +13438,7 @@ function setCustomerRowsData(rowsData = []) {
   if (!tableBody) return;
 
   const normalizedRows = normalizeCustomerRowsData(rowsData);
-  const rowsCount = Math.max(16, normalizedRows.length + 1);
+  const rowsCount = Math.max(DEFAULT_CUSTOMER_ROWS_COUNT, normalizedRows.length + 1);
 
   tableBody.innerHTML = '';
   for (let i = 0; i < rowsCount; i += 1) {
@@ -13027,16 +13453,21 @@ function setCustomerRowsData(rowsData = []) {
     const fuel80Input = row.querySelector('input[data-field="80"]');
     const fuel92Input = row.querySelector('input[data-field="92"]');
     const fuel95Input = row.querySelector('input[data-field="95"]');
-    const nameInput = row.querySelector('select[data-field="name"]');
+    const nameInput = row.querySelector('[data-field="name"]');
     const voucherInput = row.querySelector('input[data-field="voucher"]');
+    const newVoucherInput = row.querySelector('input[data-field="new_voucher"]');
+    const differenceVoucherInput = row.querySelector('input[data-field="difference_voucher"]');
+    const voucherType = normalizeCustomerVoucherType(item);
 
     if (dieselInput) dieselInput.value = item.diesel || '';
     if (fuel80Input) fuel80Input.value = item['80'] || '';
     if (fuel92Input) fuel92Input.value = item['92'] || '';
     if (fuel95Input) fuel95Input.value = item['95'] || '';
     if (nameInput) populateCustomerNameSelect(nameInput, item.customer_id || item.name || '', item.name || '');
-    if (voucherInput) voucherInput.checked = Boolean(item.voucher);
-    syncCustomerVoucherState(row, { clearCustomer: Boolean(item.voucher) });
+    if (voucherInput) voucherInput.checked = voucherType === CUSTOMER_VOUCHER_TYPES.company;
+    if (newVoucherInput) newVoucherInput.checked = voucherType === CUSTOMER_VOUCHER_TYPES.new;
+    if (differenceVoucherInput) differenceVoucherInput.checked = voucherType === CUSTOMER_VOUCHER_TYPES.difference;
+    syncCustomerVoucherState(row, { clearCustomer: Boolean(voucherType) });
   });
 
   updateCustomerColumnSums();
@@ -13077,6 +13508,15 @@ function updateCustomerColumnSums() {
   const fuel80ClientsInput = document.getElementById('fuel-80-clients');
   const fuel92ClientsInput = document.getElementById('fuel-92-clients');
   const fuel95ClientsInput = document.getElementById('fuel-95-clients');
+  const dieselTotalCell = document.getElementById('customers-total-diesel');
+  const fuel80TotalCell = document.getElementById('customers-total-80');
+  const fuel92TotalCell = document.getElementById('customers-total-92');
+  const fuel95TotalCell = document.getElementById('customers-total-95');
+
+  if (dieselTotalCell) dieselTotalCell.textContent = formatNumber(sums.diesel);
+  if (fuel80TotalCell) fuel80TotalCell.textContent = formatNumber(sums['80']);
+  if (fuel92TotalCell) fuel92TotalCell.textContent = formatNumber(sums['92']);
+  if (fuel95TotalCell) fuel95TotalCell.textContent = formatNumber(sums['95']);
 
   if (dieselClientsInput) {
     dieselClientsInput.value = formatNumber(sums.diesel);
@@ -13109,8 +13549,7 @@ function handleCustomerInput(rowIndex) {
   if (!tableBody) return;
 
   const activeRow = tableBody.querySelector(`tr[data-customer-row="${rowIndex}"]`);
-  const activeVoucherInput = activeRow?.querySelector('input[data-field="voucher"]');
-  syncCustomerVoucherState(activeRow, { clearCustomer: Boolean(activeVoucherInput?.checked) });
+  syncCustomerVoucherState(activeRow, { clearCustomer: hasCustomerRowVoucherType(activeRow) });
 
   const allRows = tableBody.querySelectorAll('tr[data-customer-row]');
   const lastRow = allRows[allRows.length - 1];
@@ -13119,7 +13558,7 @@ function handleCustomerInput(rowIndex) {
   // Check if input is in the last row
   if (rowIndex === lastRowIndex) {
     // Check if any field in the last row has a value
-    const inputs = lastRow.querySelectorAll('input[type="number"], select[data-field="name"]');
+    const inputs = lastRow.querySelectorAll('input[type="number"], [data-field="name"]');
     const hasValue = Array.from(inputs).some(input => input.value.trim() !== '');
 
     if (hasValue) {
@@ -13893,11 +14332,10 @@ function validateShiftData() {
       ), 0);
       if (quantity <= 0) return;
 
-      const voucherInput = row.querySelector('input[data-field="voucher"]');
-      const customerSelect = row.querySelector('select[data-field="name"]');
+      const customerSelect = row.querySelector('[data-field="name"]');
       const customerOption = getCustomerOptionFromSelect(customerSelect);
-      if (!voucherInput?.checked && !customerOption?.id) {
-        errors.push(`جدول العملاء (${index + 1}): اختر العميل أو حدد بونات`);
+      if (!hasCustomerRowVoucherType(row) && !String(customerOption?.name || '').trim()) {
+        errors.push(`جدول العملاء (${index + 1}): اختر العميل أو حدد نوع البون`);
       }
     });
   }
@@ -14041,6 +14479,7 @@ async function saveShift() {
 
       // Recompute fuel rows for the new shift from fresh prices + cleared clients/customers.
       await refreshFuelRowsAfterShiftSave();
+      scheduleDieselLastShiftFocus();
     } else {
       if (result.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
         alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
@@ -16253,6 +16692,8 @@ async function initializeShiftEntry() {
     await loadFuelPricesForDate(dateInput.value);
     await loadAllOilPrices();
   }
+
+  scheduleDieselLastShiftFocus();
 }
 
 // ============================================

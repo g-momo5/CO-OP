@@ -12,11 +12,11 @@ mkdir -p "$DEST_DIR"
 
 # Copia file essenziali
 echo "📁 Copiando file sorgente..."
-cp -v main.js renderer.js index.html styles.css rtl-config.js "$DEST_DIR/" 2>/dev/null
+cp -rv src "$DEST_DIR/" 2>/dev/null
 
 # Copia file HTML aggiuntivi
 echo "📄 Copiando file HTML..."
-cp -v *.html "$DEST_DIR/" 2>/dev/null | grep -v "Skipping"
+find . -maxdepth 1 -name "*.html" -exec cp -v {} "$DEST_DIR/" \; 2>/dev/null | grep -v "Skipping"
 
 # Copia configurazione
 echo "⚙️ Copiando configurazione..."
@@ -53,7 +53,6 @@ echo "   1. Sposta la cartella nella nuova posizione"
 echo "   2. Esegui: npm install"
 echo "   3. (Opzionale) Per la build: npm run build:mac"
 echo "   4. (Opzionale) Per clonare il repo: git clone https://github.com/g-momo5/CO-OP.git"
-
 
 
 

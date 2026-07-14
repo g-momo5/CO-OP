@@ -28,6 +28,7 @@ class DatabaseSchema {
     this.createCustomerBalanceAdjustmentsTable(db);
     this.createShiftsTable(db);
     this.createAnnualInventoriesTable(db);
+    this.createCompanyVoucherSettlementsTable(db);
     this.createSafeBookMovementsTable(db);
     this.createShiftBalanceChangeHistoryTable(db);
     this.createShiftCorrectionsTable(db);
@@ -336,6 +337,20 @@ class DatabaseSchema {
         status TEXT DEFAULT 'balanced',
         finalized INTEGER DEFAULT 0,
         finalized_at INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+  }
+
+  static createCompanyVoucherSettlementsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS company_voucher_settlements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        voucher_month TEXT NOT NULL UNIQUE,
+        paid_amount REAL DEFAULT 0,
+        paid_at TEXT,
+        notes TEXT DEFAULT '',
         created_at INTEGER DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
       )

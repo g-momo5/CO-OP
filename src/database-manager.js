@@ -584,6 +584,17 @@ class DatabaseManager {
       console.log('Annual inventories index creation:', err.message);
     }
 
+    // Company voucher monthly settlement table
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS company_voucher_settlements (
+      id SERIAL PRIMARY KEY,
+      voucher_month TEXT NOT NULL UNIQUE,
+      paid_amount REAL DEFAULT 0,
+      paid_at TEXT,
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     // Safe book movements table
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS safe_book_movements (
       id SERIAL PRIMARY KEY,
@@ -941,7 +952,7 @@ class DatabaseManager {
     const tables = [
       'sales', 'purchase_prices', 'products', 'price_history', 'purchase_price_history',
       'oil_movements', 'fuel_movements', 'fuel_invoices', 'oil_invoices',
-      'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'safe_book_movements',
+      'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'company_voucher_settlements', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
       'app_devices', 'app_users'

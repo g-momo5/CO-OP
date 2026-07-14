@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="styles.css?v=20260713-user-login-layout">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
     rel="stylesheet">
-  <script src="node_modules/chart.js/dist/chart.umd.min.js"></script>
+  <script src="../node_modules/chart.js/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="rtl-config.js"></script>
@@ -23,7 +23,7 @@
   <section id="login-screen" class="login-screen">
     <div class="login-panel">
       <div class="login-brand">
-        <img src="assets/logo_cpc.png" alt="CO-OP" class="login-brand-logo">
+        <img src="../assets/logo_cpc.png" alt="CO-OP" class="login-brand-logo">
         <h1>محطة بنزين سمنود</h1>
         <p class="login-instructions">اختر الحساب للمتابعة. الحسابات المحمية تطلب كلمة المرور.</p>
       </div>
@@ -74,6 +74,11 @@
               <div class="card-icon">📒</div>
               <h3>جرد سنوي</h3>
               <p>حساب العجز أو الزيادة في نهاية العام</p>
+            </div>
+            <div class="action-card home-company-vouchers-card" onclick="showScreen('company-vouchers', 'home')">
+              <div class="card-icon">🎟️</div>
+              <h3>بونات الشركة</h3>
+              <p>متابعة البونات الشهرية والتحصيل</p>
             </div>
           </div>
 
@@ -160,6 +165,84 @@
                   </div>
                 </div>
               </section>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Company Vouchers Screen -->
+      <div id="company-vouchers-screen" class="screen">
+        <div class="company-vouchers-page">
+          <div class="customer-invoices-header">
+            <div>
+              <h2>بونات الشركة</h2>
+              <p class="summary-subtitle">ملخص شهري للبونات المدفوعة مباشرة وبونات الشركة التي تُحصّل لاحقاً</p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-compact" onclick="loadCompanyVouchersPage()">تحديث</button>
+          </div>
+
+          <div class="customer-invoices-summary-grid company-vouchers-summary-grid">
+            <div class="customer-invoices-total-card">
+              <span>بون جديد + له فرق</span>
+              <strong id="company-vouchers-direct-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card">
+              <span>بون الشركة</span>
+              <strong id="company-vouchers-company-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card">
+              <span>المحصل من الشركة</span>
+              <strong id="company-vouchers-paid-total">٠ ج.م.‏</strong>
+            </div>
+            <div class="customer-invoices-total-card current-balance">
+              <span>المتبقي على الشركة</span>
+              <strong id="company-vouchers-remaining-total">٠ ج.م.‏</strong>
+            </div>
+          </div>
+
+          <div class="company-vouchers-layout">
+            <div class="customer-invoices-table-wrapper company-vouchers-months-wrapper">
+              <table class="base-table customer-invoices-table">
+                <thead>
+                  <tr>
+                    <th>الشهر</th>
+                    <th>بون جديد + له فرق</th>
+                    <th>بون الشركة</th>
+                    <th>المتبقي</th>
+                  </tr>
+                </thead>
+                <tbody id="company-vouchers-months-body"></tbody>
+              </table>
+              <div id="company-vouchers-empty" class="empty-state" style="display:none;">لا توجد بونات مسجلة</div>
+            </div>
+
+            <div class="company-vouchers-detail-card">
+              <div class="company-vouchers-detail-header">
+                <h3 id="company-vouchers-selected-month">-</h3>
+                <div class="company-vouchers-pay-form">
+                  <input type="text" inputmode="decimal" id="company-vouchers-paid-amount" class="summary-numeric-input" placeholder="المبلغ المحصل">
+                  <input type="date" id="company-vouchers-paid-date">
+                  <input type="text" id="company-vouchers-notes" placeholder="ملاحظات">
+                  <button type="button" class="btn btn-primary btn-compact" onclick="saveCompanyVoucherSettlement()">حفظ التحصيل</button>
+                </div>
+              </div>
+              <div class="customer-invoices-table-wrapper">
+                <table class="base-table customer-invoices-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>الوردية</th>
+                      <th>النوع</th>
+                      <th>الصنف</th>
+                      <th>الكمية</th>
+                      <th>السعر</th>
+                      <th>الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody id="company-vouchers-details-body"></tbody>
+                </table>
+                <div id="company-vouchers-details-empty" class="empty-state" style="display:none;">لا توجد تفاصيل لهذا الشهر</div>
+              </div>
             </div>
           </div>
         </div>
@@ -847,7 +930,7 @@
             <table class="customers-table">
               <thead>
                 <tr>
-                  <th colspan="6">عملاء</th>
+                  <th colspan="8">عملاء</th>
                 </tr>
                 <tr>
                   <th>سولار</th>
@@ -855,12 +938,23 @@
                   <th>٩٢</th>
                   <th>٩٥</th>
                   <th>العميل</th>
-                  <th>بونات</th>
+                  <th>بون الشركة</th>
+                  <th>بون جديد</th>
+                  <th>له فرق</th>
                 </tr>
               </thead>
               <tbody id="customers-table-body">
                 <!-- Rows will be generated dynamically -->
               </tbody>
+              <tfoot>
+                <tr class="customers-totals-row">
+                  <td id="customers-total-diesel">0</td>
+                  <td id="customers-total-80">0</td>
+                  <td id="customers-total-92">0</td>
+                  <td id="customers-total-95">0</td>
+                  <td colspan="4">الإجمالي</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
