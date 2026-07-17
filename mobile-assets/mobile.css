@@ -467,6 +467,26 @@ button {
   transform: translateY(-1px);
 }
 
+.land-season-filter {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.land-season-filter select {
+  width: min(140px, 100%);
+  min-height: 38px;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--coop-line);
+  background: #ffffff;
+  color: var(--coop-ink);
+  font-weight: 700;
+}
+
 .empty,
 .loading,
 .error {

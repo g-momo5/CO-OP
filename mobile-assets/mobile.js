@@ -216,12 +216,9 @@
   function landSeasonFilter(formId) {
     return `
       <form id="${formId}" class="filter-bar land-season-filter">
-        <label>السنة
-          <select name="season_key">
-            ${landSeasonOptions().map((year) => `<option value="${escapeHtml(year)}"${year === state.landSeasonKey ? ' selected' : ''}>${escapeHtml(year)}</option>`).join('')}
-          </select>
-        </label>
-        <button type="submit">تحديث</button>
+        <select name="season_key" aria-label="السنة">
+          ${landSeasonOptions().map((year) => `<option value="${escapeHtml(year)}"${year === state.landSeasonKey ? ' selected' : ''}>${escapeHtml(year)}</option>`).join('')}
+        </select>
       </form>
     `;
   }
@@ -229,8 +226,9 @@
   function wireLandSeasonFilter(formId, reload) {
     const form = document.getElementById(formId);
     if (!form) return;
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
+    const select = form.querySelector('select[name="season_key"]');
+    if (!select) return;
+    select.addEventListener('change', () => {
       const selected = new FormData(form).get('season_key');
       state.landSeasonKey = String(selected || state.landSeasonKey || new Date().getFullYear());
       reload();
@@ -338,17 +336,12 @@
     const metricData = landDashboardMetricData(data);
     content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
       ${landSeasonFilter('landDashboardSeasonForm')}
-      ${table(
-        ['البند', 'القيمة'],
-        [
-          ['عدد الأراضي', metricData.plotsCount],
-          ['إجمالي المساحة', metricData.totalSahmLabel],
-          ['الإيجار المتوقع', data.expected_egp],
-          ['المتبقي', data.remaining_egp]
-        ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '-')}</td></tr>`),
-        'لا توجد بيانات',
-        'land-dashboard-summary-table'
-      )}
+      <div class="grid two">
+        ${metric('عدد الأراضي', metricData.plotsCount, '📍')}
+        ${metric('إجمالي المساحة', metricData.totalSahmLabel, '📐')}
+        ${metric('الإيجار المتوقع', data.expected_egp, '💰')}
+        ${metric('المتبقي', data.remaining_egp, '🧾')}
+      </div>
       ${table(
         ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
         (data.assignments || []).map((row) => `
