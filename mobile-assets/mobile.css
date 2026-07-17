@@ -249,6 +249,11 @@ button {
   line-height: 1;
 }
 
+.card-title-row.has-title-actions {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+
 .metric {
   min-height: 124px;
   display: flex;
@@ -477,14 +482,49 @@ button {
   box-shadow: none;
 }
 
+.card-title-row .land-season-filter {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .land-season-filter select {
-  width: min(140px, 100%);
+  width: min(104px, 100%);
   min-height: 38px;
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--coop-line);
   background: #ffffff;
   color: var(--coop-ink);
   font-weight: 700;
+}
+
+.land-dashboard-contracts-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: visible;
+}
+
+.land-dashboard-contracts-table th:first-child,
+.land-dashboard-contracts-table td:first-child {
+  position: sticky;
+  right: 0;
+  left: auto;
+  z-index: 2;
+  min-width: 120px;
+  max-width: 150px;
+  background: #ffffff;
+  box-shadow: -1px 0 0 var(--coop-line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.land-dashboard-contracts-table th:first-child {
+  z-index: 3;
+  background: var(--coop-ink);
+  color: #ffffff;
+}
+
+.land-dashboard-contracts-table tbody tr:hover td:first-child {
+  background: #f8f9fa;
 }
 
 .empty,

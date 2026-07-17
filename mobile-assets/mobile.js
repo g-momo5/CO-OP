@@ -71,6 +71,23 @@
     return moneyFormatter.format(Number.isFinite(numeric) ? numeric : 0);
   }
 
+  function formatWholeEgp(value) {
+    if (value === undefined || value === null || value === '') return '-';
+    const raw = String(value).trim();
+    const amount = raw.replace(/[^\d,.-]/g, '');
+    if (!amount) return raw;
+    let normalized = amount;
+    if (amount.includes(',') && amount.includes('.')) {
+      normalized = amount.lastIndexOf(',') > amount.lastIndexOf('.')
+        ? amount.replace(/\./g, '').replace(',', '.')
+        : amount.replace(/,/g, '');
+    } else if (amount.includes(',')) {
+      normalized = amount.replace(',', '.');
+    }
+    const numeric = Number(normalized);
+    return Number.isFinite(numeric) ? `${Math.round(numeric)} جنيه مصري` : raw;
+  }
+
   function sumAmounts(rows) {
     return (rows || []).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   }
@@ -235,11 +252,13 @@
     });
   }
 
-  function sectionCard(icon, title, body) {
+  function sectionCard(icon, title, body, titleActions = '') {
+    const titleRowClass = ['card-title-row', titleActions ? 'has-title-actions' : ''].filter(Boolean).join(' ');
     return `
       <section class="card">
-        <div class="card-title-row">
+        <div class="${titleRowClass}">
           <h2 class="title-main"><span class="title-icon">${escapeHtml(icon)}</span>${escapeHtml(title)}</h2>
+          ${titleActions}
         </div>
         ${body}
       </section>
@@ -335,7 +354,6 @@
     const data = await api('land-dashboard', { season_key: state.landSeasonKey });
     const metricData = landDashboardMetricData(data);
     content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
-      ${landSeasonFilter('landDashboardSeasonForm')}
       <div class="grid two">
         ${metric('عدد الأراضي', metricData.plotsCount, '📍')}
         ${metric('إجمالي المساحة', metricData.totalSahmLabel, '📐')}
@@ -349,16 +367,16 @@
             <td>${escapeHtml(row.plot_name || '-')}</td>
             <td>${escapeHtml(row.tenant_name || '-')}</td>
             <td>${escapeHtml(row.assigned_sahm_label || '-')}</td>
-            <td>${escapeHtml(row.rent_egp || '-')}</td>
-            <td>${escapeHtml(row.paid_egp || '-')}</td>
-            <td>${escapeHtml(row.remaining_egp || '-')}</td>
+            <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
+            <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
+            <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
             <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
           </tr>
         `),
         'لا توجد عقود لهذا الموسم',
         'land-dashboard-contracts-table'
       )}
-    `);
+    `, landSeasonFilter('landDashboardSeasonForm'));
     wireLandSeasonFilter('landDashboardSeasonForm', loadLandDashboard);
   }
 

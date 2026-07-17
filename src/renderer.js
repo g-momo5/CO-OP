@@ -17063,6 +17063,12 @@ function landStatusChip(label, status = '') {
   return `<span class="land-status-chip ${className}">${escapeHtml(label)}</span>`;
 }
 
+function formatLandWholeEgpFromCents(cents = 0) {
+  const numericCents = Number(cents);
+  const wholeEgp = Math.round((Number.isFinite(numericCents) ? numericCents : 0) / 100);
+  return `${wholeEgp} جنيه مصري`;
+}
+
 function renderLandTable(headers, rows, emptyText, className = '') {
   if (!rows.length) return landEmpty(emptyText);
   const tableClass = ['base-table', 'land-table', className].filter(Boolean).join(' ');
@@ -17105,7 +17111,7 @@ async function loadLandDashboard() {
             <td>${escapeHtml(plot.total_sahm_label)}</td>
             <td>${escapeHtml(plot.rented_sahm_label)}</td>
             <td>${escapeHtml(plot.available_sahm_label)}</td>
-            <td>${escapeHtml(plot.expected_rent_cents_egp)}</td>
+            <td>${escapeHtml(formatLandWholeEgpFromCents(plot.expected_rent_cents))}</td>
           </tr>
         `),
         'لا توجد أراض مسجلة',
@@ -17439,9 +17445,9 @@ function renderLandAssignmentRowCompact(assignment) {
       <td>${escapeHtml(assignment.plot_name || '-')}</td>
       <td>${escapeHtml(tenantLabel)}</td>
       <td>${escapeHtml(assignment.assigned_sahm_label || '-')}</td>
-      <td>${escapeHtml(assignment.rent_cents_egp || '0.00 جنيه مصري')}</td>
-      <td>${escapeHtml(assignment.total_paid_cents_egp || '0.00 جنيه مصري')}</td>
-      <td>${escapeHtml(assignment.remaining_cents_egp || '0.00 جنيه مصري')}</td>
+      <td>${escapeHtml(formatLandWholeEgpFromCents(assignment.rent_cents))}</td>
+      <td>${escapeHtml(formatLandWholeEgpFromCents(assignment.total_paid_cents))}</td>
+      <td>${escapeHtml(formatLandWholeEgpFromCents(assignment.remaining_cents))}</td>
       <td>${landStatusChip(assignment.payment_status_label || '-', assignment.payment_status)}</td>
     </tr>
   `;
