@@ -7,6 +7,7 @@
   };
 
   const content = document.getElementById('content');
+  const appTitle = document.querySelector('.app-title');
   const lastSync = document.getElementById('lastSync');
   const shiftSummaryDialog = document.getElementById('shiftSummaryDialog');
   const shiftSummaryDialogBody = document.getElementById('shiftSummaryDialogBody');
@@ -195,11 +196,12 @@
   }
 
   function metric(label, value, icon = '📊') {
+    const displayValue = value === undefined || value === null || value === '' ? '-' : value;
     return `
       <div class="metric">
         <div class="metric-icon">${escapeHtml(icon)}</div>
         <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(value)}</strong>
+        <strong>${escapeHtml(displayValue)}</strong>
       </div>
     `;
   }
@@ -267,10 +269,8 @@
     const data = await api('land-dashboard', { season_key: new Date().getFullYear() });
     content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
       <div class="grid two">
-        ${metric('عدد الأراضي', data.plots_count, '📍')}
-        ${metric('إجمالي المساحة', data.total_sahm_label, '📐')}
-        ${metric('المؤجر', data.rented_sahm_label, '🤝')}
-        ${metric('المتاح', data.available_sahm_label, '✅')}
+        ${metric('عدد الأراضي', Number(data.plots_count) || 0, '📍')}
+        ${metric('إجمالي المساحة', data.total_sahm_label || '0 فدان، 0 قيراط، 0 سهم', '📐')}
         ${metric('الإيجار المتوقع', data.expected_egp, '💰')}
         ${metric('المتبقي', data.remaining_egp, '🧾')}
       </div>
@@ -752,6 +752,11 @@
   function switchModule(moduleName) {
     state.currentModule = moduleName === 'land' ? 'land' : 'fuel';
     document.body.classList.toggle('mobile-module-land', state.currentModule === 'land');
+    if (appTitle) {
+      appTitle.textContent = state.currentModule === 'land'
+        ? 'إدارة الأراضي الزراعية'
+        : 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
+    }
     moduleButtons.forEach((button) => {
       button.classList.toggle('active', button.dataset.module === state.currentModule);
     });
