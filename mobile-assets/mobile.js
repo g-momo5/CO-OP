@@ -3,6 +3,8 @@
     apiBase: '/api/mobile-data',
     currentModule: 'fuel',
     currentView: 'overview',
+    landSeasonKey: String(new Date().getFullYear()),
+    landSeasons: [],
     shiftDays: []
   };
 
@@ -184,6 +186,57 @@
     `;
   }
 
+  function landSeasonOptions() {
+    const currentYear = new Date().getFullYear();
+    const seasonYears = (state.landSeasons || [])
+      .map((season) => parseInt(season.season_key, 10))
+      .filter((year) => Number.isInteger(year));
+    const selectedYear = parseInt(state.landSeasonKey, 10);
+    const minYear = seasonYears.length ? Math.min(...seasonYears) : (Number.isInteger(selectedYear) ? selectedYear : currentYear);
+    const maxYear = Math.max(
+      currentYear,
+      Number.isInteger(selectedYear) ? selectedYear : currentYear,
+      seasonYears.length ? Math.max(...seasonYears) : currentYear
+    ) + 1;
+    const years = [];
+    for (let year = minYear; year <= maxYear; year += 1) years.push(String(year));
+    return years;
+  }
+
+  async function ensureLandSeasons() {
+    if (state.landSeasons.length) return;
+    try {
+      const data = await api('land-seasons');
+      state.landSeasons = Array.isArray(data.seasons) ? data.seasons : [];
+    } catch (_error) {
+      state.landSeasons = [];
+    }
+  }
+
+  function landSeasonFilter(formId) {
+    return `
+      <form id="${formId}" class="filter-bar land-season-filter">
+        <label>السنة
+          <select name="season_key">
+            ${landSeasonOptions().map((year) => `<option value="${escapeHtml(year)}"${year === state.landSeasonKey ? ' selected' : ''}>${escapeHtml(year)}</option>`).join('')}
+          </select>
+        </label>
+        <button type="submit">تحديث</button>
+      </form>
+    `;
+  }
+
+  function wireLandSeasonFilter(formId, reload) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selected = new FormData(form).get('season_key');
+      state.landSeasonKey = String(selected || state.landSeasonKey || new Date().getFullYear());
+      reload();
+    });
+  }
+
   function sectionCard(icon, title, body) {
     return `
       <section class="card">
@@ -264,41 +317,78 @@
     `;
   }
 
+  function landDashboardMetricData(data = {}) {
+    const plots = Array.isArray(data.plots) ? data.plots : [];
+    const plotsCount = data.plots_count !== undefined && data.plots_count !== null
+      ? Number(data.plots_count)
+      : plots.length;
+    const totalSahmLabel = data.total_sahm_label
+      || (plots.length === 1 ? plots[0].total_sahm_label : '')
+      || '0 فدان، 0 قيراط، 0 سهم';
+    return {
+      plotsCount: Number.isFinite(plotsCount) ? plotsCount : 0,
+      totalSahmLabel
+    };
+  }
+
   async function loadLandDashboard() {
     setLoading();
-    const data = await api('land-dashboard', { season_key: new Date().getFullYear() });
+    await ensureLandSeasons();
+    const data = await api('land-dashboard', { season_key: state.landSeasonKey });
+    const metricData = landDashboardMetricData(data);
     content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
-      <div class="grid two">
-        ${metric('عدد الأراضي', Number(data.plots_count) || 0, '📍')}
-        ${metric('إجمالي المساحة', data.total_sahm_label || '0 فدان، 0 قيراط، 0 سهم', '📐')}
-        ${metric('الإيجار المتوقع', data.expected_egp, '💰')}
-        ${metric('المتبقي', data.remaining_egp, '🧾')}
-      </div>
-      <div class="land-mobile-list">
-        ${(data.assignments || []).map((row) => landItem(`${row.plot_name} - ${row.tenant_name}`, [
-          ['المساحة', row.assigned_sahm_label],
-          ['الإيجار', row.rent_egp],
-          ['المدفوع', row.paid_egp],
-          ['المتبقي', row.remaining_egp],
-          ['الحالة', landStatusLabel(row.payment_status)]
-        ])).join('') || '<div class="empty">لا توجد عقود لهذا الموسم</div>'}
-      </div>
+      ${landSeasonFilter('landDashboardSeasonForm')}
+      ${table(
+        ['البند', 'القيمة'],
+        [
+          ['عدد الأراضي', metricData.plotsCount],
+          ['إجمالي المساحة', metricData.totalSahmLabel],
+          ['الإيجار المتوقع', data.expected_egp],
+          ['المتبقي', data.remaining_egp]
+        ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '-')}</td></tr>`),
+        'لا توجد بيانات',
+        'land-dashboard-summary-table'
+      )}
+      ${table(
+        ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+        (data.assignments || []).map((row) => `
+          <tr>
+            <td>${escapeHtml(row.plot_name || '-')}</td>
+            <td>${escapeHtml(row.tenant_name || '-')}</td>
+            <td>${escapeHtml(row.assigned_sahm_label || '-')}</td>
+            <td>${escapeHtml(row.rent_egp || '-')}</td>
+            <td>${escapeHtml(row.paid_egp || '-')}</td>
+            <td>${escapeHtml(row.remaining_egp || '-')}</td>
+            <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+          </tr>
+        `),
+        'لا توجد عقود لهذا الموسم',
+        'land-dashboard-contracts-table'
+      )}
     `);
+    wireLandSeasonFilter('landDashboardSeasonForm', loadLandDashboard);
   }
 
   async function loadLandPlots() {
     setLoading();
-    const data = await api('land-plots', { season_key: new Date().getFullYear() });
-    content.innerHTML = sectionCard('📍', 'قطع الأرض', `
-      <div class="land-mobile-list">
-        ${(data.plots || []).map((plot) => landItem(plot.name, [
-          ['المساحة', plot.total_sahm_label],
-          ['المؤجر', plot.rented_sahm_label],
-          ['المتاح', plot.available_sahm_label],
-          ['الإيجار المتوقع', plot.expected_rent_egp]
-        ])).join('') || '<div class="empty">لا توجد أراض مسجلة</div>'}
-      </div>
-    `);
+    try {
+      await ensureLandSeasons();
+      const data = await api('land-plots', { season_key: state.landSeasonKey });
+      content.innerHTML = sectionCard('📍', 'قطع الأرض', `
+        ${landSeasonFilter('landPlotsSeasonForm')}
+        <div class="land-mobile-list">
+          ${(data.plots || []).map((plot) => landItem(plot.name, [
+            ['المساحة', plot.total_sahm_label],
+            ['المؤجر', plot.rented_sahm_label],
+            ['المتاح', plot.available_sahm_label],
+            ['الإيجار المتوقع', plot.expected_rent_egp]
+          ])).join('') || '<div class="empty">لا توجد أراض مسجلة</div>'}
+        </div>
+      `);
+      wireLandSeasonFilter('landPlotsSeasonForm', loadLandPlots);
+    } catch (error) {
+      setError(errorMessage(error));
+    }
   }
 
   async function loadLandTenants() {
@@ -318,8 +408,10 @@
 
   async function loadLandReports() {
     setLoading();
-    const data = await api('land-reports', { kind: 'missing-payments', season_key: new Date().getFullYear() });
+    await ensureLandSeasons();
+    const data = await api('land-reports', { kind: 'missing-payments', season_key: state.landSeasonKey });
     content.innerHTML = sectionCard('📋', 'المدفوعات الناقصة', `
+      ${landSeasonFilter('landReportsSeasonForm')}
       <div class="land-mobile-list">
         ${(data.rows || []).map((row) => landItem(`${row.plot_name} - ${row.tenant_name}`, [
           ['المساحة', row.assigned_sahm_label],
@@ -330,6 +422,7 @@
         ])).join('') || '<div class="empty">لا توجد مدفوعات ناقصة</div>'}
       </div>
     `);
+    wireLandSeasonFilter('landReportsSeasonForm', loadLandReports);
   }
 
   function renderHomeChartCanvas(chart) {

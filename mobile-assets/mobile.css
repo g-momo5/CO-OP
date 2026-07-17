@@ -425,7 +425,8 @@ button {
   font-weight: 700;
 }
 
-.filter-bar input {
+.filter-bar input,
+.filter-bar select {
   width: 100%;
   min-width: 0;
   border: 1px solid #ddd;
@@ -435,7 +436,8 @@ button {
   color: var(--coop-ink);
 }
 
-.filter-bar input:focus {
+.filter-bar input:focus,
+.filter-bar select:focus {
   outline: none;
   border-color: var(--coop-red);
   box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.1);

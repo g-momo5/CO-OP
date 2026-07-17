@@ -1129,6 +1129,15 @@ async function ensureLandSeason(seasonKey) {
   return rows[0] || null;
 }
 
+async function getLandSeasons() {
+  return query(`
+    SELECT season_key, name
+    FROM land_seasons
+    WHERE archived_at IS NULL
+    ORDER BY season_key ASC
+  `).catch(() => []);
+}
+
 async function getLandAssignments(queryParams = {}) {
   const season = await ensureLandSeason(queryParams.season || queryParams.season_key);
   if (!season) return [];
@@ -1178,18 +1187,22 @@ async function getLandAssignments(queryParams = {}) {
 async function getLandPlots(queryParams = {}) {
   const season = await ensureLandSeason(queryParams.season || queryParams.season_key);
   const seasonId = season?.id || null;
+  const rentedSeasonCondition = seasonId ? 'a.season_id = $1' : '1 = 1';
+  const rentSeasonCondition = seasonId ? 'a.season_id = $2' : '1 = 1';
+  const tenantsSeasonCondition = seasonId ? 'a.season_id = $3' : '1 = 1';
+  const params = seasonId ? [seasonId, seasonId, seasonId] : [];
   const rows = await query(`
     SELECT
       p.*,
-      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.assigned_sahm ELSE 0 END), 0) AS rented_sahm,
-      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.rent_cents ELSE 0 END), 0) AS expected_rent_cents,
-      COUNT(DISTINCT CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.tenant_id END) AS tenants_count
+      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ${rentedSeasonCondition} THEN a.assigned_sahm ELSE 0 END), 0) AS rented_sahm,
+      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ${rentSeasonCondition} THEN a.rent_cents ELSE 0 END), 0) AS expected_rent_cents,
+      COUNT(DISTINCT CASE WHEN a.archived_at IS NULL AND ${tenantsSeasonCondition} THEN a.tenant_id END) AS tenants_count
     FROM land_plots p
     LEFT JOIN land_assignments a ON a.plot_id = p.id
     WHERE p.archived_at IS NULL
     GROUP BY p.id
     ORDER BY p.name ASC
-  `, [seasonId]).catch(() => []);
+  `, params).catch(() => []);
   return rows.map((row) => {
     const total = Number(row.total_sahm) || 0;
     const rented = Number(row.rented_sahm) || 0;
@@ -1219,6 +1232,9 @@ async function getLandDashboard(queryParams = {}) {
   return {
     readOnly: true,
     plots_count: plots.length,
+    total_sahm: totalSahm,
+    rented_sahm: rentedSahm,
+    available_sahm: Math.max(totalSahm - rentedSahm, 0),
     total_sahm_label: formatSurface(totalSahm),
     rented_sahm_label: formatSurface(rentedSahm),
     available_sahm_label: formatSurface(Math.max(totalSahm - rentedSahm, 0)),
@@ -1289,6 +1305,8 @@ async function getMobileData(queryParams = {}) {
       return await getPrices();
     case 'land-dashboard':
       return await getLandDashboard(queryParams);
+    case 'land-seasons':
+      return { seasons: await getLandSeasons(), lastSync: await getLastDataTimestamp() };
     case 'land-plots':
       return { plots: await getLandPlots(queryParams), lastSync: await getLastDataTimestamp() };
     case 'land-plot-detail':
