@@ -1,4 +1,5 @@
 const { ipcRenderer } = require('electron');
+const landTexts = require('./land-texts');
 
 let XLSX = null;
 try {
@@ -12,6 +13,8 @@ let charts = {};
 let currentScreen = 'home';
 window.__currentScreen = currentScreen;
 let currentParentScreen = null;
+let currentAppModule = '';
+let commonAppBootstrapped = false;
 let currentAppUser = null;
 let appBootstrapped = false;
 let rendererBootstrapNotified = false;
@@ -30,7 +33,7 @@ let offlineRestricted = {
   screens: ['report', 'charts'],
   settingsSections: ['backup']
 };
-const rootScreens = ['home', 'charts', 'report', 'settings'];
+const rootScreens = ['home', 'charts', 'report', 'settings', 'land-dashboard', 'land-plots', 'land-tenants', 'land-assignments', 'land-reports'];
 const HOME_CHART_MODE = {
   PURCHASES: 'purchases',
   SALES: 'sales'
@@ -86,7 +89,20 @@ const screenTitles = {
   'customer-invoices': 'فواتير العملاء',
   'company-vouchers': 'بونات الشركة',
   'profit': 'المكسب',
-  'expenses': 'المصاريف'
+  'expenses': 'المصاريف',
+  'land-dashboard': 'إدارة الأراضي',
+  'land-plots': 'الأراضي',
+  'land-tenants': 'المستأجرون',
+  'land-assignments': 'العقود',
+  'land-reports': 'تقارير الأراضي'
+};
+
+let landState = {
+  seasons: [],
+  plots: [],
+  tenants: [],
+  assignments: [],
+  selectedSeasonKey: String(new Date().getFullYear())
 };
 
 const settingsSectionTitles = {
@@ -385,13 +401,50 @@ async function attemptAppLogin(username, password) {
     const result = await ipcRenderer.invoke('login-app-user', { username, password });
     currentAppUser = result.user;
     selectedLoginUsername = '';
-    applyCurrentUserSession();
-    await bootstrapApp();
-    stabilizeHomeLayoutAfterLogin();
+    if (isCurrentUserAdmin()) {
+      showAppModuleSelector();
+      return;
+    }
+    await selectAppModule('fuel');
   } catch (error) {
     console.error('Login failed:', error);
     setLoginMessage(error.message || 'فشل تسجيل الدخول', 'error');
   }
+}
+
+function showAppModuleSelector() {
+  document.body.classList.remove('auth-locked', 'module-fuel', 'module-land');
+  document.body.classList.add('auth-ready', 'module-selecting');
+  setAppHeaderTitle('selector');
+  renderNavCurrentUser();
+}
+
+async function selectAppModule(moduleName) {
+  currentAppModule = moduleName === 'land' ? 'land' : 'fuel';
+  document.body.classList.remove('module-fuel', 'module-land');
+  document.body.classList.add(currentAppModule === 'land' ? 'module-land' : 'module-fuel');
+  setAppHeaderTitle(currentAppModule);
+  applyCurrentUserSession();
+  if (currentAppModule === 'land') {
+    await bootstrapCommonApp();
+    showScreenWithoutHistory('land-dashboard');
+    updateBreadcrumb('land-dashboard');
+    await initializeLandModule();
+    document.body.classList.remove('module-selecting');
+  } else {
+    document.body.classList.remove('module-selecting');
+    await bootstrapApp();
+    showScreenWithoutHistory('home');
+    updateBreadcrumb('home');
+    stabilizeHomeLayoutAfterLogin();
+  }
+}
+
+function setAppHeaderTitle(moduleName = currentAppModule) {
+  const title = moduleName === 'land' ? 'إدارة الأراضي الزراعية' : 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
+  const appTitle = document.querySelector('.app-title');
+  if (appTitle) appTitle.textContent = title;
+  document.title = title;
 }
 
 function applyCurrentUserSession() {
@@ -399,7 +452,9 @@ function applyCurrentUserSession() {
   document.body.classList.add('auth-ready');
   renderNavCurrentUser();
   applyPermissionLocks();
-  stabilizeHomeLayoutAfterLogin();
+  if (currentAppModule !== 'land') {
+    stabilizeHomeLayoutAfterLogin();
+  }
 }
 
 function renderNavCurrentUser() {
@@ -428,10 +483,12 @@ async function logoutAppUser() {
   }
 
   currentAppUser = null;
+  currentAppModule = '';
   selectedLoginUsername = '';
   renderNavCurrentUser();
+  setAppHeaderTitle('fuel');
   document.body.classList.add('auth-locked');
-  document.body.classList.remove('auth-ready');
+  document.body.classList.remove('auth-ready', 'module-selecting', 'module-fuel', 'module-land');
   showScreenWithoutHistory('home');
   updateBreadcrumb('home');
   await loadLoginUsers();
@@ -681,14 +738,10 @@ async function bootstrapApp() {
   appBootstrapped = true;
 
   try {
-    // RTL configuration is handled by rtl-config.js before bootstrap runs.
-    initializeApp();
-    setupEventListeners();
+    await bootstrapCommonApp();
     setupDepotEventListeners();
     initSalesSummaryFilters();
     initSafeBookFilters();
-    initializeConnectionMonitoring();
-    await updateConnectionStatus();
 
     await Promise.allSettled([
       loadHomeChart(),
@@ -709,6 +762,26 @@ async function bootstrapApp() {
         ipcRenderer.send('check-for-updates-manual');
       }
     }, 3000);
+  }
+}
+
+async function bootstrapCommonApp() {
+  if (commonAppBootstrapped) {
+    return;
+  }
+  commonAppBootstrapped = true;
+
+  try {
+    // RTL configuration is handled by rtl-config.js before bootstrap runs.
+    initializeApp();
+    setupEventListeners();
+    initializeConnectionMonitoring();
+    await updateConnectionStatus();
+  } catch (error) {
+    commonAppBootstrapped = false;
+    throw error;
+  } finally {
+    notifyRendererBootstrapComplete();
   }
 }
 
@@ -1229,6 +1302,21 @@ function showScreenWithoutHistory(screenName) {
       break;
     case 'annual-inventory':
       refreshAnnualInventoryView();
+      break;
+    case 'land-dashboard':
+      initializeLandModule();
+      break;
+    case 'land-plots':
+      loadLandPlots();
+      break;
+    case 'land-tenants':
+      loadLandTenants();
+      break;
+    case 'land-assignments':
+      loadLandAssignments();
+      break;
+    case 'land-reports':
+      loadLandReports();
       break;
   }
 }
@@ -6564,6 +6652,30 @@ function getActionDeleteIconSvg() {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
       <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
       <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+    </svg>
+  `;
+}
+
+function getLandPaymentIconSvg() {
+  return `
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M1 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1H1V4zm0 3h14v5a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7zm3 3.5a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1H4z"/>
+    </svg>
+  `;
+}
+
+function getLandRenewIconSvg() {
+  return `
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 3a5 5 0 1 1-4.47 7.24.75.75 0 1 1 1.34-.67A3.5 3.5 0 1 0 8 4.5H6.56l.72.72a.75.75 0 0 1-1.06 1.06L4.22 4.28a.75.75 0 0 1 0-1.06l2-2a.75.75 0 1 1 1.06 1.06L6.56 3H8z"/>
+    </svg>
+  `;
+}
+
+function getLandArchiveIconSvg() {
+  return `
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 2.5A1.5 1.5 0 0 1 3.5 1h9A1.5 1.5 0 0 1 14 2.5V4H2V2.5zM1 5h14v7.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5V5zm5 2.75a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5H6z"/>
     </svg>
   `;
 }
@@ -16873,6 +16985,631 @@ function applyOfflineLocks() {
       salesToggleBtn.disabled = false;
       salesToggleBtn.removeAttribute('title');
     }
+  }
+}
+
+function landSeasonKey() {
+  const input = document.getElementById('land-season-key');
+  const value = input?.value?.trim() || landState.selectedSeasonKey || String(new Date().getFullYear());
+  landState.selectedSeasonKey = value;
+  if (input) input.value = value;
+  return value;
+}
+
+async function initializeLandModule() {
+  await refreshLandLookups();
+  bindLandAssignmentPreviewInputs();
+  await loadLandDashboard();
+}
+
+function landSeasonOptionKeys() {
+  const currentYear = new Date().getFullYear();
+  const existingYears = (landState.seasons || [])
+    .map((season) => parseInt(season.season_key, 10))
+    .filter((year) => Number.isInteger(year));
+  const selectedYear = parseInt(landState.selectedSeasonKey, 10);
+  const minYear = existingYears.length ? Math.min(...existingYears) : (Number.isInteger(selectedYear) ? selectedYear : currentYear);
+  const maxYear = Math.max(
+    currentYear,
+    Number.isInteger(selectedYear) ? selectedYear : currentYear,
+    existingYears.length ? Math.max(...existingYears) : currentYear
+  ) + 1;
+  const years = [];
+  for (let year = minYear; year <= maxYear; year += 1) {
+    years.push(String(year));
+  }
+  return years;
+}
+
+function fillLandSeasonOptions() {
+  const options = landSeasonOptionKeys();
+  const selected = landState.selectedSeasonKey || String(new Date().getFullYear());
+  ['land-season-key', 'land-plot-season', 'land-assignment-season'].forEach((id) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    const value = select.value || selected;
+    select.innerHTML = options.map((year) => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join('');
+    select.value = options.includes(value) ? value : (options.includes(selected) ? selected : options[0]);
+  });
+}
+
+async function handleLandSeasonChange() {
+  landSeasonKey();
+  fillLandSeasonOptions();
+  await refreshLandLookups();
+  await loadLandDashboard();
+}
+
+async function refreshLandLookups() {
+  const [plots, tenants, seasons] = await Promise.all([
+    ipcRenderer.invoke('land:list-plots', { season_key: landSeasonKey() }),
+    ipcRenderer.invoke('land:list-tenants', {}),
+    ipcRenderer.invoke('land:get-seasons')
+  ]);
+  landState.plots = Array.isArray(plots) ? plots : [];
+  landState.tenants = Array.isArray(tenants) ? tenants : [];
+  landState.seasons = Array.isArray(seasons) ? seasons : [];
+  fillLandSeasonOptions();
+  fillLandAssignmentOptions();
+}
+
+function landEmpty(text) {
+  return `<div class="empty-state">${escapeHtml(text)}</div>`;
+}
+
+function landStatusChip(label, status = '') {
+  const greenStatuses = new Set(['paid_full', 'available']);
+  const className = greenStatuses.has(status) ? 'success' : 'danger';
+  return `<span class="land-status-chip ${className}">${escapeHtml(label)}</span>`;
+}
+
+function renderLandTable(headers, rows, emptyText, className = '') {
+  if (!rows.length) return landEmpty(emptyText);
+  const tableClass = ['base-table', 'land-table', className].filter(Boolean).join(' ');
+  return `
+    <table class="${escapeHtml(tableClass)}">
+      <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>
+  `;
+}
+
+async function loadLandDashboard() {
+  const container = document.getElementById('land-dashboard-metrics');
+  const plotsContainer = document.getElementById('land-dashboard-plots');
+  const assignmentsContainer = document.getElementById('land-dashboard-assignments');
+  if (!container) return;
+  container.innerHTML = landEmpty('جار تحميل البيانات...');
+  try {
+    const data = await ipcRenderer.invoke('land:get-dashboard', { season_key: landSeasonKey() });
+    container.innerHTML = [
+      ['عدد الأراضي', data.plots_count],
+      ['إجمالي المساحة', data.total_sahm_label],
+      ['المساحة المؤجرة', data.rented_sahm_label],
+      ['المساحة المتاحة', data.available_sahm_label],
+      ['الإيجار المتوقع', data.expected_rent_cents_egp],
+      ['المحصل', data.paid_cents_egp],
+      ['المتبقي', data.remaining_cents_egp],
+      ['مستأجرون غير مكتملين', data.incomplete_tenants]
+    ].map(([label, value]) => `
+      <div class="land-metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+    `).join('');
+
+    if (plotsContainer) {
+      plotsContainer.classList.add('land-sticky-first-column');
+      plotsContainer.innerHTML = renderLandTable(
+        ['الأرض', 'الإجمالي', 'المؤجر', 'المتاح', 'المتوقع'],
+        (data.plots || []).map((plot) => `
+          <tr>
+            <td>${escapeHtml(plot.name)}</td>
+            <td>${escapeHtml(plot.total_sahm_label)}</td>
+            <td>${escapeHtml(plot.rented_sahm_label)}</td>
+            <td>${escapeHtml(plot.available_sahm_label)}</td>
+            <td>${escapeHtml(plot.expected_rent_cents_egp)}</td>
+          </tr>
+        `),
+        'لا توجد أراض مسجلة',
+        'land-dashboard-table'
+      );
+    }
+
+    if (assignmentsContainer) {
+      assignmentsContainer.classList.add('land-sticky-first-column');
+      assignmentsContainer.innerHTML = renderLandTable(
+        ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+        (data.assignments || []).map(renderLandAssignmentRowCompact),
+        'لا توجد عقود لهذا الموسم',
+        'land-dashboard-table'
+      );
+    }
+  } catch (error) {
+    console.error('Land dashboard error:', error);
+    container.innerHTML = landEmpty(error.message || 'تعذر تحميل بيانات الأراضي');
+  }
+}
+
+async function loadLandPlots() {
+  const container = document.getElementById('land-plots-list');
+  if (!container) return;
+  container.innerHTML = landEmpty('جار التحميل...');
+  try {
+    const plots = await ipcRenderer.invoke('land:list-plots', { season_key: landSeasonKey() });
+    landState.plots = plots;
+    container.innerHTML = renderLandTable(
+      ['الأرض', 'المساحة', 'المؤجر', 'المتاح', 'الحالة', 'إجراءات'],
+      plots.map((plot) => `
+        <tr>
+          <td>${escapeHtml(plot.name)}</td>
+          <td>${escapeHtml(plot.total_sahm_label)}</td>
+          <td>${escapeHtml(plot.rented_sahm_label)}</td>
+          <td>${escapeHtml(plot.available_sahm_label)}</td>
+          <td>${landStatusChip(landTexts.plotStatuses[plot.status] || plot.status)}</td>
+          <td><span class="land-row-actions">
+            <button type="button" class="btn btn-secondary btn-compact" onclick="editLandPlot(${plot.id})">تعديل</button>
+            <button type="button" class="btn btn-secondary btn-compact" onclick="archiveLandPlot(${plot.id})">أرشفة</button>
+          </span></td>
+        </tr>
+      `),
+      'لا توجد أراض مسجلة'
+    );
+    fillLandAssignmentOptions();
+  } catch (error) {
+    container.innerHTML = landEmpty(error.message || 'تعذر تحميل الأراضي');
+  }
+}
+
+function openLandPlotForm(plot = null) {
+  const form = document.getElementById('land-plot-form');
+  if (!form) return;
+  form.classList.remove('is-hidden');
+  document.getElementById('land-plot-id').value = plot?.id || '';
+  document.getElementById('land-plot-name').value = plot?.name || '';
+  document.getElementById('land-plot-season').value = landSeasonKey();
+  const parts = plot?.total_sahm_parts || { feddan: 0, qirat: 0, sahm: 0 };
+  document.getElementById('land-plot-feddan').value = parts.feddan || 0;
+  document.getElementById('land-plot-qirat').value = parts.qirat || 0;
+  document.getElementById('land-plot-sahm').value = parts.sahm || 0;
+  document.getElementById('land-plot-rent-mode').value = 'per_feddan';
+  document.getElementById('land-plot-rent-value').value = '';
+  document.getElementById('land-plot-notes').value = plot?.notes || '';
+}
+
+function closeLandPlotForm() {
+  document.getElementById('land-plot-form')?.classList.add('is-hidden');
+}
+
+function editLandPlot(id) {
+  const plot = landState.plots.find((item) => Number(item.id) === Number(id));
+  openLandPlotForm(plot);
+}
+
+async function saveLandPlot(confirmRecalculate = false) {
+  try {
+    const payload = {
+      id: document.getElementById('land-plot-id')?.value || '',
+      name: document.getElementById('land-plot-name')?.value || '',
+      location: '',
+      season_key: document.getElementById('land-plot-season')?.value || landSeasonKey(),
+      feddan: document.getElementById('land-plot-feddan')?.value || 0,
+      qirat: document.getElementById('land-plot-qirat')?.value || 0,
+      sahm: document.getElementById('land-plot-sahm')?.value || 0,
+      rent_mode: document.getElementById('land-plot-rent-mode')?.value || 'per_feddan',
+      rent_value: document.getElementById('land-plot-rent-value')?.value || '',
+      notes: document.getElementById('land-plot-notes')?.value || '',
+      confirm_recalculate_paid: confirmRecalculate
+    };
+    const result = await ipcRenderer.invoke('land:save-plot', payload);
+    if (result?.requiresConfirmation && confirm(result.message)) {
+      await saveLandPlot(true);
+      return;
+    }
+    closeLandPlotForm();
+    showMessage('تم حفظ الأرض', 'success');
+    await loadLandPlots();
+    await loadLandDashboard();
+  } catch (error) {
+    showMessage(error.message || 'تعذر حفظ الأرض', 'error');
+  }
+}
+
+async function archiveLandPlot(id, confirmed = false) {
+  if (!confirmed && !confirm('هل تريد أرشفة هذه الأرض؟')) return;
+  const result = await ipcRenderer.invoke('land:archive-plot', { id, confirm: confirmed });
+  if (result?.requiresConfirmation && confirm(result.message)) {
+    await archiveLandPlot(id, true);
+    return;
+  }
+  await loadLandPlots();
+}
+
+async function loadLandTenants() {
+  const container = document.getElementById('land-tenants-list');
+  if (!container) return;
+  container.innerHTML = landEmpty('جار التحميل...');
+  try {
+    const tenants = await ipcRenderer.invoke('land:list-tenants', {});
+    landState.tenants = tenants;
+    container.innerHTML = renderLandTable(
+      ['الاسم', 'الهاتف', 'العنوان', 'العقود', 'إجمالي الإيجار', 'إجراءات'],
+      tenants.map((tenant) => `
+        <tr>
+          <td>${escapeHtml(tenant.full_name)}</td>
+          <td>${escapeHtml(tenant.phone || '-')}</td>
+          <td>${escapeHtml(tenant.village_address || '-')}</td>
+          <td>${escapeHtml(tenant.assignments_count || 0)}</td>
+          <td>${escapeHtml(tenant.total_rent_cents_egp || '0.00 جنيه مصري')}</td>
+          <td><span class="land-row-actions">
+            <button type="button" class="btn btn-secondary btn-compact" onclick="editLandTenant(${tenant.id})">تعديل</button>
+            <button type="button" class="btn btn-secondary btn-compact" onclick="archiveLandTenant(${tenant.id})">أرشفة</button>
+          </span></td>
+        </tr>
+      `),
+      'لا يوجد مستأجرون'
+    );
+    fillLandAssignmentOptions();
+  } catch (error) {
+    container.innerHTML = landEmpty(error.message || 'تعذر تحميل المستأجرين');
+  }
+}
+
+function openLandTenantForm(tenant = null) {
+  const form = document.getElementById('land-tenant-form');
+  if (!form) return;
+  form.classList.remove('is-hidden');
+  document.getElementById('land-tenant-id').value = tenant?.id || '';
+  document.getElementById('land-tenant-name').value = tenant?.full_name || '';
+  document.getElementById('land-tenant-phone').value = tenant?.phone || '';
+  document.getElementById('land-tenant-address').value = tenant?.village_address || '';
+  document.getElementById('land-tenant-document').value = tenant?.document_id || '';
+  document.getElementById('land-tenant-notes').value = tenant?.notes || '';
+}
+
+function closeLandTenantForm() {
+  document.getElementById('land-tenant-form')?.classList.add('is-hidden');
+}
+
+function editLandTenant(id) {
+  openLandTenantForm(landState.tenants.find((item) => Number(item.id) === Number(id)));
+}
+
+async function saveLandTenant() {
+  try {
+    await ipcRenderer.invoke('land:save-tenant', {
+      id: document.getElementById('land-tenant-id')?.value || '',
+      full_name: document.getElementById('land-tenant-name')?.value || '',
+      phone: document.getElementById('land-tenant-phone')?.value || '',
+      village_address: document.getElementById('land-tenant-address')?.value || '',
+      document_id: document.getElementById('land-tenant-document')?.value || '',
+      notes: document.getElementById('land-tenant-notes')?.value || ''
+    });
+    closeLandTenantForm();
+    showMessage('تم حفظ المستأجر', 'success');
+    await loadLandTenants();
+  } catch (error) {
+    showMessage(error.message || 'تعذر حفظ المستأجر', 'error');
+  }
+}
+
+async function archiveLandTenant(id, confirmed = false) {
+  if (!confirmed && !confirm('هل تريد أرشفة هذا المستأجر؟')) return;
+  const result = await ipcRenderer.invoke('land:archive-tenant', { id, confirm: confirmed });
+  if (result?.requiresConfirmation && confirm(result.message)) {
+    await archiveLandTenant(id, true);
+    return;
+  }
+  await loadLandTenants();
+}
+
+function fillLandAssignmentOptions() {
+  const plotSelect = document.getElementById('land-assignment-plot');
+  const tenantSelect = document.getElementById('land-assignment-tenant');
+  if (plotSelect) {
+    plotSelect.innerHTML = landState.plots.map((plot) => `<option value="${plot.id}">${escapeHtml(plot.name)}</option>`).join('');
+  }
+  if (tenantSelect) {
+    tenantSelect.innerHTML = landState.tenants.map((tenant) => `<option value="${tenant.id}">${escapeHtml(tenant.full_name)}</option>`).join('');
+  }
+}
+
+function landAssignmentPayloadFromForm() {
+  return {
+    id: document.getElementById('land-assignment-id')?.value || '',
+    plot_id: document.getElementById('land-assignment-plot')?.value || '',
+    tenant_id: document.getElementById('land-assignment-tenant')?.value || '',
+    season_key: document.getElementById('land-assignment-season')?.value || landSeasonKey(),
+    feddan: document.getElementById('land-assignment-feddan')?.value || 0,
+    qirat: document.getElementById('land-assignment-qirat')?.value || 0,
+    sahm: document.getElementById('land-assignment-sahm')?.value || 0,
+    rent_adjustment_mode: document.getElementById('land-assignment-rent-adjustment-mode')?.value || 'none',
+    rent_adjustment_value: document.getElementById('land-assignment-rent-adjustment-value')?.value || '',
+    manual_rent_note: document.getElementById('land-assignment-manual-note')?.value || '',
+    first_due_date: document.getElementById('land-assignment-first-due')?.value || '',
+    second_due_date: document.getElementById('land-assignment-second-due')?.value || '',
+    notes: document.getElementById('land-assignment-notes')?.value || ''
+  };
+}
+
+function bindLandAssignmentPreviewInputs() {
+  const form = document.getElementById('land-assignment-form');
+  if (!form || form.dataset.previewBound === '1') return;
+  form.dataset.previewBound = '1';
+  [
+    'land-assignment-plot',
+    'land-assignment-season',
+    'land-assignment-feddan',
+    'land-assignment-qirat',
+    'land-assignment-sahm',
+    'land-assignment-rent-adjustment-mode',
+    'land-assignment-rent-adjustment-value'
+  ].forEach((id) => {
+    const field = document.getElementById(id);
+    if (!field) return;
+    field.addEventListener('input', updateLandAssignmentRentPreview);
+    field.addEventListener('change', updateLandAssignmentRentPreview);
+  });
+}
+
+function revealLandAssignmentForm() {
+  const form = document.getElementById('land-assignment-form');
+  if (!form) return;
+  requestAnimationFrame(() => {
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+async function updateLandAssignmentRentPreview() {
+  const preview = document.getElementById('land-assignment-rent-preview');
+  if (!preview) return;
+  const payload = landAssignmentPayloadFromForm();
+  if (!payload.plot_id) {
+    preview.textContent = 'إجمالي الإيجار: اختر الأرض';
+    return;
+  }
+  const totalSurface = (parseInt(payload.feddan || 0, 10) * 576) + (parseInt(payload.qirat || 0, 10) * 24) + parseInt(payload.sahm || 0, 10);
+  if (!Number.isFinite(totalSurface) || totalSurface <= 0) {
+    preview.textContent = 'إجمالي الإيجار: أدخل المساحة';
+    return;
+  }
+  try {
+    const result = await ipcRenderer.invoke('land:preview-assignment-rent', payload);
+    if (!result?.ready) {
+      preview.textContent = `إجمالي الإيجار: ${result?.message || '-'}`;
+      return;
+    }
+    preview.textContent = `إجمالي الإيجار: ${result.total_rent_cents_egp} | الأساسي: ${result.base_rent_cents_egp} | الزيادة: ${result.adjustment_cents_egp}`;
+  } catch (error) {
+    const message = String(error.message || '');
+    if (message.includes('No handler registered') || message.includes('land:preview-assignment-rent')) {
+      preview.textContent = 'إجمالي الإيجار: أعد تشغيل التطبيق لتفعيل حساب الإجمالي';
+      return;
+    }
+    preview.textContent = `إجمالي الإيجار: ${message || 'تعذر الحساب'}`;
+  }
+}
+
+async function loadLandAssignments() {
+  const container = document.getElementById('land-assignments-list');
+  if (!container) return;
+  container.innerHTML = landEmpty('جار التحميل...');
+  await refreshLandLookups();
+  try {
+    const assignments = await ipcRenderer.invoke('land:list-assignments', { season_key: landSeasonKey() });
+    landState.assignments = assignments;
+    container.innerHTML = renderLandTable(
+      ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'القسط الأول', 'مدفوع ١', 'القسط الثاني', 'مدفوع ٢', 'المتبقي', 'الحالة', 'إجراءات'],
+      assignments.map((assignment) => `
+        <tr>
+          ${renderLandAssignmentCells(assignment)}
+          <td><span class="land-row-actions">
+            <button type="button" class="btn-icon land-action-icon" title="دفعة" aria-label="دفعة" onclick="openLandPaymentForm(${assignment.id})">${getLandPaymentIconSvg()}</button>
+            <button type="button" class="btn-icon land-action-icon" title="تعديل" aria-label="تعديل" onclick="editLandAssignment(${assignment.id})">${getActionEditIconSvg()}</button>
+            <button type="button" class="btn-icon land-action-icon" title="تجديد" aria-label="تجديد" onclick="renewLandAssignment(${assignment.id})">${getLandRenewIconSvg()}</button>
+            <button type="button" class="btn-icon btn-icon-danger land-action-icon" title="أرشفة" aria-label="أرشفة" onclick="archiveLandAssignment(${assignment.id})">${getLandArchiveIconSvg()}</button>
+          </span></td>
+        </tr>
+      `),
+      'لا توجد عقود'
+    );
+  } catch (error) {
+    container.innerHTML = landEmpty(error.message || 'تعذر تحميل العقود');
+  }
+}
+
+function renderLandAssignmentCells(assignment) {
+  return `
+    <td>${escapeHtml(assignment.plot_name || '-')}</td>
+    <td>${escapeHtml(assignment.tenant_name || '-')}</td>
+    <td>${escapeHtml(assignment.assigned_sahm_label || '-')}</td>
+    <td>${escapeHtml(assignment.rent_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${escapeHtml(assignment.first_expected_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${escapeHtml(assignment.first_paid_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${escapeHtml(assignment.second_expected_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${escapeHtml(assignment.second_paid_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${escapeHtml(assignment.remaining_cents_egp || '0.00 جنيه مصري')}</td>
+    <td>${landStatusChip(assignment.payment_status_label || landTexts.paymentStatuses[assignment.payment_status] || '-', assignment.payment_status)}</td>
+  `;
+}
+
+function renderLandAssignmentRowCompact(assignment) {
+  const tenantLabel = Number(assignment.assignment_count) > 1
+    ? `${assignment.tenant_name || '-'} (${assignment.assignment_count} عقود)`
+    : (assignment.tenant_name || '-');
+  return `
+    <tr>
+      <td>${escapeHtml(assignment.plot_name || '-')}</td>
+      <td>${escapeHtml(tenantLabel)}</td>
+      <td>${escapeHtml(assignment.assigned_sahm_label || '-')}</td>
+      <td>${escapeHtml(assignment.rent_cents_egp || '0.00 جنيه مصري')}</td>
+      <td>${escapeHtml(assignment.total_paid_cents_egp || '0.00 جنيه مصري')}</td>
+      <td>${escapeHtml(assignment.remaining_cents_egp || '0.00 جنيه مصري')}</td>
+      <td>${landStatusChip(assignment.payment_status_label || '-', assignment.payment_status)}</td>
+    </tr>
+  `;
+}
+
+async function openLandAssignmentForm() {
+  await refreshLandLookups();
+  bindLandAssignmentPreviewInputs();
+  const form = document.getElementById('land-assignment-form');
+  if (!form) return;
+  form.classList.remove('is-hidden');
+  document.getElementById('land-assignment-id').value = '';
+  document.getElementById('land-assignment-season').value = landSeasonKey();
+  ['feddan', 'qirat', 'sahm'].forEach((name) => {
+    const input = document.getElementById(`land-assignment-${name}`);
+    if (input) input.value = 0;
+  });
+  document.getElementById('land-assignment-rent-adjustment-mode').value = 'none';
+  document.getElementById('land-assignment-rent-adjustment-value').value = '';
+  document.getElementById('land-assignment-manual-note').value = '';
+  document.getElementById('land-assignment-notes').value = '';
+  updateLandAssignmentRentPreview();
+  revealLandAssignmentForm();
+}
+
+async function editLandAssignment(id) {
+  const assignment = landState.assignments.find((item) => Number(item.id) === Number(id));
+  if (!assignment) return;
+  await refreshLandLookups();
+  bindLandAssignmentPreviewInputs();
+  const form = document.getElementById('land-assignment-form');
+  if (!form) return;
+  form.classList.remove('is-hidden');
+  document.getElementById('land-assignment-id').value = assignment.id || '';
+  document.getElementById('land-assignment-plot').value = assignment.plot_id || '';
+  document.getElementById('land-assignment-tenant').value = assignment.tenant_id || '';
+  document.getElementById('land-assignment-season').value = assignment.season_key || landSeasonKey();
+  const parts = assignment.assigned_sahm_parts || { feddan: 0, qirat: 0, sahm: 0 };
+  document.getElementById('land-assignment-feddan').value = parts.feddan || 0;
+  document.getElementById('land-assignment-qirat').value = parts.qirat || 0;
+  document.getElementById('land-assignment-sahm').value = parts.sahm || 0;
+  const rentAdjustmentCents = assignment.rent_adjustment_cents === null || assignment.rent_adjustment_cents === undefined
+    ? null
+    : Number(assignment.rent_adjustment_cents);
+  document.getElementById('land-assignment-rent-adjustment-mode').value = assignment.rent_adjustment_mode || 'none';
+  document.getElementById('land-assignment-rent-adjustment-value').value = Number.isFinite(rentAdjustmentCents) && rentAdjustmentCents > 0 ? formatPrice(rentAdjustmentCents / 100) : '';
+  document.getElementById('land-assignment-manual-note').value = assignment.manual_rent_note || '';
+  document.getElementById('land-assignment-first-due').value = assignment.first_due_date || '';
+  document.getElementById('land-assignment-second-due').value = assignment.second_due_date || '';
+  document.getElementById('land-assignment-notes').value = assignment.notes || '';
+  updateLandAssignmentRentPreview();
+  revealLandAssignmentForm();
+}
+
+function closeLandAssignmentForm() {
+  document.getElementById('land-assignment-form')?.classList.add('is-hidden');
+  const preview = document.getElementById('land-assignment-rent-preview');
+  if (preview) preview.textContent = 'إجمالي الإيجار: -';
+}
+
+async function saveLandAssignment(confirmRecalculate = false) {
+  try {
+    const result = await ipcRenderer.invoke('land:save-assignment', {
+      ...landAssignmentPayloadFromForm(),
+      confirm_recalculate_paid: confirmRecalculate
+    });
+    if (result?.requiresConfirmation && confirm(result.message)) {
+      await saveLandAssignment(true);
+      return;
+    }
+    closeLandAssignmentForm();
+    showMessage('تم حفظ العقد', 'success');
+    await loadLandAssignments();
+    await loadLandDashboard();
+  } catch (error) {
+    showMessage(error.message || 'تعذر حفظ العقد', 'error');
+  }
+}
+
+async function archiveLandAssignment(id, confirmed = false) {
+  if (!confirmed && !confirm('هل تريد أرشفة هذا العقد؟')) return;
+  const result = await ipcRenderer.invoke('land:archive-assignment', { id, confirm: confirmed });
+  if (result?.requiresConfirmation && confirm(result.message)) {
+    await archiveLandAssignment(id, true);
+    return;
+  }
+  await loadLandAssignments();
+}
+
+async function renewLandAssignment(id) {
+  if (!confirm('هل تريد تجديد هذا العقد للسنة التالية؟')) return;
+  try {
+    const result = await ipcRenderer.invoke('land:renew-assignment', { id });
+    showMessage(result?.message || 'تم تجديد العقد للسنة التالية', 'success');
+    await refreshLandLookups();
+    await loadLandAssignments();
+    await loadLandDashboard();
+  } catch (error) {
+    showMessage(error.message || 'تعذر تجديد العقد', 'error');
+  }
+}
+
+function openLandPaymentForm(assignmentId) {
+  const form = document.getElementById('land-payment-form');
+  if (!form) return;
+  form.classList.remove('is-hidden');
+  document.getElementById('land-payment-assignment-id').value = assignmentId;
+  document.getElementById('land-payment-installment').value = '1';
+  document.getElementById('land-payment-amount').value = '';
+  document.getElementById('land-payment-date').value = getTodayDate();
+  document.getElementById('land-payment-method').value = '';
+  document.getElementById('land-payment-reference').value = '';
+  document.getElementById('land-payment-notes').value = '';
+}
+
+function closeLandPaymentForm() {
+  document.getElementById('land-payment-form')?.classList.add('is-hidden');
+}
+
+async function saveLandPayment() {
+  try {
+    await ipcRenderer.invoke('land:add-payment', {
+      assignment_id: document.getElementById('land-payment-assignment-id')?.value || '',
+      installment_number: document.getElementById('land-payment-installment')?.value || '1',
+      amount: document.getElementById('land-payment-amount')?.value || '',
+      paid_at: document.getElementById('land-payment-date')?.value || getTodayDate(),
+      payment_method: document.getElementById('land-payment-method')?.value || '',
+      reference: document.getElementById('land-payment-reference')?.value || '',
+      notes: document.getElementById('land-payment-notes')?.value || ''
+    });
+    closeLandPaymentForm();
+    showMessage('تم حفظ الدفعة', 'success');
+    await loadLandAssignments();
+    await loadLandDashboard();
+  } catch (error) {
+    showMessage(error.message || 'تعذر حفظ الدفعة', 'error');
+  }
+}
+
+async function loadLandReports() {
+  const container = document.getElementById('land-reports-list');
+  if (!container) return;
+  container.innerHTML = landEmpty('جار التحميل...');
+  try {
+    const rows = await ipcRenderer.invoke('land:get-report', {
+      kind: document.getElementById('land-report-kind')?.value || 'complete',
+      season_key: landSeasonKey()
+    });
+    container.innerHTML = renderLandTable(
+      ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+      rows.map(renderLandAssignmentRowCompact),
+      'لا توجد بيانات لهذا التقرير'
+    );
+  } catch (error) {
+    container.innerHTML = landEmpty(error.message || 'تعذر تحميل التقرير');
+  }
+}
+
+async function exportLandReport(format) {
+  try {
+    const channel = format === 'xlsx' ? 'land:export-report-xlsx' : (format === 'pdf' ? 'land:export-report-pdf' : 'land:export-report-csv');
+    const result = await ipcRenderer.invoke(channel, {
+      kind: document.getElementById('land-report-kind')?.value || 'complete',
+      season_key: landSeasonKey()
+    });
+    if (result?.success) showMessage('تم تصدير التقرير', 'success');
+  } catch (error) {
+    showMessage(error.message || 'تعذر تصدير التقرير', 'error');
   }
 }
 

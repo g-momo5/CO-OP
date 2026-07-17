@@ -621,6 +621,10 @@ body.modal-scroll-lock {
   min-width: 100px;
   direction: rtl;
   text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.25;
 }
 
 .nav-btn:hover {
@@ -9446,4 +9450,423 @@ select option {
 .shift-summary-sidebar .final-total-input {
   text-align: center !important;
   text-align-last: center !important;
+}
+
+.app-module-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f4f7f1 0%, #ffffff 55%, #eef4f7 100%);
+}
+
+body.module-selecting .app-module-screen {
+  display: flex;
+}
+
+body.module-selecting .app-container,
+body.module-selecting .bottom-navigation {
+  display: none;
+}
+
+.app-module-panel {
+  width: min(760px, 100%);
+  padding: 1.5rem;
+  border: 1px solid rgba(28, 79, 58, 0.14);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 54px rgba(31, 48, 64, 0.14);
+  display: grid;
+  gap: 1.2rem;
+}
+
+.app-module-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.app-module-heading h1 {
+  margin: 0;
+  color: #1f3040;
+  font-size: 1.6rem;
+}
+
+.app-module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.app-module-card {
+  min-height: 160px;
+  padding: 1rem;
+  border: 1px solid #dbe5dd;
+  border-radius: 8px;
+  background: #f8fbf8;
+  color: #1f3040;
+  font-family: 'Noto Naskh Arabic', serif;
+  text-align: right;
+  cursor: pointer;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.app-module-card:hover {
+  border-color: #1f8f3a;
+  box-shadow: 0 10px 28px rgba(31, 143, 58, 0.12);
+}
+
+.app-module-card.land {
+  background: #fbfaf2;
+  border-color: #e4dbb7;
+}
+
+.app-module-icon {
+  font-size: 2rem;
+}
+
+.app-module-card strong {
+  font-size: 1.25rem;
+}
+
+.app-module-card span:last-child {
+  color: #607080;
+  font-weight: 600;
+}
+
+.nav-land {
+  display: none;
+}
+
+body.module-land .bottom-navigation .nav-btn:not(.nav-land) {
+  display: none;
+}
+
+body.module-land .nav-land {
+  display: inline-flex;
+}
+
+body.module-fuel .nav-land {
+  display: none;
+}
+
+.land-page {
+  padding: 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.land-toolbar,
+.land-panel-header,
+.land-form-actions,
+.land-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.land-toolbar h2,
+.land-panel h3 {
+  margin: 0;
+  color: #1f3040;
+}
+
+.land-toolbar-actions {
+  justify-content: flex-start;
+}
+
+.land-toolbar-actions .form-input {
+  width: 160px;
+}
+
+.land-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.land-metric-card,
+.land-panel,
+.land-form {
+  border: 1px solid #dfe7dd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(31, 48, 64, 0.06);
+}
+
+.land-metric-card {
+  min-height: 96px;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.land-metric-card span {
+  color: #607080;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.land-metric-card strong {
+  color: #1f8f3a;
+  font-size: 1.25rem;
+}
+
+.land-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.land-panel {
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.75rem;
+  align-self: start;
+}
+
+.land-form {
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  width: min(860px, 100%);
+  justify-self: center;
+}
+
+.land-form.is-hidden {
+  display: none;
+}
+
+.land-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.land-form label {
+  color: #1f3040;
+  font-weight: 800;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.land-form .form-input,
+.land-toolbar-actions .form-input {
+  min-height: 40px;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid #cbd8cf;
+  border-radius: 999px;
+  background-color: #ffffff;
+  color: #1f3040;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  outline: none;
+  box-shadow: none;
+}
+
+.land-form .form-input {
+  width: 100%;
+}
+
+.land-toolbar-actions .form-input {
+  width: 160px;
+}
+
+.land-form select.form-input,
+.land-toolbar-actions select.form-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #607080 50%), linear-gradient(135deg, #607080 50%, transparent 50%);
+  background-position: left 16px center, left 10px center;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-left: 2rem;
+}
+
+.land-form textarea.form-input {
+  min-height: 78px;
+  resize: vertical;
+  border-radius: 18px;
+}
+
+.land-form .form-input:focus,
+.land-toolbar-actions .form-input:focus {
+  border-color: #1f8f3a;
+  box-shadow: none;
+}
+
+.land-form .form-input[readonly],
+.land-form .form-input:disabled {
+  background-color: #f5f7f4;
+  color: #607080;
+}
+
+.land-rent-preview {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #cbd8cf;
+  border-radius: 8px;
+  background: #f5f7f4;
+  color: #1f3040;
+  font-weight: 800;
+  text-align: center;
+}
+
+.land-table-shell {
+  overflow: auto;
+}
+
+.land-table {
+  min-width: 760px;
+}
+
+.land-sticky-first-column {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.land-sticky-first-column .land-dashboard-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: visible;
+}
+
+.land-sticky-first-column .land-dashboard-table th:first-child,
+.land-sticky-first-column .land-dashboard-table td:first-child {
+  position: sticky;
+  right: 0;
+  left: auto;
+  z-index: 2;
+  min-width: 140px;
+  width: auto;
+  box-shadow: -1px 0 0 #e9ecef;
+}
+
+.land-sticky-first-column .land-dashboard-table th:first-child {
+  z-index: 3;
+  background: #2c3e50;
+  color: #ffffff;
+}
+
+.land-sticky-first-column .land-dashboard-table td:first-child {
+  background: #ffffff;
+}
+
+.land-sticky-first-column .land-dashboard-table tbody tr:hover td:first-child {
+  background: #f8f9fa;
+}
+
+.land-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  background: #fff1ef;
+  color: #c4291d;
+  font-weight: 800;
+}
+
+.land-status-chip.success {
+  background: #edf7ee;
+  color: #1f8f3a;
+}
+
+.land-status-chip.danger {
+  background: #fff1ef;
+  color: #c4291d;
+}
+
+.land-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.land-action-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+  flex: 0 0 auto;
+}
+
+.land-action-icon:hover,
+.land-action-icon:focus,
+.land-action-icon:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  transform: none;
+}
+
+@media (max-width: 980px) {
+  .land-metric-grid,
+  .land-two-column,
+  .land-form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-module-grid,
+  .land-metric-grid,
+  .land-two-column,
+  .land-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-module-panel {
+    padding: 1rem;
+  }
+}
+
+/* Common text field shape */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea,
+.form-input,
+.form-control,
+.summary-numeric-input,
+.total-input,
+.search-input,
+.filter-input,
+.price-input,
+.expenses-filter-input,
+.annual-inventory-input,
+.profit-manual-input,
+.profit-custom-label-input,
+.profit-custom-value-input,
+.annual-custom-label-input,
+.annual-custom-value-input {
+  border-radius: 999px !important;
+  text-align: center !important;
+  text-align-last: center !important;
+}
+
+textarea,
+textarea.form-input,
+textarea.form-control {
+  border-radius: 18px !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  text-align: center !important;
 }

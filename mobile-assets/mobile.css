@@ -765,6 +765,72 @@ button {
   background: #fff8f7;
 }
 
+.mobile-module-switch {
+  display: inline-flex;
+  align-self: center;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.topbar {
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 126px;
+}
+
+.main-content {
+  padding-top: 152px;
+}
+
+.mobile-module-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  background: transparent;
+  color: #fff;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-weight: 800;
+}
+
+.mobile-module-switch button.active {
+  background: #fff;
+  color: var(--coop-red);
+}
+
+.land-tab {
+  display: none !important;
+}
+
+body.mobile-module-land .tabs button:not(.land-tab) {
+  display: none;
+}
+
+body.mobile-module-land .land-tab {
+  display: inline-flex !important;
+}
+
+.land-mobile-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.land-mobile-item {
+  border: 1px solid rgba(31, 48, 64, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.land-mobile-item strong {
+  color: #1f3040;
+}
+
 @media (max-width: 820px) {
   .grid.four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -790,7 +856,7 @@ button {
   }
 
   .main-content {
-    padding: 112px 0.55rem 124px;
+    padding: 154px 0.55rem 124px;
   }
 
   .grid.two,
@@ -878,4 +944,22 @@ button {
   .bar-row strong {
     grid-column: 2;
   }
+}
+
+/* Common text field shape */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea {
+  border-radius: 999px !important;
+  text-align: center !important;
+  text-align-last: center !important;
+}
+
+textarea {
+  border-radius: 18px !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  text-align: center !important;
 }

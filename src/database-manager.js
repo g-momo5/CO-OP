@@ -701,6 +701,182 @@ class DatabaseManager {
     } catch (err) {
       console.log('Monthly profit custom indexes creation:', err.message);
     }
+
+    await this.createPostgreSQLLandTables();
+  }
+
+  async createPostgreSQLLandTables() {
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_seasons (
+      id SERIAL PRIMARY KEY,
+      season_key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      start_date TEXT,
+      end_date TEXT,
+      notes TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      archived_at TEXT
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_plots (
+      id SERIAL PRIMARY KEY,
+      plot_code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      location TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      total_sahm INTEGER NOT NULL CHECK(total_sahm > 0),
+      status TEXT NOT NULL DEFAULT 'available',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      archived_at TEXT
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_plot_terms (
+      id SERIAL PRIMARY KEY,
+      plot_id INTEGER NOT NULL,
+      season_id INTEGER NOT NULL,
+      rent_mode TEXT NOT NULL DEFAULT 'per_feddan',
+      rent_value_cents INTEGER NOT NULL DEFAULT 0,
+      rent_total_cents INTEGER NOT NULL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      UNIQUE(plot_id, season_id)
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_tenants (
+      id SERIAL PRIMARY KEY,
+      full_name TEXT NOT NULL,
+      phone TEXT DEFAULT '',
+      village_address TEXT DEFAULT '',
+      document_id TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      archived_at TEXT
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_assignments (
+      id SERIAL PRIMARY KEY,
+      plot_id INTEGER NOT NULL,
+      tenant_id INTEGER NOT NULL,
+      season_id INTEGER NOT NULL,
+      assigned_sahm INTEGER NOT NULL CHECK(assigned_sahm > 0),
+      rent_cents INTEGER NOT NULL DEFAULT 0,
+      manual_rent_cents INTEGER,
+      manual_rent_note TEXT DEFAULT '',
+      rent_adjustment_mode TEXT DEFAULT 'none',
+      rent_adjustment_cents INTEGER DEFAULT 0,
+      notes TEXT DEFAULT '',
+      contract_status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      archived_at TEXT
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_installments (
+      id SERIAL PRIMARY KEY,
+      assignment_id INTEGER NOT NULL,
+      installment_number INTEGER NOT NULL CHECK(installment_number IN (1, 2)),
+      expected_cents INTEGER NOT NULL DEFAULT 0,
+      due_date TEXT,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      UNIQUE(assignment_id, installment_number)
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_payments (
+      id SERIAL PRIMARY KEY,
+      assignment_id INTEGER NOT NULL,
+      installment_number INTEGER NOT NULL CHECK(installment_number IN (1, 2)),
+      amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+      paid_at TEXT NOT NULL,
+      payment_method TEXT DEFAULT '',
+      reference TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text),
+      archived_at TEXT
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_receipts (
+      id SERIAL PRIMARY KEY,
+      payment_id INTEGER NOT NULL,
+      receipt_number TEXT NOT NULL UNIQUE,
+      issued_at TEXT NOT NULL,
+      receipt_data TEXT NOT NULL DEFAULT '{}',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP::text)
+    )`);
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS land_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP::text)
+    )`);
+
+    const landColumns = {
+      land_seasons: [
+        ['season_key', 'TEXT'], ['name', 'TEXT'], ['start_date', 'TEXT'], ['end_date', 'TEXT'], ['notes', "TEXT DEFAULT ''"],
+        ['is_active', 'INTEGER DEFAULT 1'], ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['archived_at', 'TEXT']
+      ],
+      land_plots: [
+        ['plot_code', 'TEXT'], ['name', 'TEXT'], ['location', "TEXT DEFAULT ''"], ['description', "TEXT DEFAULT ''"], ['total_sahm', 'INTEGER'],
+        ['status', "TEXT DEFAULT 'available'"], ['notes', "TEXT DEFAULT ''"], ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['archived_at', 'TEXT']
+      ],
+      land_plot_terms: [
+        ['plot_id', 'INTEGER'], ['season_id', 'INTEGER'], ['rent_mode', "TEXT DEFAULT 'per_feddan'"], ['rent_value_cents', 'INTEGER DEFAULT 0'],
+        ['rent_total_cents', 'INTEGER DEFAULT 0'], ['notes', "TEXT DEFAULT ''"], ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)']
+      ],
+      land_tenants: [
+        ['full_name', 'TEXT'], ['phone', "TEXT DEFAULT ''"], ['village_address', "TEXT DEFAULT ''"], ['document_id', "TEXT DEFAULT ''"], ['notes', "TEXT DEFAULT ''"],
+        ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['archived_at', 'TEXT']
+      ],
+      land_assignments: [
+        ['plot_id', 'INTEGER'], ['tenant_id', 'INTEGER'], ['season_id', 'INTEGER'], ['assigned_sahm', 'INTEGER'], ['rent_cents', 'INTEGER DEFAULT 0'],
+        ['manual_rent_cents', 'INTEGER'], ['manual_rent_note', "TEXT DEFAULT ''"], ['rent_adjustment_mode', "TEXT DEFAULT 'none'"], ['rent_adjustment_cents', 'INTEGER DEFAULT 0'],
+        ['notes', "TEXT DEFAULT ''"], ['contract_status', "TEXT DEFAULT 'active'"],
+        ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['archived_at', 'TEXT']
+      ],
+      land_installments: [
+        ['assignment_id', 'INTEGER'], ['installment_number', 'INTEGER'], ['expected_cents', 'INTEGER DEFAULT 0'], ['due_date', 'TEXT'], ['notes', "TEXT DEFAULT ''"],
+        ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)']
+      ],
+      land_payments: [
+        ['assignment_id', 'INTEGER'], ['installment_number', 'INTEGER'], ['amount_cents', 'INTEGER'], ['paid_at', 'TEXT'], ['payment_method', "TEXT DEFAULT ''"],
+        ['reference', "TEXT DEFAULT ''"], ['notes', "TEXT DEFAULT ''"], ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)'], ['archived_at', 'TEXT']
+      ],
+      land_receipts: [
+        ['payment_id', 'INTEGER'], ['receipt_number', 'TEXT'], ['issued_at', 'TEXT'], ['receipt_data', "TEXT DEFAULT '{}'"], ['notes', "TEXT DEFAULT ''"], ['created_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)']
+      ],
+      land_settings: [
+        ['value', 'TEXT'], ['updated_at', 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)']
+      ]
+    };
+
+    for (const [tableName, columns] of Object.entries(landColumns)) {
+      for (const [columnName, definition] of columns) {
+        await this.pgPool.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${columnName} ${definition}`);
+      }
+    }
+
+    try {
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_plots_location ON land_plots(location)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_plots_status ON land_plots(status)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_plot_terms_plot_season ON land_plot_terms(plot_id, season_id)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_tenants_name ON land_tenants(full_name)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_tenants_phone ON land_tenants(phone)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_assignments_plot_season ON land_assignments(plot_id, season_id)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_assignments_tenant ON land_assignments(tenant_id)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_installments_assignment ON land_installments(assignment_id)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_payments_assignment ON land_payments(assignment_id)');
+      await this.pgPool.query('CREATE INDEX IF NOT EXISTS idx_land_payments_paid_at ON land_payments(paid_at)');
+    } catch (err) {
+      console.log('Land indexes creation:', err.message);
+    }
   }
 
   /**
@@ -955,8 +1131,16 @@ class DatabaseManager {
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'company_voucher_settlements', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
-      'app_devices', 'app_users'
+      'app_devices', 'app_users',
+      'land_seasons', 'land_plots', 'land_plot_terms', 'land_tenants',
+      'land_assignments', 'land_installments', 'land_payments', 'land_receipts', 'land_settings'
     ];
+
+    try {
+      this.sqlite.pragma('foreign_keys = OFF');
+    } catch (error) {
+      console.warn('Unable to disable SQLite foreign keys for initial sync:', error.message);
+    }
 
     for (const table of tables) {
       try {
@@ -997,6 +1181,12 @@ class DatabaseManager {
       } catch (error) {
         console.error(`Failed to sync table ${table}:`, error);
       }
+    }
+
+    try {
+      this.sqlite.pragma('foreign_keys = ON');
+    } catch (error) {
+      console.warn('Unable to re-enable SQLite foreign keys after initial sync:', error.message);
     }
 
     this.lastSyncTime = Date.now();

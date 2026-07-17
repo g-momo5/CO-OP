@@ -32,6 +32,28 @@
     </div>
   </section>
 
+  <section id="app-module-screen" class="app-module-screen" aria-label="اختيار النظام">
+    <div class="app-module-panel">
+      <div class="app-module-heading">
+        <img src="../assets/logo_cpc.png" alt="CO-OP" class="login-brand-logo">
+        <h1>اختر النظام</h1>
+      </div>
+      <div class="app-module-grid">
+        <button type="button" class="app-module-card" onclick="selectAppModule('fuel')">
+          <span class="app-module-icon">⛽</span>
+          <strong>إدارة محطة البنزين</strong>
+          <span>الفواتير، الورديات، المخزن، التقارير</span>
+        </button>
+        <button type="button" class="app-module-card land" onclick="selectAppModule('land')">
+          <span class="app-module-icon">🌾</span>
+          <strong>إدارة الأراضي</strong>
+          <span>الأراضي، المستأجرون، العقود، الأقساط</span>
+        </button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-compact" onclick="logoutAppUser()">تسجيل الخروج</button>
+    </div>
+  </section>
+
   <div class="app-container">
     <!-- Header with Breadcrumb -->
     <header class="header">
@@ -167,6 +189,188 @@
               </section>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="land-dashboard-screen" class="screen">
+        <div class="land-page">
+          <div class="land-toolbar">
+            <div>
+              <h2>إدارة الأراضي</h2>
+              <p class="summary-subtitle">متابعة الأراضي، المستأجرين، العقود والمدفوعات</p>
+            </div>
+            <div class="land-toolbar-actions">
+              <select id="land-season-key" class="form-input" onchange="handleLandSeasonChange()"></select>
+              <button type="button" class="btn btn-primary btn-compact" onclick="loadLandDashboard()">تحديث</button>
+            </div>
+          </div>
+          <div id="land-dashboard-metrics" class="land-metric-grid"></div>
+          <div class="land-two-column">
+            <section class="land-panel">
+              <div class="land-panel-header">
+                <h3>الأراضي</h3>
+                <button type="button" class="btn btn-primary btn-compact" onclick="showScreen('land-plots')">إدارة الأراضي</button>
+              </div>
+              <div id="land-dashboard-plots" class="land-table-shell"></div>
+            </section>
+            <section class="land-panel">
+              <div class="land-panel-header">
+                <h3>العقود النشطة لهذا العام</h3>
+                <button type="button" class="btn btn-secondary btn-compact" onclick="showScreen('land-assignments')">كل العقود</button>
+              </div>
+              <div id="land-dashboard-assignments" class="land-table-shell"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div id="land-plots-screen" class="screen">
+        <div class="land-page">
+          <div class="land-toolbar">
+            <div>
+              <h2>الأراضي</h2>
+              <p class="summary-subtitle">إضافة وتعديل الأراضي وأسعار الإيجار لكل موسم</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-compact" onclick="openLandPlotForm()">أرض جديدة</button>
+          </div>
+          <form id="land-plot-form" class="land-form is-hidden">
+            <input type="hidden" id="land-plot-id">
+            <div class="land-form-grid">
+              <label>اسم الأرض<input type="text" id="land-plot-name" class="form-input"></label>
+              <label>الموسم<select id="land-plot-season" class="form-input"></select></label>
+              <label>فدان<input type="number" id="land-plot-feddan" class="form-input" min="0" step="1"></label>
+              <label>قيراط<input type="number" id="land-plot-qirat" class="form-input" min="0" max="23" step="1"></label>
+              <label>سهم<input type="number" id="land-plot-sahm" class="form-input" min="0" max="23" step="1"></label>
+              <label>طريقة الإيجار
+                <select id="land-plot-rent-mode" class="form-input">
+                  <option value="per_feddan">سعر الفدان</option>
+                  <option value="total">إجمالي إيجار الأرض</option>
+                </select>
+              </label>
+              <label>قيمة الإيجار<input type="text" id="land-plot-rent-value" class="form-input" inputmode="decimal"></label>
+            </div>
+            <label>ملاحظات<textarea id="land-plot-notes" class="form-input" rows="2"></textarea></label>
+            <div class="land-form-actions">
+              <button type="button" class="btn btn-primary" onclick="saveLandPlot()">حفظ الأرض</button>
+              <button type="button" class="btn btn-secondary" onclick="closeLandPlotForm()">إلغاء</button>
+            </div>
+          </form>
+          <div id="land-plots-list" class="land-table-shell"></div>
+        </div>
+      </div>
+
+      <div id="land-tenants-screen" class="screen">
+        <div class="land-page">
+          <div class="land-toolbar">
+            <div>
+              <h2>المستأجرون</h2>
+              <p class="summary-subtitle">بيانات المستأجرين وأرقام التواصل</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-compact" onclick="openLandTenantForm()">مستأجر جديد</button>
+          </div>
+          <form id="land-tenant-form" class="land-form is-hidden">
+            <input type="hidden" id="land-tenant-id">
+            <div class="land-form-grid">
+              <label>الاسم<input type="text" id="land-tenant-name" class="form-input"></label>
+              <label>الهاتف<input type="text" id="land-tenant-phone" class="form-input"></label>
+              <label>العنوان أو القرية<input type="text" id="land-tenant-address" class="form-input"></label>
+              <label>رقم مستند<input type="text" id="land-tenant-document" class="form-input"></label>
+            </div>
+            <label>ملاحظات<textarea id="land-tenant-notes" class="form-input" rows="2"></textarea></label>
+            <div class="land-form-actions">
+              <button type="button" class="btn btn-primary" onclick="saveLandTenant()">حفظ المستأجر</button>
+              <button type="button" class="btn btn-secondary" onclick="closeLandTenantForm()">إلغاء</button>
+            </div>
+          </form>
+          <div id="land-tenants-list" class="land-table-shell"></div>
+        </div>
+      </div>
+
+      <div id="land-assignments-screen" class="screen">
+        <div class="land-page">
+          <div class="land-toolbar">
+            <div>
+              <h2>العقود والأقساط</h2>
+              <p class="summary-subtitle">توزيع المساحات وحساب الإيجار والمدفوعات</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-compact" onclick="openLandAssignmentForm()">عقد جديد</button>
+          </div>
+          <form id="land-assignment-form" class="land-form is-hidden">
+            <input type="hidden" id="land-assignment-id">
+            <div class="land-form-grid">
+              <label>الأرض<select id="land-assignment-plot" class="form-input"></select></label>
+              <label>المستأجر<select id="land-assignment-tenant" class="form-input"></select></label>
+              <label>الموسم<select id="land-assignment-season" class="form-input"></select></label>
+              <label>فدان<input type="number" id="land-assignment-feddan" class="form-input" min="0" step="1"></label>
+              <label>قيراط<input type="number" id="land-assignment-qirat" class="form-input" min="0" max="23" step="1"></label>
+              <label>سهم<input type="number" id="land-assignment-sahm" class="form-input" min="0" max="23" step="1"></label>
+              <label>نوع زيادة الإيجار
+                <select id="land-assignment-rent-adjustment-mode" class="form-input">
+                  <option value="none">بدون زيادة</option>
+                  <option value="fixed_total">إضافة مبلغ ثابت للإجمالي</option>
+                  <option value="unit_price">إضافة على سعر الفدان</option>
+                </select>
+              </label>
+              <label>قيمة الزيادة<input type="text" id="land-assignment-rent-adjustment-value" class="form-input" inputmode="decimal" placeholder="0"></label>
+              <label>ملاحظة الزيادة<input type="text" id="land-assignment-manual-note" class="form-input"></label>
+              <label>تاريخ القسط الأول<input type="date" id="land-assignment-first-due" class="form-input"></label>
+              <label>تاريخ القسط الثاني<input type="date" id="land-assignment-second-due" class="form-input"></label>
+            </div>
+            <div id="land-assignment-rent-preview" class="land-rent-preview">إجمالي الإيجار: -</div>
+            <label>ملاحظات<textarea id="land-assignment-notes" class="form-input" rows="2"></textarea></label>
+            <div class="land-form-actions">
+              <button type="button" class="btn btn-primary" onclick="saveLandAssignment()">حفظ العقد</button>
+              <button type="button" class="btn btn-secondary" onclick="closeLandAssignmentForm()">إلغاء</button>
+            </div>
+          </form>
+          <form id="land-payment-form" class="land-form is-hidden">
+            <input type="hidden" id="land-payment-assignment-id">
+            <div class="land-form-grid">
+              <label>القسط
+                <select id="land-payment-installment" class="form-input">
+                  <option value="1">القسط الأول</option>
+                  <option value="2">القسط الثاني</option>
+                </select>
+              </label>
+              <label>المبلغ<input type="text" id="land-payment-amount" class="form-input" inputmode="decimal"></label>
+              <label>تاريخ الدفع<input type="date" id="land-payment-date" class="form-input"></label>
+              <label>طريقة الدفع<input type="text" id="land-payment-method" class="form-input"></label>
+              <label>مرجع أو إيصال<input type="text" id="land-payment-reference" class="form-input"></label>
+            </div>
+            <label>ملاحظات<textarea id="land-payment-notes" class="form-input" rows="2"></textarea></label>
+            <div class="land-form-actions">
+              <button type="button" class="btn btn-primary" onclick="saveLandPayment()">حفظ الدفعة</button>
+              <button type="button" class="btn btn-secondary" onclick="closeLandPaymentForm()">إلغاء</button>
+            </div>
+          </form>
+          <div id="land-assignments-list" class="land-table-shell"></div>
+        </div>
+      </div>
+
+      <div id="land-reports-screen" class="screen">
+        <div class="land-page">
+          <div class="land-toolbar">
+            <div>
+              <h2>تقارير الأراضي</h2>
+              <p class="summary-subtitle">المدفوعات الناقصة والمتأخرة وملخص الأقساط</p>
+            </div>
+            <div class="land-toolbar-actions">
+              <select id="land-report-kind" class="form-input">
+                <option value="complete">تقرير كامل</option>
+                <option value="missing-payments">مدفوعات ناقصة</option>
+                <option value="overdue">مدفوعات متأخرة</option>
+                <option value="first-installment">ملخص القسط الأول</option>
+                <option value="second-installment">ملخص القسط الثاني</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-compact" onclick="loadLandReports()">عرض</button>
+            </div>
+          </div>
+          <div class="land-form-actions">
+            <button type="button" class="btn btn-secondary btn-compact" onclick="exportLandReport('csv')">CSV</button>
+            <button type="button" class="btn btn-secondary btn-compact" onclick="exportLandReport('xlsx')">Excel</button>
+            <button type="button" class="btn btn-secondary btn-compact" onclick="exportLandReport('pdf')">PDF</button>
+          </div>
+          <div id="land-reports-list" class="land-table-shell"></div>
         </div>
       </div>
 
@@ -2386,6 +2590,11 @@
       <button class="nav-btn" data-screen="charts">الرسوم البيانية</button>
       <button class="nav-btn" data-screen="report">التقارير</button>
       <button class="nav-btn" data-screen="settings">الإعدادات</button>
+      <button class="nav-btn nav-land" data-screen="land-dashboard">الأراضي</button>
+      <button class="nav-btn nav-land" data-screen="land-plots">قطع الأرض</button>
+      <button class="nav-btn nav-land" data-screen="land-tenants">المستأجرون</button>
+      <button class="nav-btn nav-land" data-screen="land-assignments">العقود</button>
+      <button class="nav-btn nav-land" data-screen="land-reports">التقارير</button>
       <div class="nav-user-status" id="nav-user-status" style="display: none;">
         <div class="nav-user-avatar" id="nav-user-avatar"></div>
         <span class="nav-user-name" id="nav-user-name"></span>

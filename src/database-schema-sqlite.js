@@ -37,6 +37,7 @@ class DatabaseSchema {
     this.createMonthlyProfitCustomValuesTable(db);
     this.createAppUsersTable(db);
     this.createAppDevicesTable(db);
+    this.createLandTables(db);
     this.createSyncQueueTable(db);
 
     // Create indexes for performance
@@ -448,6 +449,130 @@ class DatabaseSchema {
     `);
   }
 
+  static createLandTables(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS land_seasons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season_key TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        start_date TEXT,
+        end_date TEXT,
+        notes TEXT DEFAULT '',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS land_plots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plot_code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        location TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        total_sahm INTEGER NOT NULL CHECK(total_sahm > 0),
+        status TEXT NOT NULL DEFAULT 'available',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS land_plot_terms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plot_id INTEGER NOT NULL,
+        season_id INTEGER NOT NULL,
+        rent_mode TEXT NOT NULL DEFAULT 'per_feddan',
+        rent_value_cents INTEGER NOT NULL DEFAULT 0,
+        rent_total_cents INTEGER NOT NULL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(plot_id, season_id),
+        FOREIGN KEY(plot_id) REFERENCES land_plots(id),
+        FOREIGN KEY(season_id) REFERENCES land_seasons(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS land_tenants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        village_address TEXT DEFAULT '',
+        document_id TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS land_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plot_id INTEGER NOT NULL,
+        tenant_id INTEGER NOT NULL,
+        season_id INTEGER NOT NULL,
+        assigned_sahm INTEGER NOT NULL CHECK(assigned_sahm > 0),
+        rent_cents INTEGER NOT NULL DEFAULT 0,
+        manual_rent_cents INTEGER,
+        manual_rent_note TEXT DEFAULT '',
+        rent_adjustment_mode TEXT DEFAULT 'none',
+        rent_adjustment_cents INTEGER DEFAULT 0,
+        notes TEXT DEFAULT '',
+        contract_status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT,
+        FOREIGN KEY(plot_id) REFERENCES land_plots(id),
+        FOREIGN KEY(tenant_id) REFERENCES land_tenants(id),
+        FOREIGN KEY(season_id) REFERENCES land_seasons(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS land_installments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_id INTEGER NOT NULL,
+        installment_number INTEGER NOT NULL CHECK(installment_number IN (1, 2)),
+        expected_cents INTEGER NOT NULL DEFAULT 0,
+        due_date TEXT,
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assignment_id, installment_number),
+        FOREIGN KEY(assignment_id) REFERENCES land_assignments(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS land_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_id INTEGER NOT NULL,
+        installment_number INTEGER NOT NULL CHECK(installment_number IN (1, 2)),
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        paid_at TEXT NOT NULL,
+        payment_method TEXT DEFAULT '',
+        reference TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT,
+        FOREIGN KEY(assignment_id) REFERENCES land_assignments(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS land_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payment_id INTEGER NOT NULL,
+        receipt_number TEXT NOT NULL UNIQUE,
+        issued_at TEXT NOT NULL,
+        receipt_data TEXT NOT NULL DEFAULT '{}',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(payment_id) REFERENCES land_payments(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS land_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  }
+
   static createSyncQueueTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS sync_queue (
@@ -494,6 +619,16 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_plots_location ON land_plots(location)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_plots_status ON land_plots(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_plot_terms_plot_season ON land_plot_terms(plot_id, season_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_tenants_name ON land_tenants(full_name)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_tenants_phone ON land_tenants(phone)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_assignments_plot_season ON land_assignments(plot_id, season_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_assignments_tenant ON land_assignments(tenant_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_installments_assignment ON land_installments(assignment_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_payments_assignment ON land_payments(assignment_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_land_payments_paid_at ON land_payments(paid_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_year ON annual_inventories(year)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_annual_inventories_finalized ON annual_inventories(finalized)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_safe_book_movements_date ON safe_book_movements(date)');
@@ -844,6 +979,26 @@ class DatabaseSchema {
       }
       db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active)');
+
+      const landSeasonsInfo = db.prepare("PRAGMA table_info(land_seasons)").all();
+      if (landSeasonsInfo.length === 0) {
+        console.log('Creating land management tables...');
+        this.createLandTables(db);
+      } else {
+        const landAssignmentsInfo = db.prepare("PRAGMA table_info(land_assignments)").all();
+        ensureColumn('land_assignments', landAssignmentsInfo, 'rent_adjustment_mode', "TEXT DEFAULT 'none'");
+        ensureColumn('land_assignments', landAssignmentsInfo, 'rent_adjustment_cents', 'INTEGER DEFAULT 0');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_plots_location ON land_plots(location)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_plots_status ON land_plots(status)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_plot_terms_plot_season ON land_plot_terms(plot_id, season_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_tenants_name ON land_tenants(full_name)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_tenants_phone ON land_tenants(phone)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_assignments_plot_season ON land_assignments(plot_id, season_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_assignments_tenant ON land_assignments(tenant_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_installments_assignment ON land_installments(assignment_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_payments_assignment ON land_payments(assignment_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_land_payments_paid_at ON land_payments(paid_at)');
 
       const annualInventoriesTableInfo = db.prepare("PRAGMA table_info(annual_inventories)").all();
       const hasExpectedItems = annualInventoriesTableInfo.some(col => col.name === 'expected_items');

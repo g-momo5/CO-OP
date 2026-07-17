@@ -1,10 +1,11 @@
 {
   "name": "coop2",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "main": "src/main.js",
   "scripts": {
     "dev": "node scripts/run-electron.cjs",
     "start": "node scripts/run-electron.cjs",
+    "test": "node --test test-land-domain.js test-land-service.js",
     "build": "node scripts/build.cjs",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
@@ -92,6 +93,7 @@
   "dependencies": {
     "better-sqlite3": "^12.4.1",
     "chart.js": "^4.5.0",
+    "drizzle-orm": "^0.45.2",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.1.7",
     "file-saver": "^2.0.5",

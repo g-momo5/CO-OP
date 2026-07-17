@@ -1,6 +1,7 @@
 (() => {
   const state = {
     apiBase: '/api/mobile-data',
+    currentModule: 'fuel',
     currentView: 'overview',
     shiftDays: []
   };
@@ -10,6 +11,7 @@
   const shiftSummaryDialog = document.getElementById('shiftSummaryDialog');
   const shiftSummaryDialogBody = document.getElementById('shiftSummaryDialogBody');
   const closeShiftSummaryDialog = document.getElementById('closeShiftSummaryDialog');
+  const moduleButtons = document.querySelectorAll('[data-module]');
   let homeChart = null;
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
@@ -236,6 +238,98 @@
         }).join('')}
       </div>
     `;
+  }
+
+  function landStatusLabel(status) {
+    const labels = {
+      unpaid: 'غير مدفوع',
+      first_partial: 'القسط الأول جزئي',
+      first_paid: 'تم دفع القسط الأول',
+      second_partial: 'القسط الثاني جزئي',
+      paid_full: 'مدفوع بالكامل',
+      overpaid: 'دفعة زائدة',
+      overdue: 'متأخر'
+    };
+    return labels[status] || status || '-';
+  }
+
+  function landItem(title, rows) {
+    return `
+      <div class="land-mobile-item">
+        <strong>${escapeHtml(title)}</strong>
+        ${rows.map(([label, value]) => `<span>${escapeHtml(label)}: ${escapeHtml(value ?? '-')}</span>`).join('')}
+      </div>
+    `;
+  }
+
+  async function loadLandDashboard() {
+    setLoading();
+    const data = await api('land-dashboard', { season_key: new Date().getFullYear() });
+    content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
+      <div class="grid two">
+        ${metric('عدد الأراضي', data.plots_count, '📍')}
+        ${metric('إجمالي المساحة', data.total_sahm_label, '📐')}
+        ${metric('المؤجر', data.rented_sahm_label, '🤝')}
+        ${metric('المتاح', data.available_sahm_label, '✅')}
+        ${metric('الإيجار المتوقع', data.expected_egp, '💰')}
+        ${metric('المتبقي', data.remaining_egp, '🧾')}
+      </div>
+      <div class="land-mobile-list">
+        ${(data.assignments || []).map((row) => landItem(`${row.plot_name} - ${row.tenant_name}`, [
+          ['المساحة', row.assigned_sahm_label],
+          ['الإيجار', row.rent_egp],
+          ['المدفوع', row.paid_egp],
+          ['المتبقي', row.remaining_egp],
+          ['الحالة', landStatusLabel(row.payment_status)]
+        ])).join('') || '<div class="empty">لا توجد عقود لهذا الموسم</div>'}
+      </div>
+    `);
+  }
+
+  async function loadLandPlots() {
+    setLoading();
+    const data = await api('land-plots', { season_key: new Date().getFullYear() });
+    content.innerHTML = sectionCard('📍', 'قطع الأرض', `
+      <div class="land-mobile-list">
+        ${(data.plots || []).map((plot) => landItem(plot.name, [
+          ['المساحة', plot.total_sahm_label],
+          ['المؤجر', plot.rented_sahm_label],
+          ['المتاح', plot.available_sahm_label],
+          ['الإيجار المتوقع', plot.expected_rent_egp]
+        ])).join('') || '<div class="empty">لا توجد أراض مسجلة</div>'}
+      </div>
+    `);
+  }
+
+  async function loadLandTenants() {
+    setLoading();
+    const data = await api('land-tenants');
+    content.innerHTML = sectionCard('👥', 'المستأجرون', `
+      <div class="land-mobile-list">
+        ${(data.tenants || []).map((tenant) => landItem(tenant.full_name, [
+          ['الهاتف', tenant.phone],
+          ['العنوان', tenant.village_address],
+          ['العقود', tenant.assignments_count],
+          ['إجمالي الإيجار', tenant.total_rent_egp]
+        ])).join('') || '<div class="empty">لا يوجد مستأجرون</div>'}
+      </div>
+    `);
+  }
+
+  async function loadLandReports() {
+    setLoading();
+    const data = await api('land-reports', { kind: 'missing-payments', season_key: new Date().getFullYear() });
+    content.innerHTML = sectionCard('📋', 'المدفوعات الناقصة', `
+      <div class="land-mobile-list">
+        ${(data.rows || []).map((row) => landItem(`${row.plot_name} - ${row.tenant_name}`, [
+          ['المساحة', row.assigned_sahm_label],
+          ['الإيجار', row.rent_egp],
+          ['المدفوع', row.paid_egp],
+          ['المتبقي', row.remaining_egp],
+          ['الحالة', landStatusLabel(row.payment_status)]
+        ])).join('') || '<div class="empty">لا توجد مدفوعات ناقصة</div>'}
+      </div>
+    `);
   }
 
   function renderHomeChartCanvas(chart) {
@@ -646,10 +740,27 @@
       if (view === 'expenses') await loadExpenses();
       if (view === 'annual-inventory') await loadAnnualInventory();
       if (view === 'shift-day-summaries') await loadShiftDaySummaries();
+      if (view === 'land-dashboard') await loadLandDashboard();
+      if (view === 'land-plots') await loadLandPlots();
+      if (view === 'land-tenants') await loadLandTenants();
+      if (view === 'land-reports') await loadLandReports();
     } catch (error) {
       setError(errorMessage(error));
     }
   }
+
+  function switchModule(moduleName) {
+    state.currentModule = moduleName === 'land' ? 'land' : 'fuel';
+    document.body.classList.toggle('mobile-module-land', state.currentModule === 'land');
+    moduleButtons.forEach((button) => {
+      button.classList.toggle('active', button.dataset.module === state.currentModule);
+    });
+    loadView(state.currentModule === 'land' ? 'land-dashboard' : 'overview');
+  }
+
+  moduleButtons.forEach((button) => {
+    button.addEventListener('click', () => switchModule(button.dataset.module));
+  });
 
   document.querySelectorAll('.tabs button').forEach((button) => {
     button.addEventListener('click', () => loadView(button.dataset.view));

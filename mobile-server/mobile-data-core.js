@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { formatSurface, formatMoney, calculatePaymentSummary } = require('../src/land-domain');
 
 let pool = null;
 
@@ -1122,6 +1123,140 @@ async function getOverview() {
   };
 }
 
+async function ensureLandSeason(seasonKey) {
+  const key = String(seasonKey || new Date().getFullYear()).trim();
+  const rows = await query('SELECT * FROM land_seasons WHERE season_key = $1 AND archived_at IS NULL LIMIT 1', [key]).catch(() => []);
+  return rows[0] || null;
+}
+
+async function getLandAssignments(queryParams = {}) {
+  const season = await ensureLandSeason(queryParams.season || queryParams.season_key);
+  if (!season) return [];
+  const rows = await query(`
+    SELECT
+      a.*,
+      p.name AS plot_name,
+      p.plot_code,
+      p.location,
+      t.full_name AS tenant_name,
+      t.phone AS tenant_phone,
+      s.season_key,
+      COALESCE(SUM(CASE WHEN i.installment_number = 1 THEN i.expected_cents ELSE 0 END), 0) AS first_expected_cents,
+      COALESCE(SUM(CASE WHEN i.installment_number = 2 THEN i.expected_cents ELSE 0 END), 0) AS second_expected_cents,
+      COALESCE(SUM(CASE WHEN pay.installment_number = 1 AND pay.archived_at IS NULL THEN pay.amount_cents ELSE 0 END), 0) AS first_paid_cents,
+      COALESCE(SUM(CASE WHEN pay.installment_number = 2 AND pay.archived_at IS NULL THEN pay.amount_cents ELSE 0 END), 0) AS second_paid_cents
+    FROM land_assignments a
+    JOIN land_plots p ON p.id = a.plot_id
+    JOIN land_tenants t ON t.id = a.tenant_id
+    JOIN land_seasons s ON s.id = a.season_id
+    LEFT JOIN land_installments i ON i.assignment_id = a.id
+    LEFT JOIN land_payments pay ON pay.assignment_id = a.id
+    WHERE a.archived_at IS NULL AND a.season_id = $1
+    GROUP BY a.id, p.name, p.plot_code, p.location, t.full_name, t.phone, s.season_key
+    ORDER BY p.name ASC, t.full_name ASC
+  `, [season.id]).catch(() => []);
+
+  return rows.map((row) => {
+    const summary = calculatePaymentSummary(
+      Number(row.rent_cents) || 0,
+      Number(row.first_expected_cents) || 0,
+      Number(row.second_expected_cents) || 0,
+      Number(row.first_paid_cents) || 0,
+      Number(row.second_paid_cents) || 0
+    );
+    return {
+      ...row,
+      assigned_sahm_label: formatSurface(Number(row.assigned_sahm) || 0),
+      rent_egp: formatMoney(Number(row.rent_cents) || 0),
+      paid_egp: formatMoney(summary.totalPaidCents),
+      remaining_egp: formatMoney(summary.remainingCents),
+      payment_status: summary.status
+    };
+  });
+}
+
+async function getLandPlots(queryParams = {}) {
+  const season = await ensureLandSeason(queryParams.season || queryParams.season_key);
+  const seasonId = season?.id || null;
+  const rows = await query(`
+    SELECT
+      p.*,
+      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.assigned_sahm ELSE 0 END), 0) AS rented_sahm,
+      COALESCE(SUM(CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.rent_cents ELSE 0 END), 0) AS expected_rent_cents,
+      COUNT(DISTINCT CASE WHEN a.archived_at IS NULL AND ($1 IS NULL OR a.season_id = $1) THEN a.tenant_id END) AS tenants_count
+    FROM land_plots p
+    LEFT JOIN land_assignments a ON a.plot_id = p.id
+    WHERE p.archived_at IS NULL
+    GROUP BY p.id
+    ORDER BY p.name ASC
+  `, [seasonId]).catch(() => []);
+  return rows.map((row) => {
+    const total = Number(row.total_sahm) || 0;
+    const rented = Number(row.rented_sahm) || 0;
+    return {
+      ...row,
+      total_sahm_label: formatSurface(total),
+      rented_sahm_label: formatSurface(rented),
+      available_sahm_label: formatSurface(Math.max(total - rented, 0)),
+      expected_rent_egp: formatMoney(Number(row.expected_rent_cents) || 0)
+    };
+  });
+}
+
+async function getLandDashboard(queryParams = {}) {
+  const [plots, assignments] = await Promise.all([
+    getLandPlots(queryParams),
+    getLandAssignments(queryParams)
+  ]);
+  const totalSahm = plots.reduce((sum, row) => sum + (Number(row.total_sahm) || 0), 0);
+  const rentedSahm = plots.reduce((sum, row) => sum + (Number(row.rented_sahm) || 0), 0);
+  const expected = assignments.reduce((sum, row) => sum + (Number(row.rent_cents) || 0), 0);
+  const paid = assignments.reduce((sum, row) => {
+    const firstPaid = Number(row.first_paid_cents) || 0;
+    const secondPaid = Number(row.second_paid_cents) || 0;
+    return sum + firstPaid + secondPaid;
+  }, 0);
+  return {
+    readOnly: true,
+    plots_count: plots.length,
+    total_sahm_label: formatSurface(totalSahm),
+    rented_sahm_label: formatSurface(rentedSahm),
+    available_sahm_label: formatSurface(Math.max(totalSahm - rentedSahm, 0)),
+    expected_egp: formatMoney(expected),
+    paid_egp: formatMoney(paid),
+    remaining_egp: formatMoney(Math.max(expected - paid, 0)),
+    plots: plots.slice(0, 12),
+    assignments: assignments.slice(0, 20),
+    lastSync: await getLastDataTimestamp()
+  };
+}
+
+async function getLandTenants() {
+  return query(`
+    SELECT t.*, COUNT(DISTINCT a.id) AS assignments_count, COALESCE(SUM(a.rent_cents), 0) AS total_rent_cents
+    FROM land_tenants t
+    LEFT JOIN land_assignments a ON a.tenant_id = t.id AND a.archived_at IS NULL
+    WHERE t.archived_at IS NULL
+    GROUP BY t.id
+    ORDER BY t.full_name ASC
+  `).then((rows) => rows.map((row) => ({
+    ...row,
+    total_rent_egp: formatMoney(Number(row.total_rent_cents) || 0)
+  }))).catch(() => []);
+}
+
+async function getLandReports(queryParams = {}) {
+  const rows = await getLandAssignments(queryParams);
+  const kind = String(queryParams.kind || 'complete');
+  if (kind === 'missing-payments') {
+    return rows.filter((row) => row.payment_status !== 'paid_full' && row.payment_status !== 'overpaid');
+  }
+  if (kind === 'overdue') {
+    return rows.filter((row) => row.payment_status === 'overdue');
+  }
+  return rows;
+}
+
 async function getMobileData(queryParams = {}) {
   const view = String(queryParams.view || 'overview').trim();
 
@@ -1152,6 +1287,16 @@ async function getMobileData(queryParams = {}) {
       return { rows: await getProfit(queryParams) };
     case 'prices':
       return await getPrices();
+    case 'land-dashboard':
+      return await getLandDashboard(queryParams);
+    case 'land-plots':
+      return { plots: await getLandPlots(queryParams), lastSync: await getLastDataTimestamp() };
+    case 'land-plot-detail':
+      return { plots: await getLandPlots(queryParams), assignments: await getLandAssignments(queryParams) };
+    case 'land-tenants':
+      return { tenants: await getLandTenants(), lastSync: await getLastDataTimestamp() };
+    case 'land-reports':
+      return { rows: await getLandReports(queryParams), lastSync: await getLastDataTimestamp() };
     default:
       return getOverview();
   }

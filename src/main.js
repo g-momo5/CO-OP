@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
+const { LAND_TABLES, registerLandIpcHandlers } = require('./land-service');
 
 let mainWindow;
 let splashWindow = null;
@@ -1838,6 +1839,8 @@ async function createProduct(productType, productName, price, extra = {}) {
 
 // IPC Handlers setup function
 function setupIPCHandlers() {
+  registerLandIpcHandlers(ipcMain, () => dbManager, { dialog });
+
   const PROFIT_MANUAL_FIELDS = [
     'fuel_diesel',
     'fuel_80',
@@ -5854,6 +5857,11 @@ ipcMain.handle('get-sales-summary', async () => {
       const monthlyProfitCustomRows = await executeQuery('SELECT * FROM monthly_profit_custom_rows ORDER BY row_type ASC, display_order ASC');
       const monthlyProfitCustomValues = await executeQuery('SELECT * FROM monthly_profit_custom_values ORDER BY month_key DESC');
       const appUsers = await executeQuery('SELECT * FROM app_users ORDER BY id ASC');
+      const landData = {};
+      for (const tableName of LAND_TABLES) {
+        const orderColumn = tableName === 'land_settings' ? 'key' : 'id';
+        landData[tableName] = await executeQuery(`SELECT * FROM ${tableName} ORDER BY ${orderColumn} ASC`);
+      }
 
       // Get general settings
       const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -5877,6 +5885,7 @@ ipcMain.handle('get-sales-summary', async () => {
         monthlyProfitCustomRows,
         monthlyProfitCustomValues,
         appUsers,
+        landData,
         generalSettings
       };
 
@@ -6207,6 +6216,23 @@ ipcMain.handle('get-sales-summary', async () => {
             is_active: Number(user.is_active) === 0 ? 0 : 1,
             updated_at: user.updated_at || new Date().toISOString()
           });
+        }
+      }
+
+      if (backupData.landData && typeof backupData.landData === 'object') {
+        for (const tableName of LAND_TABLES) {
+          const rows = Array.isArray(backupData.landData[tableName]) ? backupData.landData[tableName] : [];
+          for (const row of rows) {
+            const columns = Object.keys(row).filter((column) => row[column] !== undefined);
+            if (!columns.length) continue;
+            const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
+            const values = columns.map((column) => row[column]);
+            await executeInsert(
+              `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+              values,
+              tableName
+            );
+          }
         }
       }
 
