@@ -385,30 +385,36 @@
     if (!groups.length) return '<div class="empty">لا توجد عقود لهذا الموسم</div>';
 
     return `
-      <div class="land-dashboard-contracts-grid" role="table" aria-label="العقود النشطة لهذا العام">
-        <div class="land-dashboard-contracts-header" role="row">
-          <span role="columnheader">المستأجر</span>
-          <span role="columnheader">المساحة</span>
-          <span role="columnheader">الإيجار</span>
-          <span role="columnheader">المدفوع</span>
-          <span role="columnheader">المتبقي</span>
-          <span role="columnheader">الحالة</span>
-        </div>
-        ${groups.map(([plotName, rows]) => `
-          <section class="land-dashboard-contract-group" role="rowgroup">
-            <h3 class="land-dashboard-plot-title">${escapeHtml(plotName)}</h3>
-            ${rows.map((row) => `
-              <div class="land-dashboard-contract-row" role="row">
-                <span class="tenant-name" role="cell">${escapeHtml(row.tenant_name || '-')}</span>
-                <span role="cell">${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</span>
-                <span role="cell">${escapeHtml(formatWholeEgp(row.rent_egp))}</span>
-                <span role="cell">${escapeHtml(formatWholeEgp(row.paid_egp))}</span>
-                <span role="cell">${escapeHtml(formatWholeEgp(row.remaining_egp))}</span>
-                <span role="cell">${escapeHtml(landStatusLabel(row.payment_status))}</span>
-              </div>
+      <div class="table-wrap land-dashboard-contracts-table-wrap">
+        <table class="base-table land-dashboard-contracts-table">
+          <thead>
+            <tr>
+              <th>المستأجر</th>
+              <th>المساحة</th>
+              <th>الإيجار</th>
+              <th>المدفوع</th>
+              <th>المتبقي</th>
+              <th>الحالة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${groups.map(([plotName, rows]) => `
+              <tr class="land-dashboard-plot-row">
+                <td colspan="6">${escapeHtml(plotName)}</td>
+              </tr>
+              ${rows.map((row) => `
+                <tr>
+                  <td class="tenant-name">${escapeHtml(row.tenant_name || '-')}</td>
+                  <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
+                  <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+                </tr>
+              `).join('')}
             `).join('')}
-          </section>
-        `).join('')}
+          </tbody>
+        </table>
       </div>
     `;
   }
