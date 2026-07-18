@@ -384,54 +384,37 @@
     const groups = landDashboardContractGroups(assignments);
     if (!groups.length) return '<div class="empty">لا توجد عقود لهذا الموسم</div>';
 
-    const fixedRows = groups.map(([plotName, rows]) => `
-      <tr class="land-dashboard-plot-row">
-        <td>${escapeHtml(plotName)}</td>
-      </tr>
-      ${rows.map((row) => `
-        <tr>
-          <td class="tenant-name">${escapeHtml(row.tenant_name || '-')}</td>
-        </tr>
-      `).join('')}
-    `).join('');
-
-    const scrollRows = groups.map(([_plotName, rows]) => `
-      <tr class="land-dashboard-plot-row">
-        <td colspan="5">&nbsp;</td>
-      </tr>
-      ${rows.map((row) => `
-        <tr>
-          <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
-          <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
-        </tr>
-      `).join('')}
-    `).join('');
-
     return `
-      <div class="land-dashboard-contracts-lock" role="table" aria-label="العقود النشطة لهذا العام">
-        <div class="land-dashboard-contracts-fixed">
-          <table class="base-table land-dashboard-contracts-table land-dashboard-contracts-fixed-table">
-            <thead><tr><th>المستأجر</th></tr></thead>
-            <tbody>${fixedRows}</tbody>
-          </table>
-        </div>
-        <div class="land-dashboard-contracts-scroll">
-          <table class="base-table land-dashboard-contracts-table land-dashboard-contracts-scroll-table">
-            <thead>
-              <tr>
-                <th>المساحة</th>
-                <th>الإيجار</th>
-                <th>المدفوع</th>
-                <th>المتبقي</th>
-                <th>الحالة</th>
+      <div class="table-wrap land-dashboard-contracts-table-wrap">
+        <table class="base-table land-dashboard-contracts-table">
+          <thead>
+            <tr>
+              <th>المستأجر</th>
+              <th>المساحة</th>
+              <th>الإيجار</th>
+              <th>المدفوع</th>
+              <th>المتبقي</th>
+              <th>الحالة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${groups.map(([plotName, rows]) => `
+              <tr class="land-dashboard-plot-row">
+                <td colspan="6">${escapeHtml(plotName)}</td>
               </tr>
-            </thead>
-            <tbody>${scrollRows}</tbody>
-          </table>
-        </div>
+              ${rows.map((row) => `
+                <tr>
+                  <td class="tenant-name">${escapeHtml(row.tenant_name || '-')}</td>
+                  <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
+                  <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+                </tr>
+              `).join('')}
+            `).join('')}
+          </tbody>
+        </table>
       </div>
     `;
   }
