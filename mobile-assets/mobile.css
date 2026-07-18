@@ -558,6 +558,76 @@ button {
   text-align: right;
 }
 
+.land-dashboard-contracts-grid {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+  margin-inline: -0.35rem;
+}
+
+.land-dashboard-contracts-header,
+.land-dashboard-contract-row {
+  display: grid;
+  grid-template-columns:
+    minmax(56px, 1.45fr)
+    minmax(32px, 0.7fr)
+    minmax(38px, 0.85fr)
+    minmax(38px, 0.85fr)
+    minmax(38px, 0.85fr)
+    minmax(34px, 0.75fr);
+  gap: 0.12rem;
+  align-items: stretch;
+}
+
+.land-dashboard-contracts-header span,
+.land-dashboard-contract-row span {
+  min-width: 0;
+  padding: 0.42rem 0.22rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--coop-line);
+  background: #ffffff;
+  color: var(--coop-ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.land-dashboard-contracts-header span {
+  background: var(--coop-ink);
+  color: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.land-dashboard-contract-group {
+  display: grid;
+  gap: 0.18rem;
+  margin: 0;
+}
+
+.land-dashboard-plot-title {
+  margin: 0.25rem 0 0;
+  padding: 0.46rem 0.55rem;
+  border: 1px solid #d7e7dc;
+  background: #eef5ef;
+  color: var(--coop-ink);
+  font-size: 0.96rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.land-dashboard-contract-row .tenant-name {
+  justify-content: flex-start;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: right;
+}
+
 .empty,
 .loading,
 .error {
