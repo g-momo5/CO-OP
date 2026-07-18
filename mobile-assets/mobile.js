@@ -16,7 +16,6 @@
   const closeShiftSummaryDialog = document.getElementById('closeShiftSummaryDialog');
   const moduleButtons = document.querySelectorAll('[data-module]');
   let homeChart = null;
-  let headerScrollTicking = false;
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 
@@ -170,19 +169,6 @@
 
   function setLastSync(value) {
     if (lastSync) lastSync.textContent = formatDate(value);
-  }
-
-  function updateHeaderCompactState() {
-    document.body.classList.toggle('mobile-header-compact', window.scrollY > 24);
-  }
-
-  function handleWindowScroll() {
-    if (headerScrollTicking) return;
-    headerScrollTicking = true;
-    requestAnimationFrame(() => {
-      updateHeaderCompactState();
-      headerScrollTicking = false;
-    });
   }
 
   function buildUrl(base, params) {
@@ -370,53 +356,28 @@
     };
   }
 
-  function landDashboardContractGroups(assignments = []) {
+  function landDashboardContractRows(assignments = []) {
+    if (!assignments.length) return [];
     const groups = new Map();
     assignments.forEach((row) => {
       const plotName = row.plot_name || '-';
       if (!groups.has(plotName)) groups.set(plotName, []);
       groups.get(plotName).push(row);
     });
-    return Array.from(groups.entries());
-  }
 
-  function renderLandDashboardContracts(assignments = []) {
-    const groups = landDashboardContractGroups(assignments);
-    if (!groups.length) return '<div class="empty">لا توجد عقود لهذا الموسم</div>';
-
-    return `
-      <div class="table-wrap land-dashboard-contracts-table-wrap">
-        <table class="base-table land-dashboard-contracts-table">
-          <thead>
-            <tr>
-              <th>المستأجر</th>
-              <th>المساحة</th>
-              <th>الإيجار</th>
-              <th>المدفوع</th>
-              <th>المتبقي</th>
-              <th>الحالة</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${groups.map(([plotName, rows]) => `
-              <tr class="land-dashboard-plot-row">
-                <td colspan="6">${escapeHtml(plotName)}</td>
-              </tr>
-              ${rows.map((row) => `
-                <tr>
-                  <td class="tenant-name">${escapeHtml(row.tenant_name || '-')}</td>
-                  <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
-                  <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
-                  <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
-                  <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
-                  <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
-                </tr>
-              `).join('')}
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+    return Array.from(groups.entries()).flatMap(([plotName, rows]) => [
+      `<tr class="land-dashboard-plot-row"><td colspan="6">${escapeHtml(plotName)}</td></tr>`,
+      ...rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.tenant_name || '-')}</td>
+          <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
+          <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+        </tr>
+      `)
+    ]);
   }
 
   async function loadLandDashboard() {
@@ -431,9 +392,18 @@
         ${metric('الإيجار المتوقع', formatWholeEgp(data.expected_egp), '💰')}
         ${metric('المتبقي', formatWholeEgp(data.remaining_egp), '🧾')}
       </div>
-      ${renderLandDashboardContracts(data.assignments || [])}
+      ${table(
+        ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+        landDashboardContractRows(data.assignments || []),
+        'لا توجد عقود لهذا الموسم',
+        'land-dashboard-contracts-table'
+      )}
     `, landSeasonFilter('landDashboardSeasonForm'));
     wireLandSeasonFilter('landDashboardSeasonForm', loadLandDashboard);
+    requestAnimationFrame(() => {
+      const tableWrap = content.querySelector('.land-dashboard-contracts-table-wrap');
+      if (tableWrap) tableWrap.scrollLeft = tableWrap.scrollWidth;
+    });
   }
 
   async function loadLandPlots() {
@@ -935,7 +905,6 @@
   shiftSummaryDialog?.addEventListener('click', (event) => {
     if (event.target === shiftSummaryDialog) closeSummaryModal();
   });
-  window.addEventListener('scroll', handleWindowScroll, { passive: true });
 
   loadView('overview');
 })();
