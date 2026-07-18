@@ -16,6 +16,7 @@
   const closeShiftSummaryDialog = document.getElementById('closeShiftSummaryDialog');
   const moduleButtons = document.querySelectorAll('[data-module]');
   let homeChart = null;
+  let headerScrollTicking = false;
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 
@@ -169,6 +170,19 @@
 
   function setLastSync(value) {
     if (lastSync) lastSync.textContent = formatDate(value);
+  }
+
+  function updateHeaderCompactState() {
+    document.body.classList.toggle('mobile-header-compact', window.scrollY > 24);
+  }
+
+  function handleWindowScroll() {
+    if (headerScrollTicking) return;
+    headerScrollTicking = true;
+    requestAnimationFrame(() => {
+      updateHeaderCompactState();
+      headerScrollTicking = false;
+    });
   }
 
   function buildUrl(base, params) {
@@ -915,6 +929,7 @@
   shiftSummaryDialog?.addEventListener('click', (event) => {
     if (event.target === shiftSummaryDialog) closeSummaryModal();
   });
+  window.addEventListener('scroll', handleWindowScroll, { passive: true });
 
   loadView('overview');
 })();
