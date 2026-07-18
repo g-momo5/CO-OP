@@ -200,8 +200,9 @@
 
   function table(headers, rows, emptyText = 'لا توجد بيانات', tableClass = '') {
     if (!rows.length) return `<div class="empty">${emptyText}</div>`;
+    const wrapperClass = ['table-wrap', tableClass ? `${tableClass}-wrap` : ''].filter(Boolean).join(' ');
     return `
-      <div class="table-wrap">
+      <div class="${escapeHtml(wrapperClass)}">
         <table class="base-table ${escapeHtml(tableClass)}">
           <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
           <tbody>${rows.join('')}</tbody>
@@ -399,6 +400,10 @@
       )}
     `, landSeasonFilter('landDashboardSeasonForm'));
     wireLandSeasonFilter('landDashboardSeasonForm', loadLandDashboard);
+    requestAnimationFrame(() => {
+      const tableWrap = content.querySelector('.land-dashboard-contracts-table-wrap');
+      if (tableWrap) tableWrap.scrollLeft = tableWrap.scrollWidth;
+    });
   }
 
   async function loadLandPlots() {
