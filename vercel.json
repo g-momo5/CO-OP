@@ -48,6 +48,15 @@
       ]
     },
     {
+      "source": "/m/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/m/(.*)",
       "headers": [
         {
@@ -58,6 +67,33 @@
     },
     {
       "source": "/mobile",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/mobile/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/mobile/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/mobile/manifest.webmanifest",
       "headers": [
         {
           "key": "Cache-Control",

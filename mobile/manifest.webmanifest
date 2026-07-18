@@ -2,7 +2,7 @@
   "name": "CO-OP",
   "short_name": "CO-OP",
   "description": "CO-OP mobile dashboard",
-  "start_url": "/m/",
+  "start_url": "/m/?v=20260718-ios-refresh",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f6f7f4",

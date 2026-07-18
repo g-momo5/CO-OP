@@ -39,12 +39,32 @@
     Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
 
 [[headers]]
+  for = "/m/"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
   for = "/m/*"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
 
 [[headers]]
   for = "/mobile"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile/"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile/index.html"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile/manifest.webmanifest"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
 
