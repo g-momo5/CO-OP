@@ -88,6 +88,11 @@
     return Number.isFinite(numeric) ? `${Math.round(numeric)} جنيه مصري` : raw;
   }
 
+  function formatWholeEgpShort(value) {
+    const formatted = formatWholeEgp(value);
+    return formatted.replace('جنيه مصري', 'ج.م');
+  }
+
   function formatCompactSurfaceLabel(value) {
     return String(value || '-')
       .replaceAll('فدان', 'ف')
@@ -371,9 +376,9 @@
         <tr>
           <td>${escapeHtml(row.tenant_name || '-')}</td>
           <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
-          <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
+          <td>${escapeHtml(formatWholeEgpShort(row.rent_egp))}</td>
+          <td>${escapeHtml(formatWholeEgpShort(row.paid_egp))}</td>
+          <td>${escapeHtml(formatWholeEgpShort(row.remaining_egp))}</td>
           <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
         </tr>
       `)
