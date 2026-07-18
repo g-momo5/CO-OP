@@ -527,8 +527,31 @@ button {
   -webkit-transform: translateZ(0);
 }
 
+.land-dashboard-contract-group {
+  display: grid;
+  gap: 0;
+}
+
+.land-dashboard-plot-title {
+  margin: 0.65rem -0.35rem 0;
+  padding: 0.42rem 0.62rem;
+  border: 1px solid #d7e7dc;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: #eef5ef;
+  color: var(--coop-ink);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.land-dashboard-contract-group .table-wrap {
+  border-radius: 0 0 8px 8px;
+}
+
 .land-dashboard-contracts-table th:first-child,
-.land-dashboard-contracts-table tr:not(.land-dashboard-plot-row) td:first-child {
+.land-dashboard-contracts-table td:first-child {
   position: sticky;
   right: 0;
   left: auto;
@@ -549,16 +572,8 @@ button {
   color: #ffffff;
 }
 
-.land-dashboard-contracts-table tbody tr:not(.land-dashboard-plot-row):hover td:first-child {
+.land-dashboard-contracts-table tbody tr:hover td:first-child {
   background: #f8f9fa;
-}
-
-.land-dashboard-contracts-table .land-dashboard-plot-row td {
-  background: #eef5ef;
-  color: var(--coop-ink);
-  font-size: 0.94rem;
-  font-weight: 800;
-  text-align: right;
 }
 
 .empty,
@@ -1110,13 +1125,8 @@ textarea::placeholder {
   font-size: 1.05rem;
 }
 
-.land-dashboard-contracts-table .land-dashboard-plot-row td {
-  font-size: 0.94rem;
-  line-height: 1.25;
-}
-
 .land-dashboard-contracts-table th:first-child,
-.land-dashboard-contracts-table tr:not(.land-dashboard-plot-row) td:first-child {
+.land-dashboard-contracts-table td:first-child {
   position: -webkit-sticky;
   position: sticky;
   right: 0;

@@ -361,28 +361,40 @@
     };
   }
 
-  function landDashboardContractRows(assignments = []) {
-    if (!assignments.length) return [];
+  function landDashboardContractGroups(assignments = []) {
     const groups = new Map();
     assignments.forEach((row) => {
       const plotName = row.plot_name || '-';
       if (!groups.has(plotName)) groups.set(plotName, []);
       groups.get(plotName).push(row);
     });
+    return Array.from(groups.entries());
+  }
 
-    return Array.from(groups.entries()).flatMap(([plotName, rows]) => [
-      `<tr class="land-dashboard-plot-row"><td colspan="6">${escapeHtml(plotName)}</td></tr>`,
-      ...rows.map((row) => `
-        <tr>
-          <td>${escapeHtml(row.tenant_name || '-')}</td>
-          <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
-          <td>${escapeHtml(formatWholeEgpShort(row.rent_egp))}</td>
-          <td>${escapeHtml(formatWholeEgpShort(row.paid_egp))}</td>
-          <td>${escapeHtml(formatWholeEgpShort(row.remaining_egp))}</td>
-          <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
-        </tr>
-      `)
-    ]);
+  function renderLandDashboardContracts(assignments = []) {
+    const groups = landDashboardContractGroups(assignments);
+    if (!groups.length) return '<div class="empty">لا توجد عقود لهذا الموسم</div>';
+
+    return groups.map(([plotName, rows], index) => `
+      <section class="land-dashboard-contract-group">
+        <h3 class="land-dashboard-plot-title">${escapeHtml(plotName)}</h3>
+        ${table(
+          ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+          rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.tenant_name || '-')}</td>
+              <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+              <td>${escapeHtml(formatWholeEgpShort(row.rent_egp))}</td>
+              <td>${escapeHtml(formatWholeEgpShort(row.paid_egp))}</td>
+              <td>${escapeHtml(formatWholeEgpShort(row.remaining_egp))}</td>
+              <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+            </tr>
+          `),
+          'لا توجد عقود لهذا الموسم',
+          `land-dashboard-contracts-table land-dashboard-contracts-table-${index}`
+        )}
+      </section>
+    `).join('');
   }
 
   async function loadLandDashboard() {
@@ -397,17 +409,13 @@
         ${metric('الإيجار المتوقع', formatWholeEgp(data.expected_egp), '💰')}
         ${metric('المتبقي', formatWholeEgp(data.remaining_egp), '🧾')}
       </div>
-      ${table(
-        ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
-        landDashboardContractRows(data.assignments || []),
-        'لا توجد عقود لهذا الموسم',
-        'land-dashboard-contracts-table'
-      )}
+      ${renderLandDashboardContracts(data.assignments || [])}
     `, landSeasonFilter('landDashboardSeasonForm'));
     wireLandSeasonFilter('landDashboardSeasonForm', loadLandDashboard);
     requestAnimationFrame(() => {
-      const tableWrap = content.querySelector('.land-dashboard-contracts-table-wrap');
-      if (tableWrap) tableWrap.scrollLeft = tableWrap.scrollWidth;
+      content.querySelectorAll('.land-dashboard-contracts-table-wrap').forEach((tableWrap) => {
+        tableWrap.scrollLeft = tableWrap.scrollWidth;
+      });
     });
   }
 
