@@ -250,7 +250,7 @@ button {
 }
 
 .card-title-row.has-title-actions {
-  justify-content: flex-start;
+  justify-content: space-between;
   flex-wrap: nowrap;
 }
 
@@ -262,6 +262,19 @@ button {
   justify-content: center;
   text-align: center;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.land-dashboard-metrics-grid {
+  gap: 0.55rem;
+}
+
+.land-dashboard-metrics-grid .metric {
+  min-height: 88px;
+  padding: 0.75rem;
+}
+
+.land-dashboard-metrics-grid .metric span {
+  margin-top: 0.2rem;
 }
 
 .metric:hover,
@@ -485,10 +498,11 @@ button {
 .card-title-row .land-season-filter {
   flex: 0 0 auto;
   margin: 0;
+  margin-inline-start: auto;
 }
 
 .land-season-filter select {
-  width: min(104px, 100%);
+  width: min(140px, 100%);
   min-height: 38px;
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--coop-line);
@@ -504,7 +518,7 @@ button {
 }
 
 .land-dashboard-contracts-table th:first-child,
-.land-dashboard-contracts-table td:first-child {
+.land-dashboard-contracts-table tr:not(.land-dashboard-plot-row) td:first-child {
   position: sticky;
   right: 0;
   left: auto;
@@ -523,8 +537,15 @@ button {
   color: #ffffff;
 }
 
-.land-dashboard-contracts-table tbody tr:hover td:first-child {
+.land-dashboard-contracts-table tbody tr:not(.land-dashboard-plot-row):hover td:first-child {
   background: #f8f9fa;
+}
+
+.land-dashboard-contracts-table .land-dashboard-plot-row td {
+  background: #eef5ef;
+  color: var(--coop-ink);
+  font-weight: 800;
+  text-align: right;
 }
 
 .empty,
@@ -829,45 +850,59 @@ button {
 
 .mobile-module-switch {
   display: inline-flex;
-  align-self: center;
-  gap: 0.35rem;
-  padding: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.38);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.16rem;
+  border: 1px solid #dfe5e8;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.topbar {
-  flex-direction: column;
-  gap: 0.55rem;
-  min-height: 126px;
-}
-
-.main-content {
-  padding-top: 152px;
+  background: #ffffff;
 }
 
 .mobile-module-switch button {
-  min-height: 34px;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
   border: 0;
   border-radius: 999px;
-  padding: 0.25rem 0.7rem;
+  padding: 0;
   background: transparent;
-  color: #fff;
-  font-family: 'Noto Naskh Arabic', serif;
-  font-weight: 800;
+  color: var(--coop-red);
+}
+
+.mobile-module-switch img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.mobile-module-switch button > span {
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .mobile-module-switch button.active {
-  background: #fff;
-  color: var(--coop-red);
+  background: var(--coop-red-soft);
+  box-shadow: none;
+}
+
+.mobile-module-switch button:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.mobile-nav-separator {
+  flex: 0 0 auto;
+  color: #c8d0d4;
+  font-weight: 800;
 }
 
 .land-tab {
   display: none !important;
 }
 
-body.mobile-module-land .tabs button:not(.land-tab) {
+body.mobile-module-land .tabs button[data-view]:not(.land-tab) {
   display: none;
 }
 
@@ -918,7 +953,7 @@ body.mobile-module-land .land-tab {
   }
 
   .main-content {
-    padding: 154px 0.55rem 124px;
+    padding: 116px 0.55rem 124px;
   }
 
   .grid.two,

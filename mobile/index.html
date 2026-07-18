@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20260718-land-dashboard-contracts">
+  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20260718-land-mobile-grouped-contracts">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -24,10 +24,6 @@
     <header class="topbar">
       <div class="header-top">
         <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
-      </div>
-      <div class="mobile-module-switch" aria-label="اختيار النظام">
-        <button type="button" class="active" data-module="fuel">محطة البنزين</button>
-        <button type="button" data-module="land">الأراضي</button>
       </div>
     </header>
 
@@ -38,6 +34,15 @@
     </main>
 
     <nav class="tabs bottom-navigation" aria-label="Mobile sections">
+      <div class="mobile-module-switch" aria-label="اختيار النظام">
+        <button type="button" class="active" data-module="fuel" aria-label="محطة البنزين">
+          <img src="/assets/logo_cpc.png" alt="">
+        </button>
+        <button type="button" data-module="land" aria-label="الأراضي">
+          <span aria-hidden="true">🌾</span>
+        </button>
+      </div>
+      <span class="mobile-nav-separator" aria-hidden="true">|</span>
       <button class="active" data-view="overview"><span>🏠</span>الرئيسية</button>
       <button data-view="sales-summary"><span>📊</span>ملخص المبيعات</button>
       <button data-view="profit"><span>📈</span>المكسب</button>
@@ -58,6 +63,6 @@
     </div>
   </dialog>
 
-  <script src="/mobile-assets/mobile.js?v=20260718-land-dashboard-contracts"></script>
+  <script src="/mobile-assets/mobile.js?v=20260718-land-mobile-grouped-contracts"></script>
 </body>
 </html>

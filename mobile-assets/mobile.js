@@ -88,6 +88,13 @@
     return Number.isFinite(numeric) ? `${Math.round(numeric)} جنيه مصري` : raw;
   }
 
+  function formatCompactSurfaceLabel(value) {
+    return String(value || '-')
+      .replaceAll('فدان', 'ف')
+      .replaceAll('قيراط', 'ق')
+      .replaceAll('سهم', 'س');
+  }
+
   function sumAmounts(rows) {
     return (rows || []).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   }
@@ -348,31 +355,45 @@
     };
   }
 
+  function landDashboardContractRows(assignments = []) {
+    if (!assignments.length) return [];
+    const groups = new Map();
+    assignments.forEach((row) => {
+      const plotName = row.plot_name || '-';
+      if (!groups.has(plotName)) groups.set(plotName, []);
+      groups.get(plotName).push(row);
+    });
+
+    return Array.from(groups.entries()).flatMap(([plotName, rows]) => [
+      `<tr class="land-dashboard-plot-row"><td colspan="6">${escapeHtml(plotName)}</td></tr>`,
+      ...rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.tenant_name || '-')}</td>
+          <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
+          <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
+          <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+        </tr>
+      `)
+    ]);
+  }
+
   async function loadLandDashboard() {
     setLoading();
     await ensureLandSeasons();
     const data = await api('land-dashboard', { season_key: state.landSeasonKey });
     const metricData = landDashboardMetricData(data);
     content.innerHTML = sectionCard('🌾', 'إدارة الأراضي', `
-      <div class="grid two">
+      <div class="grid two land-dashboard-metrics-grid">
         ${metric('عدد الأراضي', metricData.plotsCount, '📍')}
         ${metric('إجمالي المساحة', metricData.totalSahmLabel, '📐')}
-        ${metric('الإيجار المتوقع', data.expected_egp, '💰')}
-        ${metric('المتبقي', data.remaining_egp, '🧾')}
+        ${metric('الإيجار المتوقع', formatWholeEgp(data.expected_egp), '💰')}
+        ${metric('المتبقي', formatWholeEgp(data.remaining_egp), '🧾')}
       </div>
       ${table(
-        ['الأرض', 'المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
-        (data.assignments || []).map((row) => `
-          <tr>
-            <td>${escapeHtml(row.plot_name || '-')}</td>
-            <td>${escapeHtml(row.tenant_name || '-')}</td>
-            <td>${escapeHtml(row.assigned_sahm_label || '-')}</td>
-            <td>${escapeHtml(formatWholeEgp(row.rent_egp))}</td>
-            <td>${escapeHtml(formatWholeEgp(row.paid_egp))}</td>
-            <td>${escapeHtml(formatWholeEgp(row.remaining_egp))}</td>
-            <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
-          </tr>
-        `),
+        ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+        landDashboardContractRows(data.assignments || []),
         'لا توجد عقود لهذا الموسم',
         'land-dashboard-contracts-table'
       )}
@@ -833,7 +854,7 @@
 
   async function loadView(view) {
     state.currentView = view;
-    document.querySelectorAll('.tabs button').forEach((button) => {
+    document.querySelectorAll('.tabs button[data-view]').forEach((button) => {
       button.classList.toggle('active', button.dataset.view === view);
     });
 
@@ -871,7 +892,7 @@
     button.addEventListener('click', () => switchModule(button.dataset.module));
   });
 
-  document.querySelectorAll('.tabs button').forEach((button) => {
+  document.querySelectorAll('.tabs button[data-view]').forEach((button) => {
     button.addEventListener('click', () => loadView(button.dataset.view));
   });
 
