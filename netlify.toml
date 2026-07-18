@@ -27,3 +27,33 @@
   for = "/.netlify/functions/mobile-data"
   [headers.values]
     Cache-Control = "no-store"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/m"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/m/*"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile/*"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+
+[[headers]]
+  for = "/mobile-assets/*"
+  [headers.values]
+    Cache-Control = "no-cache, max-age=0"
