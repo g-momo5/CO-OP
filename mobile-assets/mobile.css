@@ -527,13 +527,24 @@ button {
   -webkit-transform: translateZ(0);
 }
 
+.land-dashboard-contracts-list {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .land-dashboard-contract-group {
   display: grid;
   gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .land-dashboard-plot-title {
-  margin: 0.65rem -0.35rem 0;
+  margin: 0.65rem 0 0;
   padding: 0.42rem 0.62rem;
   border: 1px solid #d7e7dc;
   border-bottom: 0;
@@ -547,6 +558,10 @@ button {
 }
 
 .land-dashboard-contract-group .table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
   border-radius: 0 0 8px 8px;
 }
 

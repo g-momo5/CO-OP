@@ -375,26 +375,30 @@
     const groups = landDashboardContractGroups(assignments);
     if (!groups.length) return '<div class="empty">لا توجد عقود لهذا الموسم</div>';
 
-    return groups.map(([plotName, rows], index) => `
-      <section class="land-dashboard-contract-group">
-        <h3 class="land-dashboard-plot-title">${escapeHtml(plotName)}</h3>
-        ${table(
-          ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
-          rows.map((row) => `
-            <tr>
-              <td>${escapeHtml(row.tenant_name || '-')}</td>
-              <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
-              <td>${escapeHtml(formatWholeEgpShort(row.rent_egp))}</td>
-              <td>${escapeHtml(formatWholeEgpShort(row.paid_egp))}</td>
-              <td>${escapeHtml(formatWholeEgpShort(row.remaining_egp))}</td>
-              <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
-            </tr>
-          `),
-          'لا توجد عقود لهذا الموسم',
-          `land-dashboard-contracts-table land-dashboard-contracts-table-${index}`
-        )}
-      </section>
-    `).join('');
+    return `
+      <div class="land-dashboard-contracts-list">
+        ${groups.map(([plotName, rows], index) => `
+          <section class="land-dashboard-contract-group">
+            <h3 class="land-dashboard-plot-title">${escapeHtml(plotName)}</h3>
+            ${table(
+              ['المستأجر', 'المساحة', 'الإيجار', 'المدفوع', 'المتبقي', 'الحالة'],
+              rows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.tenant_name || '-')}</td>
+                  <td>${escapeHtml(formatCompactSurfaceLabel(row.assigned_sahm_label))}</td>
+                  <td>${escapeHtml(formatWholeEgpShort(row.rent_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgpShort(row.paid_egp))}</td>
+                  <td>${escapeHtml(formatWholeEgpShort(row.remaining_egp))}</td>
+                  <td>${escapeHtml(landStatusLabel(row.payment_status))}</td>
+                </tr>
+              `),
+              'لا توجد عقود لهذا الموسم',
+              `land-dashboard-contracts-table land-dashboard-contracts-table-${index}`
+            )}
+          </section>
+        `).join('')}
+      </div>
+    `;
   }
 
   async function loadLandDashboard() {
