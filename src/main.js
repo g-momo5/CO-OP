@@ -9,6 +9,10 @@ const nodemailer = require('nodemailer');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
 const { LAND_TABLES, registerLandIpcHandlers } = require('./land-service');
+const {
+  buildCascadeUpdates,
+  shiftKey
+} = require('./shift-cascade');
 
 let mainWindow;
 let splashWindow = null;
@@ -461,10 +465,25 @@ function validateShiftPayload(shiftData = {}) {
   Object.entries(oilData).forEach(([oilName, data]) => {
     const total = parseFloat(data?.total) || 0;
     const sold = parseFloat(data?.sold) || 0;
+    const open = parseFloat(data?.open) || 0;
     if (sold > total && sold > 0) {
       errors.push(`${getShiftProductDisplayName(oilName, data)}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
     }
+    if (open > sold && open > 0) {
+      errors.push(`${getShiftProductDisplayName(oilName, data)}: كمية مفتوح يجب أن تكون أقل من أو تساوي المباع`);
+    }
   });
+
+  const looseOilIncoming = Object.entries(oilData).reduce((sum, [oilName, data]) => {
+    if (getShiftProductDisplayName(oilName, data) !== SHIFT_OIL_STOCK_EXCLUDED_OIL) {
+      return sum;
+    }
+    return sum + (parseFloat(data?.added) || 0);
+  }, 0);
+  const hasAnyOpenOil = Object.values(oilData).some((data) => (parseFloat(data?.open) || 0) >= 1);
+  if (looseOilIncoming > 0 && !hasAnyOpenOil) {
+    errors.push('يوجد وارد لزيت سايب ١ ك بدون وجود أي زيوت مفتوحة. من فضلك حدد أي زيت تم فتحه');
+  }
 
   return errors;
 }
@@ -7497,6 +7516,57 @@ function buildShiftCorrectionDiff(beforeSnapshot, afterSnapshot) {
   };
 }
 
+async function buildShiftCascadePlan(correctedShift) {
+  const date = normalizeIsoDate(correctedShift?.date);
+  const shiftNumber = parseInt(correctedShift?.shift_number, 10);
+  if (!date || !Number.isFinite(shiftNumber)) {
+    return {
+      updates: [],
+      stopped_at: null,
+      stopped_reason: null,
+      validationErrors: []
+    };
+  }
+
+  const followingShifts = await executeQuery(
+    `SELECT * FROM shifts
+     WHERE is_saved = 1
+       AND (date > $1 OR (date = $1 AND shift_number > $2))
+     ORDER BY date ASC, shift_number ASC, id ASC`,
+    [date, shiftNumber]
+  );
+
+  if (followingShifts.length === 0) {
+    return {
+      updates: [],
+      stopped_at: null,
+      stopped_reason: null,
+      validationErrors: []
+    };
+  }
+
+  const resetRows = await executeQuery(
+    `SELECT DISTINCT shift_date, shift_number
+     FROM shift_balance_change_history
+     WHERE shift_date > $1 OR (shift_date = $1 AND shift_number > $2)`,
+    [date, shiftNumber]
+  ).catch((error) => {
+    console.warn('Unable to read shift balance reset history for cascade:', error.message);
+    return [];
+  });
+  const resetShiftKeys = new Set(
+    resetRows
+      .map((row) => shiftKey({ date: row.shift_date, shift_number: row.shift_number }))
+      .filter((key) => /^\d{4}-\d{2}-\d{2}\|\d+$/.test(key))
+  );
+
+  return buildCascadeUpdates({
+    sourceShift: correctedShift,
+    followingShifts,
+    resetShiftKeys
+  });
+}
+
 async function persistShiftRecord(shiftData) {
   try {
     const {
@@ -7654,6 +7724,26 @@ ipcMain.handle('correct-saved-shift', async (_event, shiftData) => {
     }
 
     const beforeSnapshot = buildShiftSnapshotFromRow(existingRows[0]);
+    const correctedSnapshot = buildShiftSnapshotFromPayload({
+      ...shiftData,
+      date,
+      shift_number: shiftNumber,
+      is_saved: 1
+    });
+    const cascadePlan = await buildShiftCascadePlan(correctedSnapshot);
+    if (Array.isArray(cascadePlan.validationErrors) && cascadePlan.validationErrors.length > 0) {
+      return {
+        success: false,
+        error: 'cascade_validation_failed',
+        validationErrors: cascadePlan.validationErrors,
+        cascade: {
+          updated_count: 0,
+          stopped_at: cascadePlan.stopped_at,
+          stopped_reason: cascadePlan.stopped_reason
+        }
+      };
+    }
+
     const saveResult = await persistShiftRecord({
       ...shiftData,
       date,
@@ -7684,7 +7774,39 @@ ipcMain.handle('correct-saved-shift', async (_event, shiftData) => {
       'shift_corrections'
     );
 
-    return { success: true, id: saveResult.id, correction_id: correctionId, diff_summary: diffSummary };
+    let updatedCount = 0;
+    for (const update of cascadePlan.updates) {
+      const cascadeSaveResult = await persistShiftRecord(update.payload);
+      if (!cascadeSaveResult?.success) {
+        return {
+          success: false,
+          error: cascadeSaveResult?.error || 'cascade_save_failed',
+          validationErrors: cascadeSaveResult?.validationErrors,
+          correction_saved: true,
+          id: saveResult.id,
+          correction_id: correctionId,
+          diff_summary: diffSummary,
+          cascade: {
+            updated_count: updatedCount,
+            stopped_at: cascadePlan.stopped_at,
+            stopped_reason: cascadePlan.stopped_reason
+          }
+        };
+      }
+      updatedCount += 1;
+    }
+
+    return {
+      success: true,
+      id: saveResult.id,
+      correction_id: correctionId,
+      diff_summary: diffSummary,
+      cascade: {
+        updated_count: updatedCount,
+        stopped_at: cascadePlan.stopped_at,
+        stopped_reason: cascadePlan.stopped_reason
+      }
+    };
   } catch (error) {
     console.error('Error correcting saved shift:', error);
     return { success: false, error: error.message };
@@ -7816,7 +7938,7 @@ ipcMain.handle('get-last-draft-shift', async () => {
 
 ipcMain.handle('get-last-saved-shift', async () => {
   try {
-    const query = 'SELECT * FROM shifts WHERE is_saved = 1 ORDER BY id DESC LIMIT 1';
+    const query = 'SELECT * FROM shifts WHERE is_saved = 1 ORDER BY date DESC, shift_number DESC, id DESC LIMIT 1';
     const result = await executeQuery(query, []);
     if (result.length > 0) {
       return {

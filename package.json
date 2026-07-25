@@ -1,11 +1,11 @@
 {
   "name": "coop2",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "main": "src/main.js",
   "scripts": {
     "dev": "node scripts/run-electron.cjs",
     "start": "node scripts/run-electron.cjs",
-    "test": "node --test test-land-domain.js test-land-service.js",
+    "test": "node --test test-land-domain.js test-land-service.js test-shift-cascade.js",
     "build": "node scripts/build.cjs",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",

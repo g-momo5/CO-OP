@@ -3403,9 +3403,11 @@ body.modal-scroll-lock {
   cursor: not-allowed;
 }
 
-/* Oil table first header (نوع الزيت) - left aligned */
+/* Oil table first header and row labels follow the RTL reading edge. */
 .shift-oil-table th:first-child {
-  text-align: left;
+  text-align: right !important;
+  width: max-content;
+  min-width: max-content;
 }
 
 /* Oil table row labels */
@@ -3413,8 +3415,8 @@ body.modal-scroll-lock {
   display: table-cell;
   background: #ecf0f1;
   font-weight: 600;
-  text-align: left !important;
-  padding: 4px;
+  text-align: right !important;
+  padding: 4px 10px;
   width: max-content;
   min-width: max-content;
   max-width: none;
@@ -3427,6 +3429,8 @@ body.modal-scroll-lock {
   gap: 0.5rem;
   width: max-content;
   min-width: max-content;
+  margin-inline-start: 0 !important;
+  margin-inline-end: auto !important;
   white-space: nowrap;
 }
 

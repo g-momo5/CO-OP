@@ -12939,6 +12939,25 @@ async function calculateOilRow(oilId) {
   calculateOilTotal();
 }
 
+async function recalculateShiftOilDerivedRows() {
+  const tableBody = document.getElementById('shift-oil-table-body');
+  if (!tableBody) {
+    calculateGrandTotal();
+    return;
+  }
+
+  const rows = Array.from(tableBody.querySelectorAll('tr[data-oil-id]'));
+  for (const row of rows) {
+    const oilId = row.getAttribute('data-oil-id');
+    if (oilId) {
+      await calculateOilRow(oilId);
+    }
+  }
+
+  calculateOilTotal();
+  calculateGrandTotal();
+}
+
 function handleOilCustomerAssignmentInput(_oilId) {
   const voucherInput = document.getElementById(`oil-${_oilId}-voucher`);
   syncOilVoucherState(_oilId, { clearCustomer: Boolean(voucherInput?.checked) });
@@ -14390,8 +14409,9 @@ function clearShiftRevenueInputs() {
 }
 
 // Validate shift data before saving
-function validateShiftData() {
+function validateShiftData(options = {}) {
   const errors = [];
+  const requireLooseOilOpen = Boolean(options.requireLooseOilOpen);
 
   // Validate date and shift number
   const dateInput = document.getElementById('shift-date');
@@ -14456,23 +14476,37 @@ function validateShiftData() {
   const tableBody = document.getElementById('shift-oil-table-body');
   if (tableBody) {
     const rows = tableBody.querySelectorAll('tr[data-oil-id]');
+    let looseOilIncoming = 0;
+    let hasAnyOpenOil = false;
+
     rows.forEach(row => {
       const oilId = row.getAttribute('data-oil-id');
-      const oilName = row.querySelector('td strong')?.textContent;
+      const oilName = row.getAttribute('data-oil-name') || row.querySelector('td strong')?.textContent || '';
 
+      const addedInput = document.getElementById(`oil-${oilId}-added`);
       const totalInput = document.getElementById(`oil-${oilId}-total`);
       const soldInput = document.getElementById(`oil-${oilId}-sold`);
       const remainingInput = document.getElementById(`oil-${oilId}-remaining`);
+      const openInput = document.getElementById(`oil-${oilId}-open`);
       const customersInput = document.getElementById(`oil-${oilId}-customers`);
       const customerNameSelect = document.getElementById(`oil-${oilId}-customer-name`);
       const voucherInput = document.getElementById(`oil-${oilId}-voucher`);
 
+      const added = parseOilQuantity(addedInput?.value);
       const total = parseOilQuantity(totalInput?.value);
       const sold = parseOilQuantity(soldInput?.value);
+      const open = parseOilQuantity(openInput?.value);
       const customerQuantity = parseOilQuantity(customersInput?.value);
       const remainingRaw = String(remainingInput?.value ?? '').trim();
       const remainingParsed = parseFloat(remainingRaw.replace(',', '.'));
       const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
+
+      if (normalizeOilName(oilName) === EDITABLE_OIL_INITIAL_NAME) {
+        looseOilIncoming += added;
+      }
+      if (open >= 1) {
+        hasAnyOpenOil = true;
+      }
 
       if (remainingRaw !== '' && remaining > total && remaining > 0) {
         errors.push(`${oilName}: الكمية المتبقية يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
@@ -14482,10 +14516,18 @@ function validateShiftData() {
         errors.push(`${oilName}: الكمية المباعة يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
       }
 
+      if (open > sold && open > 0) {
+        errors.push(`${oilName}: كمية مفتوح يجب أن تكون أقل من أو تساوي المباع`);
+      }
+
       if (customerQuantity > 0 && !voucherInput?.checked && !getCustomerOptionFromSelect(customerNameSelect)?.id) {
         errors.push(`${oilName}: اختر العميل أو حدد بونات لكمية العملاء`);
       }
     });
+
+    if (requireLooseOilOpen && looseOilIncoming > 0 && !hasAnyOpenOil) {
+      errors.push('يوجد وارد لزيت سايب ١ ك بدون وجود أي زيوت مفتوحة. من فضلك حدد أي زيت تم فتحه');
+    }
   }
 
   document.querySelectorAll('#shift-customer-payment-rows .customer-payment-row').forEach((row, index) => {
@@ -14528,9 +14570,10 @@ async function saveShift() {
     }
 
     applyNightShiftGasAutoClose();
+    await recalculateShiftOilDerivedRows();
 
     // Validate data
-    const errors = validateShiftData();
+    const errors = validateShiftData({ requireLooseOilOpen: !currentShiftData.isSaved });
     if (errors.length > 0) {
       alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
       return;
@@ -15168,9 +15211,10 @@ async function loadNextShift() {
       // Shift exists, load it
       await loadShiftData(nextShift.date, nextShift.shiftNumber);
     } else {
-      // New shift, pre-populate with last shift end values
-      if (lastShift) {
-        await loadPreviousShiftEndValues(lastShift);
+      // New shift, pre-populate with the saved shift immediately before this date/number.
+      const previousShift = await getPreviousSavedShiftFor(nextShift.date, nextShift.shiftNumber);
+      if (previousShift) {
+        await loadPreviousShiftEndValues(previousShift);
       }
       disableReadOnlyMode();
     }
@@ -15188,7 +15232,8 @@ async function loadPreviousShiftEndValues(previousShift) {
   try {
     if (!previousShift) return;
 
-    const fuelData = JSON.parse(previousShift.fuel_data);
+    const legacyData = parseShiftJsonObject(previousShift?.data, {});
+    const fuelData = parseShiftJsonObject(previousShift.fuel_data || legacyData.fuel_data, {});
 
     // Populate "first shift" fields with "last shift" values from previous shift
     Object.entries(fuelData).forEach(([fuelType, data]) => {
@@ -15252,10 +15297,10 @@ async function loadShiftData(date, shiftNumber) {
       currentShiftData.hasUnsavedChanges = false;
       currentShiftData.draftCleanupQueue = [];
 
-      // Load last shift data (by ID) to populate "first shift" fields
-      const lastShift = await getLastSavedShift();
-      if (lastShift) {
-        await loadPreviousShiftEndValues(lastShift);
+      // Load the immediately previous saved shift to populate "first shift" fields.
+      const previousShift = await getPreviousSavedShiftFor(date, shiftNumber);
+      if (previousShift) {
+        await loadPreviousShiftEndValues(previousShift);
       }
 
       setShiftDraftStatus('idle');
@@ -15765,9 +15810,21 @@ async function cancelShiftCorrection() {
 async function saveShiftCorrection() {
   if (shiftViewMode !== 'correction') return;
 
+  const saveButton = document.getElementById('save-shift-correction-btn');
+  const originalSaveButtonText = saveButton?.textContent || 'حفظ التصحيح';
+
   try {
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = 'جارٍ الحفظ...';
+    }
+    setShiftDraftStatus('saving', 'جارٍ حفظ التصحيح وتحديث الورديات...');
+
+    await recalculateShiftOilDerivedRows();
+
     const errors = validateShiftData();
     if (errors.length > 0) {
+      setShiftDraftStatus('error');
       alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
       return;
     }
@@ -15782,25 +15839,36 @@ async function saveShiftCorrection() {
       return;
     }
 
-    const saveButton = document.getElementById('save-shift-correction-btn');
-    if (saveButton) saveButton.disabled = true;
-
     const result = await ipcRenderer.invoke(
       'correct-saved-shift',
       buildCurrentShiftPayload(date, shiftNumber, 1)
     );
 
     if (!result?.success) {
-      if (result?.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
+      if (
+        ['validation_failed', 'cascade_validation_failed'].includes(result?.error)
+        && Array.isArray(result.validationErrors)
+        && result.validationErrors.length > 0
+      ) {
+        setShiftDraftStatus('error');
         alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
         return;
       }
+      setShiftDraftStatus('error');
       showToast('خطأ في حفظ التصحيح: ' + (result?.error || 'خطأ غير معروف'), 'error');
       return;
     }
 
     currentShiftData.hasUnsavedChanges = false;
-    showToast('تم حفظ التصحيح بنجاح', 'success');
+    const cascade = result.cascade || {};
+    const updatedCount = parseInt(cascade.updated_count, 10) || 0;
+    let successMessage = updatedCount > 0
+      ? `تم حفظ التصحيح وتحديث ${convertToArabicNumerals(updatedCount)} ورديات لاحقة`
+      : 'تم حفظ التصحيح بنجاح';
+    if (cascade.stopped_reason === 'manual_reset' && cascade.stopped_at?.date) {
+      successMessage += `، وتوقفت المراجعة عند وردية ${cascade.stopped_at.date} رقم ${convertToArabicNumerals(cascade.stopped_at.shift_number)} بسبب إعادة ضبط يدوية`;
+    }
+    showToast(successMessage, 'success');
     await Promise.allSettled([
       loadHomeChart(),
       loadTodayStats(),
@@ -15809,10 +15877,13 @@ async function saveShiftCorrection() {
     await loadShiftHistory(date, shiftNumber, null);
   } catch (error) {
     console.error('Error saving shift correction:', error);
+    setShiftDraftStatus('error');
     showToast('خطأ في حفظ التصحيح', 'error');
   } finally {
-    const saveButton = document.getElementById('save-shift-correction-btn');
-    if (saveButton) saveButton.disabled = false;
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.textContent = originalSaveButtonText;
+    }
   }
 }
 
