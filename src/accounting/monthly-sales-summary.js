@@ -19,7 +19,7 @@ function normalizeProductRows(products = [], type) {
     .sort((a, b) => a.localeCompare(b, 'ar'));
 }
 
-function buildMonthlySalesSummary({ shifts = [], manualSales = [], products = [], fromMonth, toMonth } = {}) {
+function buildMonthlySalesSummary({ shifts = [], manualSales = [], products = [], fromMonth, toMonth, includeConfiguredManualSales = false } = {}) {
   const months = buildMonthRange(fromMonth, toMonth);
   if (months.length === 0) {
     return { fromMonth, toMonth, months: [], rows: [] };
@@ -81,10 +81,11 @@ function buildMonthlySalesSummary({ shifts = [], manualSales = [], products = []
 
   manualSales.forEach((sale) => {
     const product = String(sale.fuel_type || sale.product || sale.product_name || '').trim();
-    if (!product || fuelNames.has(product) || oilNames.has(product)) return;
+    if (!product) return;
+    if (!includeConfiguredManualSales && (fuelNames.has(product) || oilNames.has(product))) return;
     const monthKey = normalizeMonth(normalizeDate(sale.date));
     if (!months.includes(monthKey)) return;
-    const row = ensure(product, 'other');
+    const row = ensure(product, includeConfiguredManualSales ? getProductType(product) : 'other');
     if (!row) return;
     const quantity = toNumber(sale.quantity);
     row.byMonth[monthKey] += quantity;

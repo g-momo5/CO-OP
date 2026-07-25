@@ -13,6 +13,10 @@ const {
   buildCascadeUpdates,
   shiftKey
 } = require('./shift-cascade');
+const { buildHomeChartData, HOME_CHART_MODES } = require('./accounting/home-chart-view');
+const { buildSafeBookView } = require('./accounting/safe-book-view');
+const { buildSalesSummaryView } = require('./accounting/sales-summary-view');
+const { TimedViewCache } = require('./accounting/view-cache');
 
 let mainWindow;
 let splashWindow = null;
@@ -29,6 +33,7 @@ let startupFallbackTimer = null;
 let startupComplete = false;
 let isForceClosingWindow = false; // Allow close after explicit user confirmation
 let currentAppUser = null;
+const viewCache = new TimedViewCache({ ttlMs: 30_000, maxEntries: 80 });
 // Screens and sections that are limited when offline
 const OFFLINE_RESTRICTED = {
   screens: ['report', 'charts'],
@@ -152,6 +157,29 @@ function parseStoredObject(value, fallback = {}) {
   } catch (_error) {
     return fallback;
   }
+}
+
+function normalizeShiftRowsForAccounting(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const legacyData = parseStoredObject(row?.data, {});
+    return {
+      ...row,
+      data: legacyData,
+      fuel_data: parseStoredObject(row?.fuel_data || legacyData.fuel_data, {}),
+      oil_data: parseStoredObject(row?.oil_data || legacyData.oil_data, {})
+    };
+  });
+}
+
+function invalidateViewCache(_reason = '') {
+  viewCache.clear();
+}
+
+function normalizeDateRangePayload(payload = {}) {
+  return {
+    startDate: normalizeIsoDate(payload?.startDate),
+    endDate: normalizeIsoDate(payload?.endDate)
+  };
 }
 
 function normalizeShiftOilStockName(value) {
@@ -834,12 +862,16 @@ function executeQuery(query, params = []) {
   return dbManager.executeQuery(query, params);
 }
 
-function executeUpdate(query, params = []) {
-  return dbManager.executeUpdate(query, params);
+async function executeUpdate(query, params = []) {
+  const result = await dbManager.executeUpdate(query, params);
+  invalidateViewCache('write');
+  return result;
 }
 
-function executeInsert(query, params = [], tableName = 'unknown') {
-  return dbManager.executeInsert(query, params, tableName);
+async function executeInsert(query, params = [], tableName = 'unknown') {
+  const result = await dbManager.executeInsert(query, params, tableName);
+  invalidateViewCache(tableName);
+  return result;
 }
 
 function getAppSettingsPath() {
@@ -3795,6 +3827,50 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  ipcMain.handle('get-home-chart-data', async (_event, payload = {}) => {
+    const mode = payload?.mode === HOME_CHART_MODES.PURCHASES ? HOME_CHART_MODES.PURCHASES : HOME_CHART_MODES.SALES;
+    const cacheKey = `home-chart:${mode}`;
+
+    return viewCache.getOrSet(cacheKey, async () => {
+      try {
+        if (mode === HOME_CHART_MODES.PURCHASES) {
+          const fuelMovements = await executeQuery(
+            "SELECT date, fuel_type, quantity, type FROM fuel_movements WHERE type = 'in' ORDER BY date ASC, id ASC"
+          ).catch((error) => {
+            console.warn('Unable to read fuel movements for home chart:', error.message);
+            return [];
+          });
+          return buildHomeChartData({ mode, fuelMovements });
+        }
+
+        const sales = dbManager?.isOnline
+          ? await executeQuery(
+            'SELECT date, fuel_type, quantity FROM sales ORDER BY date ASC, id ASC'
+          ).catch((error) => {
+            console.warn('Unable to read sales for home chart:', error.message);
+            return [];
+          })
+          : [];
+
+        const shiftRows = await executeQuery(
+          'SELECT date, fuel_data, data FROM shifts WHERE is_saved = 1 ORDER BY date ASC, shift_number ASC, id ASC'
+        ).catch((error) => {
+          console.warn('Unable to read shifts for home chart:', error.message);
+          return [];
+        });
+
+        return buildHomeChartData({
+          mode,
+          sales,
+          shifts: normalizeShiftRowsForAccounting(shiftRows)
+        });
+      } catch (error) {
+        console.error('Error getting home chart data:', error);
+        throw error;
+      }
+    });
+  });
+
   ipcMain.handle('get-shift-fuel-sales', async () => {
     try {
       const rows = await executeQuery(
@@ -4091,6 +4167,72 @@ ipcMain.handle('get-sales-summary', async () => {
       console.error('Error getting shift oil sales:', error);
       throw error;
     }
+  });
+
+  ipcMain.handle('get-sales-summary-view', async (_event, payload = {}) => {
+    const { startDate, endDate } = normalizeDateRangePayload(payload);
+    if (!startDate || !endDate || startDate > endDate) {
+      return { months: [], rows: [], detail_sales: [] };
+    }
+
+    const cacheKey = `sales-summary:${startDate}:${endDate}`;
+    return viewCache.getOrSet(cacheKey, async () => {
+      try {
+        const fromMonth = startDate.slice(0, 7);
+        const toMonth = endDate.slice(0, 7);
+
+        const [fuelProducts, oilProducts, shiftRows, manualSales] = await Promise.all([
+          executeQuery(
+            "SELECT product_name AS fuel_type FROM products WHERE product_type = 'fuel' ORDER BY product_name ASC"
+          ).catch((error) => {
+            console.warn('Unable to read fuel products for sales summary:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT product_name AS oil_type
+             FROM products
+             WHERE product_type = 'oil'
+             ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC,
+                      COALESCE(display_order, 0) ASC,
+                      product_name ASC`
+          ).catch((error) => {
+            console.warn('Unable to read oil products for sales summary:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT date, fuel_data, oil_data, data
+             FROM shifts
+             WHERE date BETWEEN $1 AND $2 AND is_saved = 1
+             ORDER BY date ASC, shift_number ASC, id ASC`,
+            [startDate, endDate]
+          ).catch((error) => {
+            console.warn('Unable to read shifts for sales summary:', error.message);
+            return [];
+          }),
+          dbManager?.isOnline
+            ? executeQuery(
+              'SELECT date, fuel_type, quantity, total_amount FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+              [startDate, endDate]
+            ).catch((error) => {
+              console.warn('Unable to read manual sales for sales summary:', error.message);
+              return [];
+            })
+            : Promise.resolve([])
+        ]);
+
+        return buildSalesSummaryView({
+          fromMonth,
+          toMonth,
+          fuelProducts,
+          oilProducts,
+          shifts: normalizeShiftRowsForAccounting(shiftRows),
+          manualSales
+        });
+      } catch (error) {
+        console.error('Error getting sales summary view:', error);
+        throw error;
+      }
+    });
   });
 
   ipcMain.handle('get-profit-available-months', async () => {
@@ -4641,6 +4783,41 @@ ipcMain.handle('get-sales-summary', async () => {
       console.error('Error getting safe book movements:', error);
       throw error;
     }
+  });
+
+  ipcMain.handle('get-safe-book-view', async (_event, payload = {}) => {
+    const { startDate, endDate } = normalizeDateRangePayload(payload);
+    const hasDateFilter = Boolean(startDate && endDate && startDate <= endDate);
+    const cacheKey = `safe-book:${hasDateFilter ? startDate : 'all'}:${hasDateFilter ? endDate : 'all'}`;
+
+    return viewCache.getOrSet(cacheKey, async () => {
+      try {
+        const [manualRows, shiftRows] = await Promise.all([
+          executeQuery(
+            'SELECT id, date, movement_type, amount, direction, created_at FROM safe_book_movements ORDER BY date DESC, created_at DESC, id DESC'
+          ).catch((err) => {
+            console.warn('Safe book manual rows query failed:', err.message);
+            return [];
+          }),
+          executeQuery(
+            'SELECT id, date, shift_number, grand_total, created_at, updated_at FROM shifts WHERE is_saved = 1 ORDER BY date DESC, shift_number DESC, id DESC'
+          ).catch((err) => {
+            console.warn('Safe book shifts query failed:', err.message);
+            return [];
+          })
+        ]);
+
+        return buildSafeBookView({
+          manualRows,
+          shiftRows,
+          startDate: hasDateFilter ? startDate : null,
+          endDate: hasDateFilter ? endDate : null
+        });
+      } catch (error) {
+        console.error('Error getting safe book view:', error);
+        throw error;
+      }
+    });
   });
 
   ipcMain.handle('add-safe-book-movement', async (_event, movementData) => {
@@ -5250,6 +5427,7 @@ ipcMain.handle('get-sales-summary', async () => {
             }
           }
 
+          invalidateViewCache('fuel-invoice-update');
           return { success: true, rows: normalizedItems.length, queued: false };
         } catch (error) {
           if (!isDatabaseConnectionError(error)) {
@@ -5268,6 +5446,7 @@ ipcMain.handle('get-sales-summary', async () => {
         pendingReplacement?.data?.original_snapshot || originalSnapshot
       );
 
+      invalidateViewCache('fuel-invoice-update');
       return { success: true, rows: normalizedItems.length, queued: true };
     } catch (error) {
       console.error('Error updating fuel invoice:', error);

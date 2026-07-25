@@ -1,0 +1,94 @@
+const { getEntryName, normalizeDate, roundQuantity, toNumber } = require('./common');
+const { getShiftFuelSoldQuantity } = require('./fuel-accounting');
+
+const HOME_CHART_MODES = {
+  SALES: 'sales',
+  PURCHASES: 'purchases'
+};
+
+const HOME_CHART_FUEL_TYPES = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
+
+function normalizeFuelTypeForChart(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  const normalized = text
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .toLowerCase();
+
+  if (normalized === 'سولار' || normalized === 'ديزل' || normalized === 'diesel') return 'سولار';
+  if (normalized === 'غاز سيارات' || normalized === 'gas') return 'غاز سيارات';
+
+  const isFuelName = /بنزين|benz|gasoline|petrol/.test(normalized);
+  const hasOctane = (octane) => new RegExp(`(^|[^0-9])${octane}([^0-9]|$)`).test(normalized);
+  if (isFuelName && hasOctane('95')) return 'بنزين ٩٥';
+  if (isFuelName && hasOctane('92')) return 'بنزين ٩٢';
+  if (isFuelName && (hasOctane('80') || normalized === 'بنزين 8')) return 'بنزين ٨٠';
+
+  return text;
+}
+
+function addChartQuantity(entries, date, fuelType, quantity) {
+  const day = normalizeDate(date);
+  const normalizedFuelType = normalizeFuelTypeForChart(fuelType);
+  const amount = toNumber(quantity);
+  if (!day || !normalizedFuelType || amount <= 0 || !HOME_CHART_FUEL_TYPES.includes(normalizedFuelType)) return;
+  entries.push({
+    date: day,
+    fuel_type: normalizedFuelType,
+    quantity: roundQuantity(amount)
+  });
+}
+
+function aggregateChartEntries(entries = []) {
+  const byDayAndFuel = new Map();
+  entries.forEach((entry) => {
+    const date = normalizeDate(entry?.date);
+    const fuelType = normalizeFuelTypeForChart(entry?.fuel_type);
+    if (!date || !fuelType) return;
+    const key = `${date}__${fuelType}`;
+    const current = byDayAndFuel.get(key) || { date, fuel_type: fuelType, quantity: 0 };
+    current.quantity = roundQuantity(current.quantity + toNumber(entry?.quantity));
+    byDayAndFuel.set(key, current);
+  });
+  return Array.from(byDayAndFuel.values()).sort((a, b) => (
+    a.date.localeCompare(b.date) || a.fuel_type.localeCompare(b.fuel_type, 'ar')
+  ));
+}
+
+function buildHomeChartData({ mode = HOME_CHART_MODES.SALES, sales = [], shifts = [], fuelMovements = [] } = {}) {
+  const selectedMode = mode === HOME_CHART_MODES.PURCHASES ? HOME_CHART_MODES.PURCHASES : HOME_CHART_MODES.SALES;
+  const entries = [];
+
+  if (selectedMode === HOME_CHART_MODES.PURCHASES) {
+    fuelMovements.forEach((movement) => {
+      if (movement?.type && movement.type !== 'in') return;
+      addChartQuantity(entries, movement?.date, movement?.fuel_type || movement?.product_name, movement?.quantity);
+    });
+    return { mode: selectedMode, entries: aggregateChartEntries(entries) };
+  }
+
+  sales.forEach((sale) => {
+    addChartQuantity(entries, sale?.date, sale?.fuel_type || sale?.product_name, sale?.quantity);
+  });
+
+  shifts.forEach((shift) => {
+    const shiftDate = normalizeDate(shift?.date);
+    if (!shiftDate) return;
+    Object.entries(shift?.fuel_data || {}).forEach(([entryKey, data]) => {
+      if (!data || typeof data !== 'object') return;
+      addChartQuantity(entries, shiftDate, getEntryName(entryKey, data), getShiftFuelSoldQuantity(entryKey, data));
+    });
+  });
+
+  return { mode: selectedMode, entries: aggregateChartEntries(entries) };
+}
+
+module.exports = {
+  HOME_CHART_FUEL_TYPES,
+  HOME_CHART_MODES,
+  aggregateChartEntries,
+  buildHomeChartData,
+  normalizeFuelTypeForChart
+};

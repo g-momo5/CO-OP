@@ -201,6 +201,45 @@ function invalidateInvoiceFuelProductsCache() {
   invoiceFuelProductsLoadingPromise = null;
 }
 
+const VIEW_CACHE_TTL_MS = 15_000;
+const viewDataCache = new Map();
+const viewDataInFlight = new Map();
+
+function getViewCacheKey(channel, payload = {}) {
+  return `${channel}:${JSON.stringify(payload || {})}`;
+}
+
+async function invokeCached(channel, payload = {}, options = {}) {
+  const ttlMs = Number.isFinite(options.ttlMs) ? options.ttlMs : VIEW_CACHE_TTL_MS;
+  const key = getViewCacheKey(channel, payload);
+  const cached = viewDataCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.createdAt <= ttlMs) {
+    return cached.value;
+  }
+
+  if (viewDataInFlight.has(key)) {
+    return viewDataInFlight.get(key);
+  }
+
+  const promise = ipcRenderer.invoke(channel, payload)
+    .then((value) => {
+      viewDataCache.set(key, { value, createdAt: Date.now() });
+      return value;
+    })
+    .finally(() => {
+      viewDataInFlight.delete(key);
+    });
+
+  viewDataInFlight.set(key, promise);
+  return promise;
+}
+
+function invalidateViewDataCaches() {
+  viewDataCache.clear();
+  viewDataInFlight.clear();
+}
+
 // ============= TOAST NOTIFICATION SYSTEM =============
 /**
  * Show a toast notification
@@ -745,10 +784,7 @@ async function bootstrapApp() {
 
     await Promise.allSettled([
       loadHomeChart(),
-      loadTodayStats(),
-      loadFuelPrices(),
-      loadPurchasePrices(),
-      loadSafeBookMovements()
+      loadTodayStats()
     ]);
   } catch (error) {
     console.error('Renderer bootstrap failed:', error);
@@ -848,7 +884,6 @@ function initializeApp() {
 
   // Generate invoice number
   generateInvoiceNumber();
-  renderFuelInvoiceItems();
 
   // Sync home chart title with the selected mode
   updateHomeChartToggleUI();
@@ -1253,6 +1288,7 @@ function showScreenWithoutHistory(screenName) {
       setTimeout(scheduleHomeChartHeightSync, 180);
       break;
     case 'invoice':
+      renderFuelInvoiceItems();
       setupFuelCalculationListeners();
       setupOilCalculationListeners();
       break;
@@ -1477,7 +1513,7 @@ async function loadTodayStats() {
   }
   try {
     const today = new Date().toISOString().split('T')[0];
-    const sales = await ipcRenderer.invoke('get-sales-report', { startDate: today, endDate: today });
+    const sales = await invokeCached('get-sales-report', { startDate: today, endDate: today }, { ttlMs: 10_000 });
 
     const totalQuantity = sales.reduce((sum, sale) => sum + sale.quantity, 0);
     const totalRevenue = sales.reduce((sum, sale) => sum + sale.total_amount, 0);
@@ -1864,39 +1900,12 @@ async function loadSafeBookMovements() {
   if (!tableBody) return;
 
   try {
-    const allMovements = await ipcRenderer.invoke('get-safe-book-movements');
-
-    if (!Array.isArray(allMovements) || allMovements.length === 0) {
-      const filtersRange = getSafeBookFiltersRange();
-      safeBookCurrentBalance = 0;
-      updateSafeBookBalanceDisplay(0);
-      updateSafeBookPeriodBalancesDisplay(0, 0);
-      setSafeBookPeriodBalancesVisibility(false);
-      updateSafeBookClearFilterButtonState(Boolean(filtersRange.hasSelection));
-      clearSafeBookStickyMonthSummary();
-      tableBody.innerHTML = `
-        <tr>
-          <td colspan="3" style="text-align:center; color:#777;">لا توجد حركات حالياً</td>
-        </tr>
-      `;
-      return;
-    }
-
-    const signedAmount = (movement) => {
-      const direction = movement.direction === 'out' ? 'out' : 'in';
-      const amount = Math.abs(parseFloat(movement.amount) || 0);
-      return direction === 'out' ? -amount : amount;
-    };
-
-    const getMovementDate = (movement) => String(movement?.date || '').split('T')[0];
-
-    const currentBalance = allMovements.reduce((sum, movement) => sum + signedAmount(movement), 0);
-    safeBookCurrentBalance = currentBalance;
-    updateSafeBookBalanceDisplay(currentBalance);
-
     const filtersRange = getSafeBookFiltersRange();
     updateSafeBookClearFilterButtonState(Boolean(filtersRange.hasSelection));
+
     if (!filtersRange.valid) {
+      safeBookCurrentBalance = 0;
+      updateSafeBookBalanceDisplay(0);
       updateSafeBookPeriodBalancesDisplay(0, 0);
       setSafeBookPeriodBalancesVisibility(false);
       clearSafeBookStickyMonthSummary();
@@ -1908,38 +1917,31 @@ async function loadSafeBookMovements() {
       return;
     }
 
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="3" style="text-align:center; color:#777;">جاري التحميل...</td>
+      </tr>
+    `;
+
     const hasDateFilter = Boolean(filtersRange.isFiltered && filtersRange.startDate && filtersRange.endDate);
+    const view = await invokeCached('get-safe-book-view', {
+      startDate: hasDateFilter ? filtersRange.startDate : null,
+      endDate: hasDateFilter ? filtersRange.endDate : null
+    });
+    const movements = Array.isArray(view?.movements) ? view.movements : [];
+    const currentBalance = parseFloat(view?.current_balance) || 0;
+    safeBookCurrentBalance = currentBalance;
+    updateSafeBookBalanceDisplay(currentBalance);
     if (hasDateFilter) {
-      const startBalance = allMovements.reduce((sum, movement) => {
-        const movementDate = getMovementDate(movement);
-        if (!movementDate || movementDate >= filtersRange.startDate) return sum;
-        return sum + signedAmount(movement);
-      }, 0);
-
-      const endBalance = allMovements.reduce((sum, movement) => {
-        const movementDate = getMovementDate(movement);
-        if (!movementDate || movementDate > filtersRange.endDate) return sum;
-        return sum + signedAmount(movement);
-      }, 0);
-
-      updateSafeBookPeriodBalancesDisplay(startBalance, endBalance);
+      updateSafeBookPeriodBalancesDisplay(
+        parseFloat(view?.period_start_balance) || 0,
+        parseFloat(view?.period_end_balance) || 0
+      );
       setSafeBookPeriodBalancesVisibility(true);
     } else {
       updateSafeBookPeriodBalancesDisplay(0, currentBalance);
       setSafeBookPeriodBalancesVisibility(false);
     }
-
-    const filteredMovements = hasDateFilter
-      ? allMovements.filter((movement) => {
-          const movementDate = getMovementDate(movement);
-          if (!movementDate) return false;
-          return movementDate >= filtersRange.startDate && movementDate <= filtersRange.endDate;
-        })
-      : allMovements;
-
-    const movements = hasDateFilter
-      ? filteredMovements
-      : filteredMovements.slice(0, SAFE_BOOK_DEFAULT_VISIBLE_ROWS);
 
     if (movements.length === 0) {
       clearSafeBookStickyMonthSummary();
@@ -2132,6 +2134,7 @@ async function saveSafeBookAuditMovement() {
       amount: Math.abs(difference),
       direction: difference > 0 ? 'in' : 'out'
     });
+    invalidateViewDataCaches();
 
     showMessage('تمت إضافة فرق الجرد وتحديث رصيد الخزينة', 'success');
     toggleSafeBookAuditForm(false);
@@ -2180,6 +2183,7 @@ async function saveSafeBookMovement() {
       amount: amount,
       direction: direction
     });
+    invalidateViewDataCaches();
 
     showMessage('تمت إضافة حركة الخزينة بنجاح', 'success');
     toggleSafeBookForm(false);
@@ -3409,39 +3413,35 @@ async function loadHomeChart() {
   const isSalesMode = currentHomeChartMode === HOME_CHART_MODE.SALES;
 
   try {
-    let chartData = [];
-
-    if (isSalesMode) {
-      const [salesResult, shiftFuelSalesResult] = await Promise.allSettled([
-        ipcRenderer.invoke('get-sales'),
-        ipcRenderer.invoke('get-shift-fuel-sales')
-      ]);
-
-      const sales = salesResult.status === 'fulfilled' && Array.isArray(salesResult.value)
-        ? salesResult.value
-        : [];
-      const shiftFuelSales = shiftFuelSalesResult.status === 'fulfilled' && Array.isArray(shiftFuelSalesResult.value)
-        ? shiftFuelSalesResult.value
-        : [];
-
-      chartData = [...sales, ...shiftFuelSales];
-    } else {
-      const movements = await ipcRenderer.invoke('get-fuel-movements');
-      if (!movements || !Array.isArray(movements)) {
-        console.error('Invalid movements data');
-        return;
-      }
-      chartData = movements.filter(movement => movement.type === 'in');
-    }
+    const result = await invokeCached('get-home-chart-data', { mode: currentHomeChartMode });
+    const chartData = Array.isArray(result?.entries) ? result.entries : [];
 
     createMonthlyFuelSalesChart(chartData, currentHomeChartMode);
     scheduleHomeChartHeightSync();
   } catch (error) {
-    if (isSalesMode) {
-      showMessage('عرض الكميات المباعة غير متاح حالياً', 'warning');
+    try {
+      let fallbackData = [];
+      if (isSalesMode) {
+        const [salesResult, shiftFuelSalesResult] = await Promise.allSettled([
+          ipcRenderer.invoke('get-sales'),
+          ipcRenderer.invoke('get-shift-fuel-sales')
+        ]);
+        const sales = salesResult.status === 'fulfilled' && Array.isArray(salesResult.value) ? salesResult.value : [];
+        const shiftFuelSales = shiftFuelSalesResult.status === 'fulfilled' && Array.isArray(shiftFuelSalesResult.value) ? shiftFuelSalesResult.value : [];
+        fallbackData = [...sales, ...shiftFuelSales];
+      } else {
+        const movements = await ipcRenderer.invoke('get-fuel-movements');
+        fallbackData = Array.isArray(movements) ? movements.filter(movement => movement.type === 'in') : [];
+      }
+      createMonthlyFuelSalesChart(fallbackData, currentHomeChartMode);
+    } catch (fallbackError) {
+      if (isSalesMode) {
+        showMessage('عرض الكميات المباعة غير متاح حالياً', 'warning');
+      }
+      console.error('Error loading home chart fallback:', fallbackError);
+      createMonthlyFuelSalesChart([], currentHomeChartMode);
     }
     console.error('Error loading home chart:', error);
-    createMonthlyFuelSalesChart([], currentHomeChartMode);
     scheduleHomeChartHeightSync();
   }
 }
@@ -3470,8 +3470,8 @@ function normalizeFuelTypeForHomeChart(value) {
 async function loadFuelPrices() {
   try {
     const [pricesRaw, purchasePricesRaw] = await Promise.all([
-      ipcRenderer.invoke('get-fuel-prices'),
-      ipcRenderer.invoke('get-purchase-prices').catch((error) => {
+      invokeCached('get-fuel-prices', {}, { ttlMs: 30_000 }),
+      invokeCached('get-purchase-prices', {}, { ttlMs: 30_000 }).catch((error) => {
         console.warn('Unable to load purchase prices for price edit:', error);
         return [];
       })
@@ -3588,7 +3588,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
 
 async function loadPurchasePrices() {
   try {
-    const prices = await ipcRenderer.invoke('get-purchase-prices');
+    const prices = await invokeCached('get-purchase-prices', {}, { ttlMs: 30_000 });
     prices.forEach(price => {
       const inputId = `purchase-price-${price.fuel_type.replace(/\s+/g, '-').toLowerCase()}`;
       const input = document.getElementById(inputId);
@@ -3648,8 +3648,8 @@ async function loadInvoiceFuelProducts(forceReload = false) {
   invoiceFuelProductsLoadingPromise = (async () => {
     try {
       const [products, purchasePricesRaw] = await Promise.all([
-        ipcRenderer.invoke('get-fuel-prices'),
-        ipcRenderer.invoke('get-purchase-prices-by-date', { date: invoiceDate }).catch((error) => {
+        invokeCached('get-fuel-prices', {}, { ttlMs: 30_000 }),
+        invokeCached('get-purchase-prices-by-date', { date: invoiceDate }, { ttlMs: 30_000 }).catch((error) => {
           console.warn('Unable to load purchase prices by invoice date:', error);
           return [];
         })
@@ -3972,6 +3972,7 @@ async function saveFuelInvoice() {
         ...invoiceData,
         original_invoice_number: fuelInvoiceEditState.original_invoice_number
       });
+      invalidateViewDataCaches();
       showMessage('تم تعديل فاتورة الوقود بنجاح', 'success');
       setFuelInvoiceEditMode(null);
       resetFuelInvoiceForm();
@@ -3996,6 +3997,7 @@ async function saveFuelInvoice() {
           notes: `Acquisto - Prezzo: ${item.purchase_price} جنيه/لتر - Totale: ${item.total} جنيه`
         });
       }
+      invalidateViewDataCaches();
       showMessage('تم حفظ فاتورة الوقود بنجاح', 'success');
     }
 
@@ -4063,6 +4065,8 @@ async function updatePurchasePrice(fuelType) {
 
   try {
     await ipcRenderer.invoke('update-purchase-price', { fuel_type: fuelType, price });
+    invalidateViewDataCaches();
+    invalidateInvoiceFuelProductsCache();
     showMessage('تم تحديث سعر الشراء بنجاح', 'success');
   } catch (error) {
     showMessage('حدث خطأ أثناء تحديث سعر الشراء', 'error');
@@ -5866,7 +5870,8 @@ async function saveMovement() {
       quantity: quantity,
       invoice_number: type === 'in' ? invoiceNumber : null
     });
-    
+    invalidateViewDataCaches();
+
     showMessage('تم حفظ الحركة بنجاح', 'success');
     resetMovementForm();
     closeMovementModal();
@@ -5917,11 +5922,12 @@ async function saveOilInvoice() {
     return;
   }
 
-  try {
-    // Save the oil invoice
-    await ipcRenderer.invoke('add-oil-invoice', invoiceData);
+	  try {
+	    // Save the oil invoice
+	    await ipcRenderer.invoke('add-oil-invoice', invoiceData);
+	    invalidateViewDataCaches();
 
-    showMessage('تم حفظ فاتورة الزيوت بنجاح', 'success');
+	    showMessage('تم حفظ فاتورة الزيوت بنجاح', 'success');
     resetOilInvoiceForm();
     
     // Update depot screen if currently on depot screen
@@ -6148,7 +6154,7 @@ function updateOilType(itemId, oilType) {
 // Oil Prices Functions
 async function loadOilPrices() {
   try {
-    const prices = await ipcRenderer.invoke('get-oil-prices');
+    const prices = await invokeCached('get-oil-prices', {}, { ttlMs: 30_000 });
     const tbody = document.getElementById('oil-prices-table-body');
 
     if (!tbody) return;
@@ -6360,6 +6366,7 @@ async function saveAllPrices() {
       invalidateInvoiceFuelProductsCache();
       await refreshFuelInvoicePurchasePricesForDate();
     }
+    invalidateViewDataCaches();
 
     // Reset all price inputs
     resetPriceInputs();
@@ -6441,13 +6448,14 @@ async function addNewProduct() {
 
   try {
     // Add product to appropriate price table
-    if (type === 'fuel') {
-      await ipcRenderer.invoke('add-fuel-price', { fuel_type: name, price });
-      invalidateInvoiceFuelProductsCache();
-    } else if (type === 'oil') {
-      await ipcRenderer.invoke('add-oil-price', { oil_type: name, price, vat });
-      invalidateInvoiceOilProductsCache();
-    }
+	    if (type === 'fuel') {
+	      await ipcRenderer.invoke('add-fuel-price', { fuel_type: name, price });
+	      invalidateInvoiceFuelProductsCache();
+	    } else if (type === 'oil') {
+	      await ipcRenderer.invoke('add-oil-price', { oil_type: name, price, vat });
+	      invalidateInvoiceOilProductsCache();
+	    }
+	    invalidateViewDataCaches();
 
     showMessage('تم إضافة المنتج بنجاح', 'success');
 
@@ -6931,9 +6939,10 @@ async function loadManageProducts() {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = isActive;
-        checkbox.onchange = async () => {
-          await ipcRenderer.invoke('toggle-oil-active', product.oil_type, checkbox.checked);
-        };
+	        checkbox.onchange = async () => {
+	          await ipcRenderer.invoke('toggle-oil-active', product.oil_type, checkbox.checked);
+	          invalidateViewDataCaches();
+	        };
         tdCheckbox.appendChild(checkbox);
 
         const td1 = document.createElement('td');
@@ -7059,6 +7068,7 @@ async function saveEditProductName() {
       renameDepotVisibleOilFilter(currentEditContext.currentName, newName);
       invalidateInvoiceOilProductsCache();
     }
+    invalidateViewDataCaches();
 
     showMessage('تم تحديث اسم المنتج بنجاح', 'success');
     closeEditProductModal();
@@ -7087,10 +7097,11 @@ async function deleteFuelProduct(fuelType) {
 
   try {
     console.log('Deleting fuel product:', fuelType);
-    const result = await ipcRenderer.invoke('delete-fuel-product', fuelType);
-    console.log('Delete result:', result);
-    invalidateInvoiceFuelProductsCache();
-    showMessage('تم حذف المنتج بنجاح', 'success');
+	    const result = await ipcRenderer.invoke('delete-fuel-product', fuelType);
+	    console.log('Delete result:', result);
+	    invalidateInvoiceFuelProductsCache();
+	    invalidateViewDataCaches();
+	    showMessage('تم حذف المنتج بنجاح', 'success');
 
     // Reload tables
     console.log('Reloading manage products...');
@@ -7114,9 +7125,10 @@ async function deleteOilProduct(oilType) {
   }
 
   try {
-    await ipcRenderer.invoke('delete-oil-product', oilType);
-    invalidateInvoiceOilProductsCache();
-    showMessage('تم حذف المنتج بنجاح', 'success');
+	    await ipcRenderer.invoke('delete-oil-product', oilType);
+	    invalidateInvoiceOilProductsCache();
+	    invalidateViewDataCaches();
+	    showMessage('تم حذف المنتج بنجاح', 'success');
 
     // Reload tables
     loadManageProducts();
@@ -8685,15 +8697,16 @@ async function importExcelSales() {
     if (button) button.disabled = true;
 
     let saved = 0;
-    for (const payload of payloads) {
-      const result = await ipcRenderer.invoke('save-shift', payload);
-      if (!result?.success) {
-        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
-      }
-      saved += 1;
-    }
+	    for (const payload of payloads) {
+	      const result = await ipcRenderer.invoke('save-shift', payload);
+	      if (!result?.success) {
+	        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+	      }
+	      saved += 1;
+	    }
+	    invalidateViewDataCaches();
 
-    showMessage('تم استيراد مبيعات Excel بنجاح', 'success');
+	    showMessage('تم استيراد مبيعات Excel بنجاح', 'success');
     await refreshViewsAfterExcelSalesImport();
     resetExcelSalesImport();
     setExcelSalesImportStatus(`تم استيراد ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
@@ -9023,16 +9036,17 @@ async function importExcelExpenses() {
     if (button) button.disabled = true;
 
     let saved = 0;
-    for (const [date, expenseItems] of grouped.entries()) {
-      const payload = await buildExcelExpenseShiftPayload(date, expenseItems);
-      const result = await ipcRenderer.invoke('save-shift', payload);
-      if (!result?.success) {
-        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
-      }
-      saved += 1;
-    }
+	    for (const [date, expenseItems] of grouped.entries()) {
+	      const payload = await buildExcelExpenseShiftPayload(date, expenseItems);
+	      const result = await ipcRenderer.invoke('save-shift', payload);
+	      if (!result?.success) {
+	        throw new Error(result?.validationErrors?.join('\n') || result?.error || 'save_failed');
+	      }
+	      saved += 1;
+	    }
+	    invalidateViewDataCaches();
 
-    showMessage('تم استيراد مصاريف Excel بنجاح', 'success');
+	    showMessage('تم استيراد مصاريف Excel بنجاح', 'success');
     await refreshViewsAfterExcelExpensesImport();
     resetExcelExpensesImport();
     setExcelExpensesImportStatus(`تم استيراد المصاريف في ${convertToArabicNumerals(saved)} وردية بنجاح`, 'success');
@@ -9911,12 +9925,13 @@ async function persistCurrentShiftDraftToDatabase() {
     is_saved: 0
   };
 
-  try {
-    const result = await ipcRenderer.invoke('save-shift', draftPayload);
-    if (!result?.success) {
-      return { success: false, error: result?.error || 'save_failed' };
-    }
-    return { success: true };
+	  try {
+	    const result = await ipcRenderer.invoke('save-shift', draftPayload);
+	    if (!result?.success) {
+	      return { success: false, error: result?.error || 'save_failed' };
+	    }
+	    invalidateViewDataCaches();
+	    return { success: true };
   } catch (error) {
     console.error('Error persisting shift draft:', error);
     return { success: false, error: error?.message || 'save_failed' };
@@ -10525,113 +10540,25 @@ async function loadSalesSummary() {
   const endDateStr = formatDate(endDateObj);
 
   try {
-    const [fuelProducts, oilProducts] = await Promise.all([
-      ipcRenderer.invoke('get-fuel-prices'),
-      ipcRenderer.invoke('get-oil-prices')
-    ]);
-
-    let salesReportRows = [];
-    try {
-      const salesReport = await ipcRenderer.invoke('get-sales-report', { startDate: startDateStr, endDate: endDateStr });
-      salesReportRows = Array.isArray(salesReport) ? salesReport : [];
-    } catch (error) {
-      console.warn('Sales report unavailable, using shift sales:', error);
-    }
-
-    let shiftFuelRows = [];
-    let shiftOilRows = [];
-    try {
-      const [shiftFuelSalesRaw, shiftOilSalesRaw] = await Promise.all([
-        ipcRenderer.invoke('get-shift-fuel-sales'),
-        ipcRenderer.invoke('get-shift-oil-sales')
-      ]);
-
-      shiftFuelRows = (Array.isArray(shiftFuelSalesRaw) ? shiftFuelSalesRaw : [])
-        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-        .map((entry) => ({
-          date: entry.date,
-          fuel_type: normalizeFuelTypeForHomeChart(entry.fuel_type),
-          quantity: parseFloat(entry.quantity) || 0,
-          total_amount: 0
-        }));
-
-      shiftOilRows = (Array.isArray(shiftOilSalesRaw) ? shiftOilSalesRaw : [])
-        .filter((entry) => entry?.date && entry.date >= startDateStr && entry.date <= endDateStr)
-        .map((entry) => ({
-          date: entry.date,
-          fuel_type: String(entry.product_name || '').trim(),
-          quantity: parseFloat(entry.quantity) || 0,
-          total_amount: 0
-        }));
-    } catch (error) {
-      console.warn('Shift sales unavailable:', error);
-    }
-
-    const configuredFuelNames = new Set((fuelProducts || []).map((product) => (
-      normalizeFuelTypeForHomeChart(product.fuel_type)
-    )).filter(Boolean));
-    const nonFuelReportRows = salesReportRows.filter((row) => {
-      const productName = normalizeFuelTypeForHomeChart(row.fuel_type);
-      return productName && !configuredFuelNames.has(productName);
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#777;">جاري التحميل...</td></tr>';
+    const result = await invokeCached('get-sales-summary-view', {
+      startDate: startDateStr,
+      endDate: endDateStr
     });
-    const sales = shiftFuelRows.length > 0 || shiftOilRows.length > 0
-      ? [...shiftFuelRows, ...shiftOilRows, ...nonFuelReportRows]
-      : salesReportRows;
-
-    // Build list of months in range (YYYY-MM)
-    const months = [];
-    const startMonth = new Date(startParts.year, startParts.month - 1, 1);
-    const endMonth = new Date(endParts.year, endParts.month - 1, 1);
-    startMonth.setDate(1);
-    endMonth.setDate(1);
-    const cursor = new Date(startMonth);
-    const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    while (cursor <= endMonth) {
-      months.push(monthKey(cursor));
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
-
-    // Collect all products (fuel first, then oil, then any extras from sales)
-    const fuelNames = (fuelProducts || []).map(p => p.fuel_type).filter(Boolean);
-    const oilNames = (oilProducts || []).map(p => p.oil_type).filter(Boolean);
-    const extras = [];
-    sales.forEach(sale => {
-      if (sale.fuel_type && !fuelNames.includes(sale.fuel_type) && !oilNames.includes(sale.fuel_type) && !extras.includes(sale.fuel_type)) {
-        extras.push(sale.fuel_type);
-      }
-    });
-    const productsOrdered = [
-      ...fuelNames.sort((a, b) => a.localeCompare(b)),
-      ...oilNames.sort((a, b) => a.localeCompare(b)),
-      ...extras.sort((a, b) => a.localeCompare(b))
-    ];
-    const productSet = new Set(productsOrdered);
-
-    // Aggregate by product and month (YYYY-MM)
+    const months = Array.isArray(result?.months) ? result.months : [];
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+    const sales = Array.isArray(result?.detail_sales) ? result.detail_sales : [];
     const map = new Map();
-    sales.forEach(sale => {
-      const normalizedFuelType = normalizeFuelTypeForHomeChart(sale.fuel_type);
-      const month = sale.date?.slice(0, 7) || '';
-      const key = `${normalizedFuelType}__${month}`;
-      if (!map.has(key)) {
-        map.set(key, { product: normalizedFuelType, month, qty: 0, revenue: 0 });
-      }
-      const entry = map.get(key);
-      entry.qty += parseFloat(sale.quantity) || 0;
-      entry.revenue += parseFloat(sale.total_amount) || 0;
-    });
-
-    // Ensure every product appears for each month even if zero sales
-    productSet.forEach(product => {
-      months.forEach(month => {
-        const key = `${product}__${month}`;
-        if (!map.has(key)) {
-          map.set(key, { product, month, qty: 0, revenue: 0 });
-        }
+    rows.forEach((row) => {
+      const product = String(row?.product || row?.name || '').trim();
+      if (!product) return;
+      months.forEach((month) => {
+        const qty = parseFloat(row?.byMonth?.[month]) || 0;
+        map.set(`${product}__${month}`, { product, month, qty, revenue: 0 });
       });
     });
 
-    let products = productsOrdered.length > 0 ? productsOrdered : Array.from(productSet).sort((a, b) => a.localeCompare(b));
+    let products = rows.map((row) => String(row?.product || row?.name || '').trim()).filter(Boolean);
     products = applySavedSalesSummaryOrder(products);
     // Store for later drill-down use
     salesSummaryCache = { sales, months, products };
@@ -13026,11 +12953,13 @@ async function loadAllOilPrices() {
 
   try {
     const rows = tableBody.querySelectorAll('tr[data-oil-id]');
+    let batchLoaded = false;
 
     try {
       const batchPrices = await ipcRenderer.invoke('get-oil-prices-by-date', { date: shiftDate });
       if (Array.isArray(batchPrices)) {
         cacheOilPricesBatch(shiftDate, batchPrices);
+        batchLoaded = true;
       }
     } catch (batchError) {
       console.warn('loadAllOilPrices: Batch loading failed, using per-row fallback:', batchError);
@@ -13046,7 +12975,10 @@ async function loadAllOilPrices() {
       const revenueInput = document.getElementById(`oil-${oilId}-revenue`);
 
       if (priceInput && oilName) {
-        const price = await getOilPriceByDate(oilName, shiftDate);
+        const cachedPrice = getCachedOilPrice(oilName, shiftDate);
+        const price = batchLoaded
+          ? (cachedPrice ?? 0)
+          : await getOilPriceByDate(oilName, shiftDate);
         priceInput.value = formatPrice(price);
 
         if (revenueInput) {
@@ -13172,7 +13104,7 @@ function shouldKeepShiftAssignmentReadOnly() {
 // Load customer names for the dropdown used in the shift customers table
 async function loadCustomerNameOptions() {
   try {
-    const customers = await ipcRenderer.invoke('get-customers');
+    const customers = await invokeCached('get-customers', {}, { ttlMs: 30_000 });
     updateCustomerNameOptions(customers);
   } catch (error) {
     console.error('Error loading customer names:', error);
@@ -13801,18 +13733,20 @@ async function saveNewCustomer() {
     return;
   }
 
-  try {
-    if (editingCustomerId) {
-      await ipcRenderer.invoke('update-customer', { id: editingCustomerId, name });
-      closeAddCustomerModal();
-      await loadCustomersSettings();
+	  try {
+	    if (editingCustomerId) {
+	      await ipcRenderer.invoke('update-customer', { id: editingCustomerId, name });
+	      invalidateViewDataCaches();
+	      closeAddCustomerModal();
+	      await loadCustomersSettings();
       showMessage('تم تحديث اسم العميل بنجاح', 'success');
       return;
     }
 
-    // Save customer
-    const result = await ipcRenderer.invoke('add-customer', { name });
-    console.log('Customer added successfully, ID:', result);
+	    // Save customer
+	    const result = await ipcRenderer.invoke('add-customer', { name });
+	    invalidateViewDataCaches();
+	    console.log('Customer added successfully, ID:', result);
 
     // Close modal
     closeAddCustomerModal();
@@ -13834,9 +13768,10 @@ async function deleteCustomer(id, name) {
     return;
   }
 
-  try {
-    await ipcRenderer.invoke('delete-customer', { id });
-    await loadCustomersSettings();
+	  try {
+	    await ipcRenderer.invoke('delete-customer', { id });
+	    invalidateViewDataCaches();
+	    await loadCustomersSettings();
     showMessage('تم حذف العميل بنجاح', 'success');
   } catch (error) {
     console.error('Error deleting customer:', error);
@@ -13872,6 +13807,7 @@ function editCustomer(id, currentName) {
 async function updateCustomerName(id, newName) {
   try {
     await ipcRenderer.invoke('update-customer', { id, name: newName });
+    invalidateViewDataCaches();
     await loadCustomersSettings();
     showMessage('تم تحديث اسم العميل بنجاح', 'success');
   } catch (error) {
@@ -14607,8 +14543,9 @@ async function saveShift() {
     // Save to database
     const result = await ipcRenderer.invoke('save-shift', shiftData);
 
-    if (result.success) {
-      currentShiftData.isSaved = true;
+	    if (result.success) {
+	      invalidateViewDataCaches();
+	      currentShiftData.isSaved = true;
       currentShiftData.hasUnsavedChanges = false;
       setShiftDraftStatus('idle');
 
@@ -15860,6 +15797,7 @@ async function saveShiftCorrection() {
     }
 
     currentShiftData.hasUnsavedChanges = false;
+    invalidateViewDataCaches();
     const cascade = result.cascade || {};
     const updatedCount = parseInt(cascade.updated_count, 10) || 0;
     let successMessage = updatedCount > 0
