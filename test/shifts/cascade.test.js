@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildCascadeUpdates
-} = require('./src/shift-cascade');
+} = require('../../src/shift-cascade');
 
 function shift(overrides = {}) {
   return {

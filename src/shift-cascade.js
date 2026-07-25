@@ -1,3 +1,14 @@
+const {
+  recalculateFuelData: recalculateFuelDataAccounting
+} = require('./accounting/fuel-accounting');
+const {
+  recalculateOilData: recalculateOilDataAccounting
+} = require('./accounting/oil-accounting');
+const {
+  calculateShiftTotals,
+  normalizeShiftRecord: normalizeShiftRecordAccounting
+} = require('./accounting/shift-accounting');
+
 function toNumber(value) {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -59,27 +70,7 @@ function normalizeItems(items) {
 }
 
 function normalizeShiftRecord(row = {}) {
-  const legacyData = parseObject(row.data, {});
-  const fuelData = parseObject(row.fuel_data || legacyData.fuel_data, {});
-  const oilData = parseObject(row.oil_data || legacyData.oil_data, {});
-
-  return {
-    id: row.id ?? null,
-    date: normalizeDate(row.date),
-    shift_number: parseInt(row.shift_number, 10) || 1,
-    fuel_data: clone(fuelData) || {},
-    fuel_total: toNumber(row.fuel_total ?? legacyData.fuel_total),
-    oil_data: clone(oilData) || {},
-    oil_total: toNumber(row.oil_total ?? legacyData.oil_total),
-    customer_rows: normalizeItems(legacyData.customer_rows),
-    revenue_items: normalizeItems(legacyData.revenue_items),
-    customer_payments: normalizeItems(legacyData.customer_payments),
-    expense_items: normalizeItems(legacyData.expense_items),
-    wash_lube_revenue: toNumber(row.wash_lube_revenue ?? legacyData.wash_lube_revenue),
-    total_expenses: toNumber(row.total_expenses ?? legacyData.total_expenses),
-    grand_total: toNumber(row.grand_total ?? legacyData.grand_total),
-    is_saved: row.is_saved === undefined ? 1 : (row.is_saved ? 1 : 0)
-  };
+  return normalizeShiftRecordAccounting(row);
 }
 
 function buildEntryLookup(entries = {}) {
@@ -105,79 +96,11 @@ function findMatchingEntry(previousEntries, entryKey, data) {
 }
 
 function recalculateFuelData(currentFuelData = {}, previousFuelData = {}) {
-  const fuelData = clone(currentFuelData) || {};
-  let fuelTotal = 0;
-  const errors = [];
-
-  Object.entries(fuelData).forEach(([entryKey, data]) => {
-    if (!data || typeof data !== 'object') return;
-
-    const previousData = findMatchingEntry(previousFuelData, entryKey, data);
-    const counterCount = getCounterCount(entryKey, data);
-    let totalQuantity = 0;
-
-    for (let i = 1; i <= counterCount; i += 1) {
-      if (previousData && previousData[`lastShift${i}`] !== undefined && previousData[`lastShift${i}`] !== null) {
-        data[`firstShift${i}`] = toNumber(previousData[`lastShift${i}`]);
-      }
-
-      const firstShift = toNumber(data[`firstShift${i}`]);
-      const lastShift = toNumber(data[`lastShift${i}`]);
-      if (firstShift > 0 && lastShift < firstShift) {
-        errors.push(`${getEntryName(entryKey, data)} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
-      }
-
-      const quantity = lastShift - firstShift;
-      data[`quantity${i}`] = Math.round(quantity);
-      totalQuantity += quantity;
-    }
-
-    data.totalQuantity = totalQuantity >= 0 ? Math.round(totalQuantity) : 0;
-    data.cash = roundMoney((toNumber(data.totalQuantity) - (toNumber(data.clients) + toNumber(data.cars))) * toNumber(data.price));
-    fuelTotal += toNumber(data.cash);
-  });
-
-  return {
-    fuel_data: fuelData,
-    fuel_total: roundMoney(fuelTotal),
-    errors
-  };
+  return recalculateFuelDataAccounting(currentFuelData, previousFuelData);
 }
 
 function recalculateOilData(currentOilData = {}, previousOilData = {}) {
-  const oilData = clone(currentOilData) || {};
-  let oilTotal = 0;
-  const errors = [];
-
-  Object.entries(oilData).forEach(([entryKey, data]) => {
-    if (!data || typeof data !== 'object') return;
-
-    const previousData = findMatchingEntry(previousOilData, entryKey, data);
-    if (previousData && previousData.remaining !== undefined && previousData.remaining !== null) {
-      data.initial = roundQuantity(previousData.remaining);
-    }
-
-    const total = roundQuantity(toNumber(data.initial) + toNumber(data.added));
-    const remaining = roundQuantity(data.remaining);
-    data.total = total;
-
-    if (remaining > total && remaining > 0) {
-      errors.push(`${getEntryName(entryKey, data)}: الكمية المتبقية يجب أن تكون أقل من أو تساوي الإجمالي المتاح`);
-    }
-
-    const sold = roundQuantity(total - remaining);
-    data.sold = sold >= 0 ? sold : 0;
-
-    const revenue = roundMoney((toNumber(data.sold) - toNumber(data.customers) - toNumber(data.open)) * toNumber(data.price));
-    data.revenue = revenue >= 0 ? revenue : 0;
-    oilTotal += toNumber(data.revenue);
-  });
-
-  return {
-    oil_data: oilData,
-    oil_total: roundMoney(oilTotal),
-    errors
-  };
+  return recalculateOilDataAccounting(currentOilData, previousOilData);
 }
 
 function sumAmounts(items = []) {
@@ -185,12 +108,7 @@ function sumAmounts(items = []) {
 }
 
 function recalculateGrandTotal(shift) {
-  const totalRevenue = toNumber(shift.fuel_total)
-    + toNumber(shift.oil_total)
-    + toNumber(shift.wash_lube_revenue)
-    + sumAmounts(shift.revenue_items)
-    + sumAmounts(shift.customer_payments);
-  return roundMoney(totalRevenue - toNumber(shift.total_expenses));
+  return calculateShiftTotals(shift).totals.grand_total;
 }
 
 function shiftKey(shift) {

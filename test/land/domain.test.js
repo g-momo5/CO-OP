@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const land = require('./src/land-domain');
+const land = require('../../src/land-domain');
 
 test('converts Egyptian land units to sahm and back', () => {
   const total = land.surfaceToSahm({ feddan: 2, qirat: 12, sahm: 0 });
