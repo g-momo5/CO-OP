@@ -1164,10 +1164,13 @@ class DatabaseManager {
         // Get all data from PostgreSQL
         const result = await this.pgPool.query(`SELECT * FROM ${table}`);
 
-        if (result.rows.length === 0) continue;
-
         // Clear SQLite table
         this.sqlite.prepare(`DELETE FROM ${table}`).run();
+
+        if (result.rows.length === 0) {
+          console.log(`Synced 0 rows from ${table}`);
+          continue;
+        }
 
         // Insert into SQLite
         const columns = Object.keys(result.rows[0]);
