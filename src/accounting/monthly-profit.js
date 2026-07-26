@@ -49,6 +49,114 @@ function mapCustomValues(rows = []) {
   return byRow;
 }
 
+function normalizeProfitRowDefinition(row = {}) {
+  const rowKey = String(row?.row_key || '').trim();
+  if (!rowKey) return null;
+  return {
+    ...row,
+    row_key: rowKey,
+    row_label: String(row?.row_label || rowKey).trim() || rowKey,
+    row_type: row?.row_type === 'deduction' ? 'deduction' : 'revenue'
+  };
+}
+
+function normalizeProfitLabelTokens(label = '') {
+  return String(label || '')
+    .replace(/[0-9٠-٩]+/g, ' ')
+    .replace(/[.,،٫٪%/\\_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((token) => token.length >= 3 && !['شهر', 'على', 'عن', 'الى', 'إلى'].includes(token));
+}
+
+function profitLabelsMayReferToSameEntry(firstLabel = '', secondLabel = '') {
+  const first = normalizeProfitLabelTokens(firstLabel);
+  const second = new Set(normalizeProfitLabelTokens(secondLabel));
+  if (!first.length || !second.size) return false;
+  return first.some((token) => second.has(token));
+}
+
+function buildProfitValueMap(valueRows = []) {
+  const byRow = new Map();
+  (Array.isArray(valueRows) ? valueRows : []).forEach((row) => {
+    const rowKey = String(row?.row_key || '').trim();
+    const monthKey = normalizeMonth(row?.month_key);
+    if (!rowKey || !monthKey) return;
+    if (!byRow.has(rowKey)) byRow.set(rowKey, new Map());
+    const rowMap = byRow.get(rowKey);
+    rowMap.set(monthKey, roundMoney((rowMap.get(monthKey) || 0) + toNumber(row?.amount)));
+  });
+  return byRow;
+}
+
+function hasProfitRowValue(rowKey, valueMap, months = []) {
+  const rowMap = valueMap.get(String(rowKey || '').trim());
+  if (!rowMap) return false;
+  return (Array.isArray(months) ? months : [])
+    .some((monthKey) => Math.abs(toNumber(rowMap.get(monthKey))) > 0.0001);
+}
+
+function filterProfitRowsWithValues(rowDefinitions = [], valueRows = [], months = []) {
+  const normalizedMonths = (Array.isArray(months) ? months : [])
+    .map((monthKey) => normalizeMonth(monthKey))
+    .filter(Boolean);
+  const valueMap = buildProfitValueMap(valueRows);
+
+  return (Array.isArray(rowDefinitions) ? rowDefinitions : [])
+    .map((row) => normalizeProfitRowDefinition(row))
+    .filter((row) => row && hasProfitRowValue(row.row_key, valueMap, normalizedMonths));
+}
+
+function findSupersededProfitCustomRowKeys({
+  customRows = [],
+  customValues = [],
+  accountingRows = [],
+  accountingValues = [],
+  months = []
+} = {}) {
+  const normalizedMonths = (Array.isArray(months) ? months : [])
+    .map((monthKey) => normalizeMonth(monthKey))
+    .filter(Boolean);
+  const customValueMap = buildProfitValueMap(customValues);
+  const accountingValueMap = buildProfitValueMap(accountingValues);
+  const accountingRowsByType = (Array.isArray(accountingRows) ? accountingRows : [])
+    .map((row) => normalizeProfitRowDefinition(row))
+    .filter(Boolean)
+    .reduce((map, row) => {
+      if (!map.has(row.row_type)) map.set(row.row_type, []);
+      map.get(row.row_type).push(row);
+      return map;
+    }, new Map());
+  const superseded = new Set();
+
+  (Array.isArray(customRows) ? customRows : []).forEach((rawRow) => {
+    const customRow = normalizeProfitRowDefinition(rawRow);
+    if (!customRow) return;
+    const customMonthValues = normalizedMonths
+      .map((monthKey) => ({
+        monthKey,
+        amount: toNumber(customValueMap.get(customRow.row_key)?.get(monthKey))
+      }))
+      .filter((entry) => Math.abs(entry.amount) > 0.0001);
+    if (customMonthValues.length === 0) return;
+
+    const matchingAccountingRow = (accountingRowsByType.get(customRow.row_type) || [])
+      .find((accountingRow) => (
+        profitLabelsMayReferToSameEntry(customRow.row_label, accountingRow.row_label)
+        && customMonthValues.every((entry) => (
+          roundMoney(accountingValueMap.get(accountingRow.row_key)?.get(entry.monthKey)) === roundMoney(entry.amount)
+        ))
+      ));
+
+    if (matchingAccountingRow) {
+      superseded.add(customRow.row_key);
+    }
+  });
+
+  return superseded;
+}
+
 function calculateMonthlyProfit({
   shifts = [],
   fuelInvoices = [],
@@ -175,5 +283,7 @@ function calculateMonthlyProfit({
 }
 
 module.exports = {
-  calculateMonthlyProfit
+  calculateMonthlyProfit,
+  filterProfitRowsWithValues,
+  findSupersededProfitCustomRowKeys
 };

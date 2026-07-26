@@ -1,6 +1,10 @@
 const { Pool } = require('pg');
 const { formatSurface, formatMoney, calculatePaymentSummary } = require('../src/land-domain');
-const { calculateMonthlyProfit } = require('../src/accounting/monthly-profit');
+const {
+  calculateMonthlyProfit,
+  filterProfitRowsWithValues,
+  findSupersededProfitCustomRowKeys
+} = require('../src/accounting/monthly-profit');
 const { buildAccountingProfitRows } = require('../src/accounting/monthly-accounting');
 
 let pool = null;
@@ -568,29 +572,47 @@ async function getProfit(queryParams) {
     final_data: parseStoredObject(row.final_data, {}),
     is_final: row.is_final
   }));
+  const accountingProfit = buildAccountingProfitRows(monthlyAccountingDocuments);
+  const activeAccountingRows = filterProfitRowsWithValues(
+    accountingProfit.rows,
+    accountingProfit.values,
+    months
+  );
+  const supersededCustomRowKeys = findSupersededProfitCustomRowKeys({
+    customRows,
+    customValues,
+    accountingRows: activeAccountingRows,
+    accountingValues: accountingProfit.values,
+    months
+  });
+  const visibleCustomRows = customRows.filter((row) => (
+    !supersededCustomRowKeys.has(String(row?.row_key || '').trim())
+  ));
+  const visibleCustomValues = customValues.filter((row) => (
+    !supersededCustomRowKeys.has(String(row?.row_key || '').trim())
+  ));
   const rows = calculateMonthlyProfit({
     shifts: shiftRows,
     oilInvoices: oilInvoiceRows,
     monthlyInputs: manualRows,
-    customRows,
-    customValues,
+    customRows: visibleCustomRows,
+    customValues: visibleCustomValues,
     monthlyAccountingDocuments,
     fromMonth,
     toMonth
   }).sort((a, b) => b.month_key.localeCompare(a.month_key));
-  const accountingProfit = buildAccountingProfitRows(monthlyAccountingDocuments);
 
   return {
     rows,
     customRows: [
-      ...customRows.map((row) => ({
+      ...visibleCustomRows.map((row) => ({
         row_key: String(row?.row_key || '').trim(),
         row_label: String(row?.row_label || '').trim(),
         row_type: row?.row_type === 'deduction' ? 'deduction' : 'revenue',
         display_order: toNumber(row?.display_order),
         source: 'monthly_profit'
       })).filter((row) => row.row_key),
-      ...accountingProfit.rows.map((row) => ({
+      ...activeAccountingRows.map((row) => ({
         row_key: String(row?.row_key || '').trim(),
         row_label: String(row?.row_label || '').trim(),
         row_type: row?.row_type === 'deduction' ? 'deduction' : 'revenue',

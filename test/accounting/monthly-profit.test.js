@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calculateMonthlyProfit } = require('../../src/accounting/monthly-profit');
+const {
+  calculateMonthlyProfit,
+  filterProfitRowsWithValues,
+  findSupersededProfitCustomRowKeys
+} = require('../../src/accounting/monthly-profit');
 
 test('calculates monthly profit from shifts, invoices, inputs, and custom rows', () => {
   const rows = calculateMonthlyProfit({
@@ -173,4 +177,59 @@ test('does not subtract old fuel invoices when finalized accounting fuel rows ar
   assert.equal(rows[0].fuel_diesel, 1000);
   assert.equal(rows[0].cash_insurance_month, 0);
   assert.equal(rows[0].net_profit, 1000);
+});
+
+test('filters accounting profit rows that have no values in the visible range', () => {
+  const rows = filterProfitRowsWithValues([
+    { row_key: 'old_row', row_label: 'بند قديم', row_type: 'deduction' },
+    { row_key: 'new_row', row_label: 'بند جديد', row_type: 'deduction' }
+  ], [
+    { row_key: 'old_row', month_key: '2026-06', amount: 0 },
+    { row_key: 'new_row', month_key: '2026-06', amount: 250 }
+  ], ['2026-06']);
+
+  assert.deepEqual(rows.map((row) => row.row_label), ['بند جديد']);
+});
+
+test('detects manual profit rows superseded by finalized accounting rows', () => {
+  const superseded = findSupersededProfitCustomRowKeys({
+    months: ['2026-06'],
+    customRows: [
+      { row_key: 'legacy_commission', row_label: 'عموله ١٫٥٪ شهر ٤', row_type: 'deduction' },
+      { row_key: 'manual_fee', row_label: 'رسوم أخرى', row_type: 'deduction' }
+    ],
+    customValues: [
+      { row_key: 'legacy_commission', month_key: '2026-06', amount: 1000 },
+      { row_key: 'manual_fee', month_key: '2026-06', amount: 750 }
+    ],
+    accountingRows: [
+      { row_key: 'accounting_commission', row_label: 'عموله ١٫٥٪ عن المسحوبات', row_type: 'deduction' }
+    ],
+    accountingValues: [
+      { row_key: 'accounting_commission', month_key: '2026-06', amount: 1000 }
+    ]
+  });
+
+  assert.equal(superseded.has('legacy_commission'), true);
+  assert.equal(superseded.has('manual_fee'), false);
+});
+
+test('keeps unrelated manual rows even when their amount matches accounting rows', () => {
+  const superseded = findSupersededProfitCustomRowKeys({
+    months: ['2026-06'],
+    customRows: [
+      { row_key: 'manual_fee', row_label: 'رسوم أخرى', row_type: 'deduction' }
+    ],
+    customValues: [
+      { row_key: 'manual_fee', month_key: '2026-06', amount: 1000 }
+    ],
+    accountingRows: [
+      { row_key: 'accounting_commission', row_label: 'عموله ١٫٥٪ عن المسحوبات', row_type: 'deduction' }
+    ],
+    accountingValues: [
+      { row_key: 'accounting_commission', month_key: '2026-06', amount: 1000 }
+    ]
+  });
+
+  assert.equal(superseded.has('manual_fee'), false);
 });
