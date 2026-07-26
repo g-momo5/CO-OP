@@ -6167,11 +6167,72 @@ body.modal-scroll-lock {
     min-width: 140px;
   }
 
+  .profit-table-scroll {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: clamp(330px, 62vh, 700px);
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .base-table.profit-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+  }
+
+  .base-table.profit-table th,
+  .base-table.profit-table td {
+    display: table-cell;
+    min-width: 120px;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .base-table.profit-table th {
+    padding: 0.18rem 0.32rem;
+    font-size: 0.84rem;
+  }
+
+  .base-table.profit-table td {
+    padding: 0 0.22rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    overflow: hidden;
+  }
+
   .profit-table th:first-child,
   .profit-table td:first-child {
+    position: sticky;
+    inset-inline-end: 0;
+    right: 0;
     width: 1%;
     min-width: max-content;
     max-width: none;
+    text-align: right;
+    padding-right: 0.7rem;
+    padding-left: 0.55rem;
+  }
+
+  .profit-table th:first-child {
+    z-index: 6;
+    background: #2c3e50;
+  }
+
+  .profit-table td:first-child {
+    z-index: 4;
+    background: #fff;
+    box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
+  }
+
+  .profit-insert-row td {
+    padding: 0 !important;
+    height: 8px;
+    line-height: 8px;
+    overflow: visible !important;
   }
 
   .home-chart-header {
