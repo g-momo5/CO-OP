@@ -669,12 +669,11 @@
         ${months.map((month) => `<td>${formatMoney(getProfitValue(byMonth.get(month), item))}</td>`).join('')}
       </tr>
     `);
-    const tableHtml = tableRows.join('');
     target.className = 'section-stack';
     target.innerHTML = sectionCard(
       '📈',
       'المكسب',
-      table(['البند', ...months.map(monthLabel)], tableHtml, 'لا توجد بيانات', 'profit-summary-table financial-summary-table')
+      table(['البند', ...months.map(monthLabel)], tableRows, 'لا توجد بيانات', 'profit-summary-table financial-summary-table')
     );
   }
 
