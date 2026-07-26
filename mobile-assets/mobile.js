@@ -34,22 +34,14 @@
     'ديسمبر'
   ];
 
-  const profitRows = [
+  const profitBaseRows = [
     ['fuel_diesel', 'سولار', 'revenue'],
     ['fuel_80', 'بنزين ٨٠', 'revenue'],
     ['fuel_92', 'بنزين ٩٢', 'revenue'],
     ['fuel_95', 'بنزين ٩٥', 'revenue'],
     ['oil_total', 'الزيوت', 'revenue'],
     ['wash_lube_month', 'غسيل و تشحيم', 'revenue'],
-    ['bonuses', 'حوافز', 'revenue'],
-    ['commission_diff', 'فرق العمولة', 'revenue'],
-    ['total_positive', 'إجمالي الإيرادات', 'summary'],
-    ['expenses_month', 'المصاريف', 'deduction'],
-    ['cash_insurance_month', 'تأمين نقدى', 'deduction'],
-    ['deposit_tax', 'ضريبة المنبع', 'deduction'],
-    ['bonus_tax', 'ضرائب الحافز', 'deduction'],
-    ['total_deductions', 'إجمالي الخصومات', 'summary'],
-    ['net_profit', 'صافي المكسب', 'net']
+    ['expenses_month', 'المصاريف', 'deduction']
   ];
 
   function escapeHtml(value) {
@@ -629,19 +621,60 @@
     target.textContent = 'جار التحميل...';
     const data = await api('profit', { fromMonth, toMonth });
     const rows = data.rows || [];
+    const customRows = Array.isArray(data.customRows) ? data.customRows : [];
     const months = rows.map((row) => row.month_key).reverse();
     const byMonth = new Map(rows.map((row) => [row.month_key, row]));
-    const tableRows = profitRows.map(([key, label, kind]) => `
-      <tr class="profit-${kind}-row">
-        <td><strong>${escapeHtml(label)}</strong></td>
-        ${months.map((month) => `<td>${formatMoney(byMonth.get(month)?.[key] || 0)}</td>`).join('')}
+
+    const normalizeCustomRow = (row) => ({
+      key: String(row?.row_key || '').trim(),
+      label: String(row?.row_label || '').trim() || (row?.row_type === 'deduction' ? 'خصم إضافي' : 'إيراد إضافي'),
+      kind: row?.row_type === 'deduction' ? 'deduction' : 'revenue',
+      displayOrder: Number(row?.display_order) || 0,
+      source: String(row?.source || '').trim() === 'monthly_accounting' ? 'monthly_accounting' : 'monthly_profit',
+      custom: true
+    });
+    const getCustomRows = (kind) => customRows
+      .map(normalizeCustomRow)
+      .filter((row) => row.key && row.kind === kind)
+      .sort((a, b) => {
+        if (kind === 'deduction') {
+          const aCashInsurance = a.label === 'تأمين نقدى';
+          const bCashInsurance = b.label === 'تأمين نقدى';
+          if (aCashInsurance !== bCashInsurance) return aCashInsurance ? -1 : 1;
+        }
+        const aAccounting = a.source === 'monthly_accounting';
+        const bAccounting = b.source === 'monthly_accounting';
+        if (aAccounting !== bAccounting) return aAccounting ? 1 : -1;
+        return (a.displayOrder - b.displayOrder) || a.key.localeCompare(b.key);
+      });
+    const displayRows = [
+      ...profitBaseRows.filter(([, , kind]) => kind === 'revenue').map(([key, label, kind]) => ({ key, label, kind })),
+      ...getCustomRows('revenue'),
+      ...profitBaseRows.filter(([, , kind]) => kind === 'deduction').map(([key, label, kind]) => ({ key, label, kind })),
+      ...getCustomRows('deduction'),
+      { key: 'total_positive', label: 'إجمالي الإيرادات', kind: 'summary' },
+      { key: 'total_deductions', label: 'إجمالي الخصومات', kind: 'summary' },
+      { key: 'net_profit', label: 'صافي المكسب', kind: 'net' }
+    ];
+    const getProfitValue = (monthRow, item) => {
+      if (!item.custom) return monthRow?.[item.key] || 0;
+      const sourceValues = item.source === 'monthly_accounting'
+        ? monthRow?.accounting_values
+        : monthRow?.custom_values;
+      return sourceValues?.[item.key] || 0;
+    };
+    const tableRows = displayRows.map((item) => `
+      <tr class="profit-${item.kind}-row">
+        <td><strong>${escapeHtml(item.label)}</strong></td>
+        ${months.map((month) => `<td>${formatMoney(getProfitValue(byMonth.get(month), item))}</td>`).join('')}
       </tr>
     `);
+    const tableHtml = tableRows.join('');
     target.className = 'section-stack';
     target.innerHTML = sectionCard(
       '📈',
       'المكسب',
-      table(['البند', ...months.map(monthLabel)], tableRows, 'لا توجد بيانات', 'profit-summary-table financial-summary-table')
+      table(['البند', ...months.map(monthLabel)], tableHtml, 'لا توجد بيانات', 'profit-summary-table financial-summary-table')
     );
   }
 

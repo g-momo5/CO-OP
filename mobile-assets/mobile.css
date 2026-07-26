@@ -891,6 +891,27 @@ button {
   background: #fff8f7;
 }
 
+.profit-summary-table {
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+
+.profit-summary-table th:first-child,
+.profit-summary-table td:first-child {
+  width: auto;
+  min-width: max-content;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.profit-summary-table th:not(:first-child),
+.profit-summary-table td:not(:first-child) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  min-width: 112px;
+}
+
 .mobile-module-switch {
   display: inline-flex;
   flex: 0 0 auto;

@@ -1,5 +1,7 @@
 const { Pool } = require('pg');
 const { formatSurface, formatMoney, calculatePaymentSummary } = require('../src/land-domain');
+const { calculateMonthlyProfit } = require('../src/accounting/monthly-profit');
+const { buildAccountingProfitRows } = require('../src/accounting/monthly-accounting');
 
 let pool = null;
 
@@ -524,9 +526,9 @@ async function getProfit(queryParams) {
   const months = buildMonthRange(fromMonth, toMonth);
   const fromRange = monthToRange(fromMonth);
   const toRange = monthToRange(toMonth);
-  if (!months.length || !fromRange || !toRange) return [];
+  if (!months.length || !fromRange || !toRange) return { rows: [], customRows: [] };
 
-  const [manualRows, shiftRows, invoiceRows, oilInvoiceRows] = await Promise.all([
+  const [manualRows, shiftRows, oilInvoiceRows, customRows, customValues, accountingDocumentRows] = await Promise.all([
     query('SELECT * FROM monthly_profit_inputs WHERE month_key BETWEEN $1 AND $2 ORDER BY month_key ASC', [fromMonth, toMonth]).catch(() => []),
     query(
       `SELECT date, fuel_data, oil_data, data, wash_lube_revenue, total_expenses
@@ -535,175 +537,68 @@ async function getProfit(queryParams) {
       [fromRange.startDate, toRange.endDate]
     ).catch(() => []),
     query(
-      'SELECT date, invoice_number, fuel_type, total, invoice_total FROM fuel_invoices WHERE date BETWEEN $1 AND $2',
+      'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
       [fromRange.startDate, toRange.endDate]
     ).catch(() => []),
     query(
-      'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
-      [fromRange.startDate, toRange.endDate]
+      `SELECT row_key, row_label, row_type, display_order
+       FROM monthly_profit_custom_rows
+       ORDER BY
+         CASE WHEN row_type = 'revenue' THEN 0 ELSE 1 END,
+         display_order ASC`,
+      []
+    ).catch(() => []),
+    query(
+      `SELECT row_key, month_key, amount
+       FROM monthly_profit_custom_values
+       WHERE month_key BETWEEN $1 AND $2`,
+      [fromMonth, toMonth]
+    ).catch(() => []),
+    query(
+      `SELECT month_key, final_data, is_final
+       FROM monthly_accounting_documents
+       WHERE month_key BETWEEN $1 AND $2 AND is_final = 1
+       ORDER BY month_key ASC`,
+      [fromMonth, toMonth]
     ).catch(() => [])
   ]);
 
-  const manualByMonth = new Map();
-  manualRows.forEach((row) => {
-    const monthKey = normalizeMonth(row.month_key);
-    if (!monthKey) return;
-    manualByMonth.set(monthKey, {
-      fuel_diesel: toNumber(row.fuel_diesel),
-      fuel_80: toNumber(row.fuel_80),
-      fuel_92: toNumber(row.fuel_92),
-      fuel_95: toNumber(row.fuel_95),
-      oil_total: toNumber(row.oil_total),
-      bonuses: toNumber(row.bonuses),
-      commission_diff: toNumber(row.commission_diff),
-      deposit_tax: toNumber(row.deposit_tax),
-      bonus_tax: toNumber(row.bonus_tax)
-    });
-  });
-
-  const dieselByMonth = new Map();
-  const fuel80ByMonth = new Map();
-  const fuel92ByMonth = new Map();
-  const fuel95ByMonth = new Map();
-  const oilByMonth = new Map();
-  const washByMonth = new Map();
-  const expensesByMonth = new Map();
-
-  shiftRows.map(normalizeShift).forEach((shift) => {
-    const monthKey = normalizeMonth(shift.date);
-    if (!monthKey) return;
-    dieselByMonth.set(monthKey, (dieselByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(shift, 'سولار'));
-    fuel80ByMonth.set(monthKey, (fuel80ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(shift, 'بنزين ٨٠'));
-    fuel92ByMonth.set(monthKey, (fuel92ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(shift, 'بنزين ٩٢'));
-    fuel95ByMonth.set(monthKey, (fuel95ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(shift, 'بنزين ٩٥'));
-    oilByMonth.set(monthKey, (oilByMonth.get(monthKey) || 0) + getShiftOilProfitValue(shift));
-    washByMonth.set(monthKey, (washByMonth.get(monthKey) || 0) + shift.wash_lube_revenue);
-    expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + shift.total_expenses);
-  });
-
-  const fuelPurchasesByMonth = {
-    fuel_diesel: new Map(),
-    fuel_80: new Map(),
-    fuel_92: new Map(),
-    fuel_95: new Map()
-  };
-  const groupedFuelInvoices = new Map();
-  invoiceRows.forEach((row) => {
-    const monthKey = normalizeMonth(normalizeDate(row.date));
-    if (!monthKey) return;
-
-    const fuelProfitKey = normalizeFuelProfitKey(row.fuel_type);
-    if (fuelProfitKey) {
-      const purchaseMap = fuelPurchasesByMonth[fuelProfitKey];
-      purchaseMap.set(monthKey, (purchaseMap.get(monthKey) || 0) + toNumber(row.total));
-    }
-
-    const invoiceNumber = String(row.invoice_number || '').trim() || '__unknown__';
-    const groupKey = `${monthKey}__${invoiceNumber}`;
-    if (!groupedFuelInvoices.has(groupKey)) {
-      groupedFuelInvoices.set(groupKey, { monthKey, sumRowsTotal: 0, maxInvoiceTotal: null });
-    }
-    const entry = groupedFuelInvoices.get(groupKey);
-    entry.sumRowsTotal += toNumber(row.total);
-    const invoiceTotal = parseFloat(row.invoice_total);
-    if (Number.isFinite(invoiceTotal)) {
-      entry.maxInvoiceTotal = entry.maxInvoiceTotal === null
-        ? invoiceTotal
-        : Math.max(entry.maxInvoiceTotal, invoiceTotal);
-    }
-  });
-
-  const insuranceByMonth = new Map();
-  groupedFuelInvoices.forEach((entry) => {
-    const invoiceTotal = entry.maxInvoiceTotal === null ? entry.sumRowsTotal : entry.maxInvoiceTotal;
-    insuranceByMonth.set(entry.monthKey, (insuranceByMonth.get(entry.monthKey) || 0) + (invoiceTotal - entry.sumRowsTotal));
-  });
-
-  const groupedOilInvoices = new Map();
-  oilInvoiceRows.forEach((row) => {
-    const monthKey = normalizeMonth(normalizeDate(row.date));
-    if (!monthKey) return;
-    const invoiceNumber = String(row.invoice_number || '').trim() || '__unknown__';
-    const groupKey = `${monthKey}__${invoiceNumber}`;
-    if (!groupedOilInvoices.has(groupKey)) {
-      groupedOilInvoices.set(groupKey, {
-        monthKey,
-        subtotal: 0,
-        immediateDiscount: null,
-        martyrsTax: null
-      });
-    }
-    const entry = groupedOilInvoices.get(groupKey);
-    entry.subtotal += toNumber(row.total_purchase);
-
-    const discount = parseFloat(row.immediate_discount);
-    if (Number.isFinite(discount)) {
-      entry.immediateDiscount = entry.immediateDiscount === null
-        ? discount
-        : Math.max(entry.immediateDiscount, discount);
-    }
-
-    const tax = parseFloat(row.martyrs_tax);
-    if (Number.isFinite(tax)) {
-      entry.martyrsTax = entry.martyrsTax === null
-        ? tax
-        : Math.max(entry.martyrsTax, tax);
-    }
-  });
-
-  const oilPurchasesByMonth = new Map();
-  groupedOilInvoices.forEach((entry) => {
-    const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
-    oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
-  });
-
-  return months.map((monthKey) => {
-    const manual = manualByMonth.get(monthKey) || {};
-    const fuel_diesel = (dieselByMonth.has(monthKey) ? dieselByMonth.get(monthKey) : toNumber(manual.fuel_diesel))
-      - toNumber(fuelPurchasesByMonth.fuel_diesel.get(monthKey));
-    const fuel_80 = (fuel80ByMonth.has(monthKey) ? fuel80ByMonth.get(monthKey) : toNumber(manual.fuel_80))
-      - toNumber(fuelPurchasesByMonth.fuel_80.get(monthKey));
-    const fuel_92 = (fuel92ByMonth.has(monthKey) ? fuel92ByMonth.get(monthKey) : toNumber(manual.fuel_92))
-      - toNumber(fuelPurchasesByMonth.fuel_92.get(monthKey));
-    const fuel_95 = (fuel95ByMonth.has(monthKey) ? fuel95ByMonth.get(monthKey) : toNumber(manual.fuel_95))
-      - toNumber(fuelPurchasesByMonth.fuel_95.get(monthKey));
-    const fuel_total_month = fuel_diesel + fuel_80 + fuel_92 + fuel_95;
-    const oil_total = (oilByMonth.has(monthKey) ? oilByMonth.get(monthKey) : toNumber(manual.oil_total))
-      - toNumber(oilPurchasesByMonth.get(monthKey));
-    const wash_lube_month = toNumber(washByMonth.get(monthKey));
-    const expenses_month = toNumber(expensesByMonth.get(monthKey));
-    const bonuses = toNumber(manual.bonuses);
-    const commission_diff = toNumber(manual.commission_diff);
-    const deposit_tax = toNumber(manual.deposit_tax);
-    const bonus_tax = toNumber(manual.bonus_tax);
-    const cash_insurance_month = toNumber(insuranceByMonth.get(monthKey));
-    const total_positive = fuel_total_month + oil_total + wash_lube_month + bonuses + commission_diff;
-    const total_deductions = cash_insurance_month + expenses_month + deposit_tax + bonus_tax;
-    const net_profit = total_positive - total_deductions;
-
-    return {
-      month_key: monthKey,
-      fuel_diesel,
-      fuel_80,
-      fuel_92,
-      fuel_95,
-      fuel_total_month,
-      fuel_total: fuel_total_month,
-      oil_total,
-      wash_lube_month,
-      wash_lube_revenue: wash_lube_month,
-      expenses_month,
-      total_expenses: total_deductions,
-      cash_insurance_month,
-      bonuses,
-      commission_diff,
-      deposit_tax,
-      bonus_tax,
-      total_positive,
-      total_deductions,
-      net_profit
-    };
+  const monthlyAccountingDocuments = accountingDocumentRows.map((row) => ({
+    month_key: normalizeMonth(row.month_key),
+    final_data: parseStoredObject(row.final_data, {}),
+    is_final: row.is_final
+  }));
+  const rows = calculateMonthlyProfit({
+    shifts: shiftRows,
+    oilInvoices: oilInvoiceRows,
+    monthlyInputs: manualRows,
+    customRows,
+    customValues,
+    monthlyAccountingDocuments,
+    fromMonth,
+    toMonth
   }).sort((a, b) => b.month_key.localeCompare(a.month_key));
+  const accountingProfit = buildAccountingProfitRows(monthlyAccountingDocuments);
+
+  return {
+    rows,
+    customRows: [
+      ...customRows.map((row) => ({
+        row_key: String(row?.row_key || '').trim(),
+        row_label: String(row?.row_label || '').trim(),
+        row_type: row?.row_type === 'deduction' ? 'deduction' : 'revenue',
+        display_order: toNumber(row?.display_order),
+        source: 'monthly_profit'
+      })).filter((row) => row.row_key),
+      ...accountingProfit.rows.map((row) => ({
+        row_key: String(row?.row_key || '').trim(),
+        row_label: String(row?.row_label || '').trim(),
+        row_type: row?.row_type === 'deduction' ? 'deduction' : 'revenue',
+        display_order: toNumber(row?.display_order),
+        source: 'monthly_accounting'
+      })).filter((row) => row.row_key)
+    ]
+  };
 }
 
 async function getHomeChart(queryParams) {
@@ -1300,7 +1195,7 @@ async function getMobileData(queryParams = {}) {
     case 'safe-book':
       return getSafeBook(queryParams.limit);
     case 'profit':
-      return { rows: await getProfit(queryParams) };
+      return await getProfit(queryParams);
     case 'prices':
       return await getPrices();
     case 'land-dashboard':
