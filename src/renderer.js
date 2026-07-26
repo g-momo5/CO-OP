@@ -89,6 +89,7 @@ const screenTitles = {
   'customer-invoices': 'فواتير العملاء',
   'company-vouchers': 'بونات الشركة',
   'profit': 'المكسب',
+  'accounting': 'المحاسبة',
   'expenses': 'المصاريف',
   'land-dashboard': 'إدارة الأراضي',
   'land-plots': 'الأراضي',
@@ -1319,6 +1320,9 @@ function showScreenWithoutHistory(screenName) {
     case 'profit':
       initializeProfitDashboard();
       break;
+    case 'accounting':
+      initializeAccountingPage();
+      break;
     case 'expenses':
       initializeExpensesDashboard();
       break;
@@ -1369,6 +1373,10 @@ function showScreen(screenName, parentScreen = null) {
       if (!confirmed) return;
     }
     flushShiftDraftAutoSave();
+  }
+
+  if (currentScreen === 'accounting' && screenName !== 'accounting') {
+    flushAccountingDraftAutoSave();
   }
 
   // Update global parent screen tracker
@@ -3430,8 +3438,7 @@ async function loadHomeChart() {
         const shiftFuelSales = shiftFuelSalesResult.status === 'fulfilled' && Array.isArray(shiftFuelSalesResult.value) ? shiftFuelSalesResult.value : [];
         fallbackData = [...sales, ...shiftFuelSales];
       } else {
-        const movements = await ipcRenderer.invoke('get-fuel-movements');
-        fallbackData = Array.isArray(movements) ? movements.filter(movement => movement.type === 'in') : [];
+        fallbackData = [];
       }
       createMonthlyFuelSalesChart(fallbackData, currentHomeChartMode);
     } catch (fallbackError) {
@@ -4294,7 +4301,9 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   // Group entries by month and fuel type
   const monthlyData = {};
   const salesDaysByMonth = {};
-  const fuelTypes = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
+  const fuelTypes = mode === HOME_CHART_MODE.PURCHASES
+    ? ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار']
+    : ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
   const colors = [
     '#FF6384',
     '#36A2EB',
@@ -9798,6 +9807,22 @@ let profitDefaultRange = null;
 let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
 let profitLoadRequestId = 0;
+const ACCOUNTING_AUTOSAVE_DELAY_MS = SHIFT_DRAFT_AUTOSAVE_DELAY_MS;
+let accountingState = {
+  monthKey: '',
+  data: null,
+  isFinal: false,
+  editMode: false,
+  dirty: false,
+  loading: false,
+  fuelProducts: [],
+  fuelProductsLoadingPromise: null,
+  fuelPriceCache: new Map(),
+  autoSaveTimer: null,
+  autoSaveInFlight: false,
+  autoSaveQueued: false,
+  initialized: false
+};
 let expenseEntriesCache = [];
 let expenseDefaultRange = null;
 let expenseFilterDebounceTimer = null;
@@ -10425,12 +10450,7 @@ const PROFIT_TABLE_ROWS = [
   { key: 'fuel_95', label: 'بنزين ٩٥', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'oil_total', label: 'الزيوت', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
   { key: 'wash_lube_month', label: 'غسيل و تشحيم', type: 'auto', section: 'revenue', cellClass: 'positive-col auto-col' },
-  { key: 'bonuses', label: 'حوافز', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
-  { key: 'commission_diff', label: 'فرق العمولة', type: 'manual-fixed', section: 'revenue', cellClass: 'positive-col' },
-  { key: 'expenses_month', label: 'المصاريف', type: 'auto', section: 'deduction', cellClass: 'deduction-col auto-col' },
-  { key: 'cash_insurance_month', label: 'تأمين نقدى', type: 'auto', section: 'deduction', cellClass: 'deduction-col auto-col' },
-  { key: 'deposit_tax', label: 'ضريبة المنبع', type: 'manual-fixed', section: 'deduction', cellClass: 'deduction-col' },
-  { key: 'bonus_tax', label: 'ضرائب الحافز', type: 'manual-fixed', section: 'deduction', cellClass: 'deduction-col' }
+  { key: 'expenses_month', label: 'المصاريف', type: 'auto', section: 'deduction', cellClass: 'deduction-col auto-col', rowClass: 'profit-deduction-start-row' }
 ];
 
 // Default summary date range (current year to date)
@@ -10789,6 +10809,826 @@ function getDefaultProfitRange(availableMonths) {
   return { fromMonth, toMonth };
 }
 
+function setAccountingSaveStatus(state = 'idle', customMessage = '') {
+  const statusEl = document.getElementById('accounting-save-status');
+  if (!statusEl) return;
+
+  const messages = {
+    idle: 'جاهز',
+    loading: 'جاري التحميل...',
+    dirty: 'تغييرات غير محفوظة',
+    saving: 'جاري الحفظ...',
+    draftSaved: 'تم حفظ المسودة',
+    saved: 'تم الحفظ النهائي',
+    readonly: 'محفوظ نهائياً',
+    edit: 'وضع التعديل',
+    error: 'تعذر الحفظ'
+  };
+
+  const statusClass = state === 'loading'
+    ? 'status-loading'
+    : (state === 'draftSaved' ? 'saved' : (state || 'idle'));
+  statusEl.classList.remove('idle', 'status-loading', 'dirty', 'saving', 'saved', 'readonly', 'edit', 'error');
+  statusEl.classList.add(statusClass);
+  statusEl.textContent = customMessage || messages[state] || messages.idle;
+}
+
+function shiftAccountingMonthKey(monthKey, offset) {
+  const normalized = normalizeMonthKey(monthKey);
+  if (!normalized) return getCurrentMonthKey();
+  const [year, month] = normalized.split('-').map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getAccountingReadOnly() {
+  return accountingState.isFinal && !accountingState.editMode;
+}
+
+function isAccountingRowFilled(row) {
+  return Boolean(String(row?.label || '').trim()) || Math.abs(parseAnnualInventoryValue(row?.amount)) > 0.0001;
+}
+
+function normalizeAccountingRowsForRender(rows = [], editable = true) {
+  const renderedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+    label: String(row?.label || '').trim(),
+    amount: row?.amount === '' ? '' : parseAnnualInventoryValue(row?.amount),
+    fixed: row?.fixed === true,
+    auto: row?.auto === true
+  }));
+
+  if (editable) {
+    const lastRow = renderedRows[renderedRows.length - 1];
+    if (!lastRow || lastRow.fixed || isAccountingRowFilled(lastRow)) {
+      renderedRows.push({ label: '', amount: '', fixed: false, auto: false, blank: true });
+    }
+  }
+
+  return renderedRows;
+}
+
+function renderAccountingSide(side, rows) {
+  const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
+  if (!tbody) return;
+
+  const readOnly = getAccountingReadOnly();
+  const renderedRows = normalizeAccountingRowsForRender(rows, !readOnly);
+
+  tbody.innerHTML = renderedRows.map((row, index) => {
+    const rowId = `${side}-${index}`;
+    const labelReadonly = row.fixed || readOnly ? 'readonly' : '';
+    const isPreviousIncreaseRow = row.auto === true && String(row.label || '').trim().startsWith('زيادة محاسبة شهر');
+    const amountReadonly = (row.auto && !isPreviousIncreaseRow) || readOnly ? 'readonly' : '';
+    const disabled = readOnly ? 'disabled' : '';
+    const numericAmount = parseAnnualInventoryValue(row.amount);
+    const amountValue = row.amount === '' || Math.abs(numericAmount) < 0.0001
+      ? ''
+      : formatArabicNumberFixed(numericAmount);
+
+    return `
+      <tr data-accounting-side="${escapeHtml(side)}" data-accounting-index="${index}">
+        <td>
+          <input
+            type="text"
+            class="accounting-row-label"
+            data-accounting-field="label"
+            data-accounting-side="${escapeHtml(side)}"
+            data-accounting-row="${escapeHtml(rowId)}"
+            value="${escapeHtml(row.label)}"
+            placeholder="بيان"
+            ${labelReadonly}
+            ${disabled}
+          >
+        </td>
+        <td>
+          <input
+            type="text"
+            class="accounting-row-amount"
+            data-accounting-field="amount"
+            data-accounting-side="${escapeHtml(side)}"
+            data-accounting-row="${escapeHtml(rowId)}"
+            value="${escapeHtml(amountValue)}"
+            inputmode="decimal"
+            placeholder="٠"
+            ${amountReadonly}
+            ${disabled}
+          >
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function appendAccountingBlankRow(side) {
+  const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
+  if (!tbody || getAccountingReadOnly()) return;
+
+  const index = tbody.querySelectorAll('tr').length;
+  const rowId = `${side}-${index}`;
+  tbody.insertAdjacentHTML('beforeend', `
+    <tr data-accounting-side="${escapeHtml(side)}" data-accounting-index="${index}">
+      <td>
+        <input
+          type="text"
+          class="accounting-row-label"
+          data-accounting-field="label"
+          data-accounting-side="${escapeHtml(side)}"
+          data-accounting-row="${escapeHtml(rowId)}"
+          value=""
+          placeholder="بيان"
+        >
+      </td>
+      <td>
+        <input
+          type="text"
+          class="accounting-row-amount"
+          data-accounting-field="amount"
+          data-accounting-side="${escapeHtml(side)}"
+          data-accounting-row="${escapeHtml(rowId)}"
+          value=""
+          inputmode="decimal"
+          placeholder="٠"
+        >
+      </td>
+    </tr>
+  `);
+}
+
+function collectAccountingSideRows(side) {
+  const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
+  if (!tbody) return [];
+
+  return Array.from(tbody.querySelectorAll('tr')).map((row) => {
+    const labelInput = row.querySelector('[data-accounting-field="label"]');
+    const amountInput = row.querySelector('[data-accounting-field="amount"]');
+    const label = String(labelInput?.value || '').trim();
+    return {
+      label,
+      amount: parseAnnualInventoryValue(amountInput?.value),
+      fixed: labelInput?.readOnly === true,
+      auto: amountInput?.readOnly === true && label.includes('زيادة محاسبة شهر')
+    };
+  }).filter((row) => isAccountingRowFilled(row));
+}
+
+function getAccountingFuelDefaultDate() {
+  const monthKey = normalizeMonthKey(accountingState.monthKey) || getCurrentMonthKey();
+  return `${monthKey}-01`;
+}
+
+function getAccountingMonthBounds() {
+  const monthKey = normalizeMonthKey(accountingState.monthKey) || getCurrentMonthKey();
+  const [year, month] = monthKey.split('-').map(Number);
+  const endDate = new Date(year, month, 0);
+  return {
+    min: `${monthKey}-01`,
+    max: `${year}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
+  };
+}
+
+function isAccountingFuelRowFilled(row = {}) {
+  return Math.abs(parseAnnualInventoryValue(row.quantity)) > 0.0001;
+}
+
+function getAccountingFuelRowTotal(row = {}) {
+  const quantity = parseAnnualInventoryValue(row.quantity);
+  const fuelType = String(row.fuel_type || '').trim();
+  const netQuantity = fuelType.includes('بنزين') ? quantity * 0.995 : quantity;
+  return netQuantity * parseAnnualInventoryValue(row.purchase_price);
+}
+
+async function ensureAccountingFuelProducts() {
+  if (Array.isArray(accountingState.fuelProducts) && accountingState.fuelProducts.length > 0) {
+    return accountingState.fuelProducts;
+  }
+  if (accountingState.fuelProductsLoadingPromise) {
+    return accountingState.fuelProductsLoadingPromise;
+  }
+
+  accountingState.fuelProductsLoadingPromise = invokeCached('get-fuel-prices', {}, { ttlMs: 30_000 })
+    .then((rows) => {
+      accountingState.fuelProducts = normalizeInvoiceFuelProducts(rows);
+      return accountingState.fuelProducts;
+    })
+    .catch((error) => {
+      console.warn('Unable to load accounting fuel products:', error);
+      accountingState.fuelProducts = normalizeInvoiceFuelProducts([]);
+      return accountingState.fuelProducts;
+    })
+    .finally(() => {
+      accountingState.fuelProductsLoadingPromise = null;
+    });
+
+  return accountingState.fuelProductsLoadingPromise;
+}
+
+async function getAccountingPurchasePricesByDate(date) {
+  const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())
+    ? String(date).trim()
+    : getAccountingFuelDefaultDate();
+  if (accountingState.fuelPriceCache.has(requestedDate)) {
+    return accountingState.fuelPriceCache.get(requestedDate);
+  }
+
+  const promise = invokeCached('get-purchase-prices-by-date', { date: requestedDate }, { ttlMs: 30_000 })
+    .then((rows) => Array.isArray(rows) ? rows : [])
+    .catch((error) => {
+      console.warn('Unable to load accounting fuel prices by date:', error);
+      return [];
+    });
+  accountingState.fuelPriceCache.set(requestedDate, promise);
+  return promise;
+}
+
+function getAccountingFuelOptions(selectedCode = '', selectedFuel = '') {
+  const selectedKey = String(selectedCode || selectedFuel || '').trim();
+  const options = ['<option value="">اختر الوقود</option>'];
+  (accountingState.fuelProducts || []).forEach((product) => {
+    const value = product.product_code || product.fuel_type;
+    const selected = selectedKey && (selectedKey === product.product_code || selectedKey === product.fuel_type) ? 'selected' : '';
+    options.push(`<option value="${escapeHtml(value)}" data-fuel-name="${escapeHtml(product.fuel_type)}" data-product-code="${escapeHtml(product.product_code || '')}" ${selected}>${escapeHtml(product.fuel_type)}</option>`);
+  });
+  if (selectedFuel && !options.some((option) => option.includes(`>${escapeHtml(selectedFuel)}</option>`))) {
+    options.push(`<option value="${escapeHtml(selectedFuel)}" data-fuel-name="${escapeHtml(selectedFuel)}" selected>${escapeHtml(selectedFuel)}</option>`);
+  }
+  return options.join('');
+}
+
+function getAccountingFuelRowKey(row = {}) {
+  return String(row.product_code || row.fuel_type || row.product_name || '').trim();
+}
+
+function buildAccountingFuelRowsForRender(rows = []) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const consumedIndexes = new Set();
+  const renderedRows = (accountingState.fuelProducts || []).map((product) => {
+    const productCode = String(product.product_code || '').trim();
+    const productFuelType = String(product.fuel_type || '').trim();
+    const sourceIndex = sourceRows.findIndex((row, index) => (
+      !consumedIndexes.has(index)
+      && (
+        (productCode && String(row?.product_code || '').trim() === productCode)
+        || (productFuelType && String(row?.fuel_type || row?.product_name || '').trim() === productFuelType)
+      )
+    ));
+    if (sourceIndex >= 0) {
+      consumedIndexes.add(sourceIndex);
+      return { ...sourceRows[sourceIndex], base: true };
+    }
+    return {
+      date: getAccountingFuelDefaultDate(),
+      product_code: product.product_code || null,
+      fuel_type: product.fuel_type,
+      quantity: '',
+      purchase_price: '',
+      base: true
+    };
+  });
+
+  sourceRows.forEach((row, index) => {
+    if (!consumedIndexes.has(index)) {
+      renderedRows.push({ ...row, base: false });
+    }
+  });
+
+  return renderedRows.length > 0
+    ? renderedRows
+    : [{ date: getAccountingFuelDefaultDate(), product_code: '', fuel_type: '', quantity: '', purchase_price: '', base: false }];
+}
+
+function renderAccountingFuelRows(rows = []) {
+  const container = document.getElementById('accounting-fuel-rows');
+  if (!container) return;
+
+  const readOnly = getAccountingReadOnly();
+  const renderedRows = buildAccountingFuelRowsForRender(rows);
+  const bounds = getAccountingMonthBounds();
+
+  container.innerHTML = renderedRows.map((row, index) => {
+    const quantity = parseAnnualInventoryValue(row?.quantity);
+    const purchasePrice = parseAnnualInventoryValue(row?.purchase_price);
+    const total = getAccountingFuelRowTotal({
+      fuel_type: row?.fuel_type,
+      quantity,
+      purchase_price: purchasePrice
+    });
+    const disabled = readOnly ? 'disabled' : '';
+    const removable = row?.base !== true;
+    const removeCell = removable
+      ? `<button type="button" class="accounting-fuel-remove" title="حذف الصف" aria-label="حذف الصف" ${disabled}>×</button>`
+      : '<span class="accounting-fuel-remove-placeholder" aria-hidden="true"></span>';
+    return `
+      <div class="accounting-fuel-table accounting-fuel-row" data-accounting-fuel-index="${index}" data-accounting-fuel-base="${row?.base === true ? '1' : '0'}">
+        <input type="date" class="accounting-fuel-input accounting-fuel-date" value="${escapeHtml(row?.date || getAccountingFuelDefaultDate())}" min="${escapeHtml(bounds.min)}" max="${escapeHtml(bounds.max)}" ${disabled}>
+        <select class="accounting-fuel-select" ${disabled}>
+          ${getAccountingFuelOptions(row?.product_code, row?.fuel_type)}
+        </select>
+        <input type="text" class="accounting-fuel-input accounting-fuel-quantity" inputmode="decimal" placeholder="الكمية" value="${quantity > 0 ? escapeHtml(formatArabicNumberFixed(quantity)) : ''}" ${disabled}>
+        <input type="text" class="accounting-fuel-input accounting-fuel-price" inputmode="decimal" placeholder="سعر الشراء" value="${purchasePrice > 0 ? escapeHtml(formatEditablePricePreserveDecimals(purchasePrice)) : ''}" readonly ${disabled}>
+        <input type="text" class="accounting-fuel-input accounting-fuel-total" placeholder="الإجمالي" value="${total > 0 ? escapeHtml(formatArabicNumberFixed(total)) : ''}" readonly disabled>
+        ${removeCell}
+      </div>
+    `;
+  }).join('');
+
+  calculateAccountingFuelTotals();
+  updateAccountingModeControls();
+  if (!readOnly) {
+    prefillAccountingFuelPricesForBaseRows();
+  }
+}
+
+function collectAccountingFuelRows(options = {}) {
+  const container = document.getElementById('accounting-fuel-rows');
+  if (!container) return [];
+  const includeEmpty = options.includeEmpty === true;
+
+  return Array.from(container.querySelectorAll('.accounting-fuel-row')).map((row) => {
+    const select = row.querySelector('.accounting-fuel-select');
+    const selected = select?.selectedOptions?.[0];
+    const fuelType = String(selected?.dataset?.fuelName || select?.value || '').trim();
+    const productCode = String(selected?.dataset?.productCode || '').trim();
+    const quantity = parseAnnualInventoryValue(row.querySelector('.accounting-fuel-quantity')?.value);
+    const purchasePrice = parseAnnualInventoryValue(row.querySelector('.accounting-fuel-price')?.value);
+    return {
+      date: row.querySelector('.accounting-fuel-date')?.value || '',
+      product_code: productCode || null,
+      fuel_type: fuelType,
+      quantity,
+      purchase_price: purchasePrice,
+      total: getAccountingFuelRowTotal({ fuel_type: fuelType, quantity, purchase_price: purchasePrice }),
+      base: row.dataset.accountingFuelBase === '1'
+    };
+  }).filter((row) => includeEmpty || isAccountingFuelRowFilled(row));
+}
+
+function getAccountingFuelWithdrawalAmountFromPage() {
+  return collectAccountingSideRows('debit')
+    .filter((row) => row.label === 'جملة مسحوبات المواد البترولية')
+    .reduce((sum, row) => sum + parseAnnualInventoryValue(row.amount), 0);
+}
+
+function calculateAccountingFuelTotals() {
+  const fuelRows = collectAccountingFuelRows();
+  const fuelPurchaseTotal = fuelRows.reduce((sum, row) => sum + getAccountingFuelRowTotal(row), 0);
+  const cashInsurance = getAccountingFuelWithdrawalAmountFromPage() - fuelPurchaseTotal;
+
+  const fuelTotalEl = document.getElementById('accounting-fuel-purchase-total');
+  const cashInsuranceEl = document.getElementById('accounting-cash-insurance-total');
+  if (fuelTotalEl) fuelTotalEl.textContent = formatArabicCurrency(fuelPurchaseTotal);
+  if (cashInsuranceEl) cashInsuranceEl.textContent = formatArabicCurrency(cashInsurance);
+}
+
+function calculateAccountingFuelRow(rowElement) {
+  if (!rowElement) return;
+  const quantity = parseAnnualInventoryValue(rowElement.querySelector('.accounting-fuel-quantity')?.value);
+  const purchasePrice = parseAnnualInventoryValue(rowElement.querySelector('.accounting-fuel-price')?.value);
+  const select = rowElement.querySelector('.accounting-fuel-select');
+  const selected = select?.selectedOptions?.[0];
+  const fuelType = String(selected?.dataset?.fuelName || select?.value || '').trim();
+  const totalInput = rowElement.querySelector('.accounting-fuel-total');
+  const total = getAccountingFuelRowTotal({ fuel_type: fuelType, quantity, purchase_price: purchasePrice });
+  if (totalInput) totalInput.value = total > 0 ? formatArabicNumberFixed(total) : '';
+  calculateAccountingFuelTotals();
+}
+
+async function prefillAccountingFuelPrice(rowElement, options = {}) {
+  if (!rowElement || getAccountingReadOnly()) return;
+  const markDirty = options.markDirty !== false;
+  const date = rowElement.querySelector('.accounting-fuel-date')?.value || getAccountingFuelDefaultDate();
+  const select = rowElement.querySelector('.accounting-fuel-select');
+  const selected = select?.selectedOptions?.[0];
+  const productCode = String(selected?.dataset?.productCode || '').trim();
+  const fuelType = String(selected?.dataset?.fuelName || select?.value || '').trim();
+  if (!fuelType && !productCode) return;
+
+  const prices = await getAccountingPurchasePricesByDate(date);
+  const match = prices.find((item) => (
+    (productCode && String(item?.product_code || '').trim() === productCode)
+    || String(item?.fuel_type || '').trim() === fuelType
+  ));
+  const price = parseFloat(match?.price);
+  if (!Number.isFinite(price) || price <= 0) return;
+
+  const priceInput = rowElement.querySelector('.accounting-fuel-price');
+  if (priceInput) {
+    priceInput.value = formatEditablePricePreserveDecimals(price);
+    calculateAccountingFuelRow(rowElement);
+    if (markDirty) markAccountingChanged();
+  }
+}
+
+async function prefillAccountingFuelPricesForBaseRows() {
+  const container = document.getElementById('accounting-fuel-rows');
+  if (!container) return;
+  const rows = Array.from(container.querySelectorAll('.accounting-fuel-row[data-accounting-fuel-base="1"]'));
+  for (const row of rows) {
+    const priceInput = row.querySelector('.accounting-fuel-price');
+    if (String(priceInput?.value || '').trim()) continue;
+    await prefillAccountingFuelPrice(row, { markDirty: false });
+  }
+}
+
+function markAccountingChanged() {
+  if (accountingState.editMode) {
+    accountingState.dirty = true;
+    setAccountingSaveStatus('dirty');
+  } else {
+    scheduleAccountingDraftAutosave();
+  }
+}
+
+function collectAccountingDocumentFromPage() {
+  return {
+    month_key: accountingState.monthKey,
+    debit_rows: collectAccountingSideRows('debit'),
+    credit_rows: collectAccountingSideRows('credit'),
+    fuel_purchase_rows: collectAccountingFuelRows()
+  };
+}
+
+function calculateAccountingPageTotals() {
+  const data = collectAccountingDocumentFromPage();
+  const debitTotal = data.debit_rows.reduce((sum, row) => sum + parseAnnualInventoryValue(row.amount), 0);
+  const creditTotal = data.credit_rows.reduce((sum, row) => sum + parseAnnualInventoryValue(row.amount), 0);
+  const increase = creditTotal - debitTotal;
+
+  const debitEl = document.getElementById('accounting-debit-total');
+  const creditEl = document.getElementById('accounting-credit-total');
+  const increaseEl = document.getElementById('accounting-increase-total');
+
+  if (debitEl) debitEl.textContent = formatArabicCurrency(debitTotal);
+  if (creditEl) creditEl.textContent = formatArabicCurrency(creditTotal);
+  if (increaseEl) increaseEl.textContent = formatArabicCurrency(increase);
+  calculateAccountingFuelTotals();
+}
+
+function renderAccountingDocument(documentRecord) {
+  const record = documentRecord || {};
+  const data = record.data || record.active_data || {
+    month_key: accountingState.monthKey,
+    debit_rows: [],
+    credit_rows: []
+  };
+
+  accountingState.monthKey = normalizeMonthKey(record.month_key || data.month_key) || accountingState.monthKey;
+  accountingState.data = data;
+  accountingState.isFinal = record.is_final === true || record.is_final === 1;
+  accountingState.editMode = false;
+  accountingState.dirty = false;
+
+  const monthInput = document.getElementById('accounting-month-input');
+  if (monthInput) monthInput.value = accountingState.monthKey;
+
+  renderAccountingSide('debit', data.debit_rows);
+  renderAccountingSide('credit', data.credit_rows);
+  renderAccountingFuelRows(data.fuel_purchase_rows);
+  calculateAccountingPageTotals();
+  updateAccountingModeControls();
+  setAccountingSaveStatus(accountingState.isFinal ? 'readonly' : 'idle');
+}
+
+function updateAccountingModeControls() {
+  const editBtn = document.getElementById('accounting-edit-btn');
+  const saveBtn = document.getElementById('accounting-save-btn');
+  const monthInput = document.getElementById('accounting-month-input');
+  const prevBtn = document.getElementById('accounting-prev-month');
+  const nextBtn = document.getElementById('accounting-next-month');
+  const readOnly = getAccountingReadOnly();
+
+  if (editBtn) editBtn.style.display = accountingState.isFinal && !accountingState.editMode ? '' : 'none';
+  if (saveBtn) saveBtn.style.display = accountingState.isFinal && !accountingState.editMode ? 'none' : '';
+  if (monthInput) monthInput.disabled = accountingState.loading;
+  if (prevBtn) prevBtn.disabled = accountingState.loading;
+  if (nextBtn) nextBtn.disabled = accountingState.loading;
+
+  document.querySelectorAll('.accounting-row-label, .accounting-row-amount, .accounting-fuel-input, .accounting-fuel-select').forEach((input) => {
+    input.disabled = readOnly || accountingState.loading;
+  });
+  document.querySelectorAll('.accounting-fuel-remove, #accounting-add-fuel-row').forEach((button) => {
+    button.disabled = readOnly || accountingState.loading;
+  });
+}
+
+async function loadAccountingMonth(monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return;
+
+  accountingState.loading = true;
+  setAccountingSaveStatus('loading');
+  const loadingEl = document.getElementById('accounting-loading');
+  const gridEl = document.getElementById('accounting-ledger-grid');
+  if (loadingEl) loadingEl.style.display = '';
+  if (gridEl) gridEl.style.opacity = '0.55';
+  updateAccountingModeControls();
+
+  try {
+    await ensureAccountingFuelProducts();
+    const record = await ipcRenderer.invoke('get-monthly-accounting-document', {
+      month_key: normalizedMonth
+    });
+    renderAccountingDocument(record);
+  } catch (error) {
+    console.error('Error loading monthly accounting document:', error);
+    showMessage('حدث خطأ أثناء تحميل المحاسبة الشهرية', 'error');
+    setAccountingSaveStatus('error', 'خطأ في التحميل');
+  } finally {
+    accountingState.loading = false;
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (gridEl) gridEl.style.opacity = '1';
+    updateAccountingModeControls();
+  }
+}
+
+async function initializeAccountingPage() {
+  bindAccountingEvents();
+
+  if (!accountingState.monthKey) {
+    setAccountingSaveStatus('loading');
+    try {
+      const defaultMonth = await ipcRenderer.invoke('get-accounting-default-month');
+      accountingState.monthKey = normalizeMonthKey(defaultMonth) || getCurrentMonthKey();
+    } catch (error) {
+      console.error('Error getting default accounting month:', error);
+      accountingState.monthKey = getCurrentMonthKey();
+    }
+  }
+
+  await loadAccountingMonth(accountingState.monthKey);
+}
+
+function scheduleAccountingDraftAutosave() {
+  if (accountingState.isFinal || accountingState.editMode || accountingState.loading) return;
+
+  accountingState.dirty = true;
+  setAccountingSaveStatus('dirty');
+  if (accountingState.autoSaveTimer) {
+    clearTimeout(accountingState.autoSaveTimer);
+  }
+  accountingState.autoSaveTimer = setTimeout(() => {
+    persistAccountingDraft();
+  }, ACCOUNTING_AUTOSAVE_DELAY_MS);
+}
+
+async function persistAccountingDraft() {
+  if (accountingState.isFinal || accountingState.editMode || !accountingState.dirty) return null;
+
+  if (accountingState.autoSaveInFlight) {
+    accountingState.autoSaveQueued = true;
+    return accountingState.autoSavePromise;
+  }
+
+  accountingState.autoSaveInFlight = true;
+  accountingState.autoSaveQueued = false;
+  setAccountingSaveStatus('saving', 'جاري حفظ المسودة...');
+
+  const payload = {
+    month_key: accountingState.monthKey,
+    data: collectAccountingDocumentFromPage()
+  };
+
+  accountingState.autoSavePromise = ipcRenderer.invoke('save-monthly-accounting-draft', payload)
+    .then((record) => {
+      accountingState.dirty = false;
+      accountingState.data = record?.data || payload.data;
+      setAccountingSaveStatus('draftSaved');
+      setTimeout(() => {
+        if (!accountingState.dirty && !accountingState.isFinal && !accountingState.editMode) {
+          setAccountingSaveStatus('idle');
+        }
+      }, 1200);
+      return record;
+    })
+    .catch((error) => {
+      console.error('Error saving accounting draft:', error);
+      setAccountingSaveStatus('error', 'تعذر حفظ المسودة');
+      throw error;
+    })
+    .finally(() => {
+      accountingState.autoSaveInFlight = false;
+      accountingState.autoSavePromise = null;
+      if (accountingState.autoSaveQueued) {
+        accountingState.autoSaveQueued = false;
+        persistAccountingDraft();
+      }
+    });
+
+  return accountingState.autoSavePromise;
+}
+
+async function flushAccountingDraftAutoSave() {
+  if (accountingState.autoSaveTimer) {
+    clearTimeout(accountingState.autoSaveTimer);
+    accountingState.autoSaveTimer = null;
+  }
+  if (!accountingState.isFinal && !accountingState.editMode && accountingState.dirty) {
+    try {
+      await persistAccountingDraft();
+    } catch (_error) {
+      // The visible status already reports the save error.
+    }
+  } else if (accountingState.autoSavePromise) {
+    try {
+      await accountingState.autoSavePromise;
+    } catch (_error) {
+      // The visible status already reports the save error.
+    }
+  }
+}
+
+async function saveAccountingDocument() {
+  const saveBtn = document.getElementById('accounting-save-btn');
+  if (saveBtn) saveBtn.disabled = true;
+
+  if (accountingState.autoSaveTimer) {
+    clearTimeout(accountingState.autoSaveTimer);
+    accountingState.autoSaveTimer = null;
+  }
+  setAccountingSaveStatus('saving');
+
+  try {
+    const record = await ipcRenderer.invoke('finalize-monthly-accounting-document', {
+      month_key: accountingState.monthKey,
+      data: collectAccountingDocumentFromPage()
+    });
+    renderAccountingDocument(record);
+    setAccountingSaveStatus('saved');
+    invalidateViewDataCaches();
+    profitDefaultRange = null;
+    if (currentScreen === 'profit') {
+      await initializeProfitDashboard();
+    }
+    const cascadeCount = parseInt(record?.cascade?.updated_count, 10) || 0;
+    showMessage(
+      cascadeCount > 0
+        ? `تم حفظ المحاسبة الشهرية وتحديث ${formatArabicNumber(cascadeCount)} شهر لاحق`
+        : 'تم حفظ المحاسبة الشهرية',
+      'success'
+    );
+  } catch (error) {
+    console.error('Error finalizing accounting document:', error);
+    showMessage(error?.message || 'تعذر حفظ المحاسبة الشهرية', 'error');
+    setAccountingSaveStatus('error');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+function enableAccountingFinalEdit() {
+  if (!accountingState.isFinal) return;
+  accountingState.editMode = true;
+  accountingState.dirty = false;
+  const data = accountingState.data || collectAccountingDocumentFromPage();
+  renderAccountingSide('debit', data.debit_rows || []);
+  renderAccountingSide('credit', data.credit_rows || []);
+  renderAccountingFuelRows(data.fuel_purchase_rows || []);
+  calculateAccountingPageTotals();
+  updateAccountingModeControls();
+  setAccountingSaveStatus('edit');
+}
+
+async function changeAccountingMonth(offset) {
+  const targetMonth = shiftAccountingMonthKey(accountingState.monthKey, offset);
+  await flushAccountingDraftAutoSave();
+  accountingState.monthKey = targetMonth;
+  await loadAccountingMonth(targetMonth);
+}
+
+function handleAccountingInput(event) {
+  const target = event.target;
+  if (
+    target?.classList?.contains('accounting-fuel-quantity')
+    || target?.classList?.contains('accounting-fuel-price')
+  ) {
+    if (getAccountingReadOnly() || accountingState.loading) return;
+    calculateAccountingFuelRow(target.closest('.accounting-fuel-row'));
+    markAccountingChanged();
+    return;
+  }
+
+  if (!target?.classList?.contains('accounting-row-label') && !target?.classList?.contains('accounting-row-amount')) {
+    return;
+  }
+  if (getAccountingReadOnly() || accountingState.loading) return;
+
+  calculateAccountingPageTotals();
+  const side = target.dataset.accountingSide;
+  const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
+  const rows = Array.from(tbody?.querySelectorAll('tr') || []);
+  const lastRow = rows[rows.length - 1];
+  if (lastRow && lastRow.contains(target)) {
+    const labelInput = lastRow.querySelector('[data-accounting-field="label"]');
+    const amountInput = lastRow.querySelector('[data-accounting-field="amount"]');
+    if (isAccountingRowFilled({
+      label: labelInput?.value,
+      amount: amountInput?.value
+    })) {
+      appendAccountingBlankRow(side);
+    }
+    calculateAccountingPageTotals();
+  }
+
+  markAccountingChanged();
+}
+
+async function handleAccountingChange(event) {
+  const target = event.target;
+  if (
+    !target?.classList?.contains('accounting-fuel-date')
+    && !target?.classList?.contains('accounting-fuel-select')
+  ) {
+    return;
+  }
+  if (getAccountingReadOnly() || accountingState.loading) return;
+
+  const row = target.closest('.accounting-fuel-row');
+  await prefillAccountingFuelPrice(row);
+  calculateAccountingFuelRow(row);
+  markAccountingChanged();
+}
+
+function addAccountingFuelRow() {
+  if (getAccountingReadOnly() || accountingState.loading) return;
+  const rows = collectAccountingFuelRows({ includeEmpty: true });
+  rows.push({
+    date: getAccountingFuelDefaultDate(),
+    product_code: '',
+    fuel_type: '',
+    quantity: '',
+    purchase_price: ''
+  });
+  renderAccountingFuelRows(rows);
+  markAccountingChanged();
+}
+
+function removeAccountingFuelRow(rowElement) {
+  if (!rowElement || getAccountingReadOnly() || accountingState.loading) return;
+  rowElement.remove();
+  if (collectAccountingFuelRows().length === 0) {
+    renderAccountingFuelRows([]);
+  }
+  calculateAccountingFuelTotals();
+  markAccountingChanged();
+}
+
+function handleAccountingClick(event) {
+  const target = event.target;
+  if (target?.id === 'accounting-add-fuel-row') {
+    addAccountingFuelRow();
+    return;
+  }
+  if (target?.classList?.contains('accounting-fuel-remove')) {
+    removeAccountingFuelRow(target.closest('.accounting-fuel-row'));
+  }
+}
+
+function handleAccountingFocusOut(event) {
+  const target = event.target;
+  if (!target?.classList?.contains('accounting-row-amount')) return;
+  if (String(target.value || '').trim()) {
+    target.value = formatArabicNumberFixed(parseAnnualInventoryValue(target.value));
+  }
+  calculateAccountingPageTotals();
+}
+
+function bindAccountingEvents() {
+  if (accountingState.initialized) return;
+
+  const prevBtn = document.getElementById('accounting-prev-month');
+  const nextBtn = document.getElementById('accounting-next-month');
+  const monthInput = document.getElementById('accounting-month-input');
+  const editBtn = document.getElementById('accounting-edit-btn');
+  const saveBtn = document.getElementById('accounting-save-btn');
+  const page = document.getElementById('accounting-screen');
+
+  if (prevBtn) prevBtn.addEventListener('click', () => changeAccountingMonth(-1));
+  if (nextBtn) nextBtn.addEventListener('click', () => changeAccountingMonth(1));
+  if (monthInput) {
+    monthInput.addEventListener('change', async () => {
+      const monthKey = normalizeMonthKey(monthInput.value);
+      if (!monthKey) return;
+      await flushAccountingDraftAutoSave();
+      accountingState.monthKey = monthKey;
+      await loadAccountingMonth(monthKey);
+    });
+  }
+  if (editBtn) editBtn.addEventListener('click', enableAccountingFinalEdit);
+  if (saveBtn) saveBtn.addEventListener('click', saveAccountingDocument);
+  if (page) {
+    page.addEventListener('input', handleAccountingInput);
+    page.addEventListener('change', handleAccountingChange);
+    page.addEventListener('click', handleAccountingClick);
+    page.addEventListener('focusout', handleAccountingFocusOut);
+    page.addEventListener('focusin', (event) => {
+      if (event.target?.classList?.contains('accounting-row-amount')) {
+        event.target.select();
+      }
+    });
+  }
+
+  accountingState.initialized = true;
+}
+
 function formatProfitMonthLabel(monthKey) {
   const normalized = normalizeMonthKey(monthKey);
   if (!normalized) return '-';
@@ -10816,7 +11656,8 @@ function normalizeProfitCustomRow(row) {
     row_key: rowKey,
     row_type: rowType,
     row_label: rowLabelRaw || defaultLabel,
-    display_order: parseInt(row.display_order, 10) || 0
+    display_order: parseInt(row.display_order, 10) || 0,
+    source: String(row.source || '').trim() === 'monthly_accounting' ? 'monthly_accounting' : 'monthly_profit'
   };
 }
 
@@ -10870,8 +11711,8 @@ function recalculateProfitDerivedValues(row, customTotals = { revenue: 0, deduct
   row.custom_deduction_total = parseAnnualInventoryValue(customTotals.deduction);
 
   row.fuel_total_month = row.fuel_diesel + row.fuel_80 + row.fuel_92 + row.fuel_95;
-  row.total_positive = row.fuel_total_month + row.oil_total + row.wash_lube_month + row.bonuses + row.commission_diff + row.custom_revenue_total;
-  row.total_deductions = row.cash_insurance_month + row.expenses_month + row.deposit_tax + row.bonus_tax + row.custom_deduction_total;
+  row.total_positive = row.fuel_total_month + row.oil_total + row.wash_lube_month + row.custom_revenue_total;
+  row.total_deductions = row.expenses_month + row.custom_deduction_total;
   row.net_profit = row.total_positive - row.total_deductions;
   return row;
 }
@@ -10887,7 +11728,12 @@ function rebuildProfitRowsWithCustomTotals() {
 function getSortedProfitCustomRowsByType(rowType) {
   return profitCustomRowsCache
     .filter((row) => row.row_type === rowType)
-    .sort((a, b) => (a.display_order - b.display_order) || a.row_key.localeCompare(b.row_key));
+    .sort((a, b) => {
+      const aAccounting = a.source === 'monthly_accounting';
+      const bAccounting = b.source === 'monthly_accounting';
+      if (aAccounting !== bAccounting) return aAccounting ? 1 : -1;
+      return (a.display_order - b.display_order) || a.row_key.localeCompare(b.row_key);
+    });
 }
 
 function buildProfitDisplayRows() {
@@ -10897,19 +11743,31 @@ function buildProfitDisplayRows() {
   const customRevenueRows = getSortedProfitCustomRowsByType('revenue').map((row) => ({
     key: row.row_key,
     label: row.row_label,
-    type: 'custom',
+    type: row.source === 'monthly_accounting' ? 'accounting-auto' : 'custom',
     section: 'revenue',
-    cellClass: 'positive-col',
-    row_key: row.row_key
+    cellClass: row.source === 'monthly_accounting' ? 'positive-col auto-col' : 'positive-col',
+    row_key: row.row_key,
+    source: row.source
   }));
 
-  const customDeductionRows = getSortedProfitCustomRowsByType('deduction').map((row) => ({
+  const customDeductionRows = getSortedProfitCustomRowsByType('deduction')
+    .sort((a, b) => {
+      const aCashInsurance = String(a.row_label || '').trim() === 'تأمين نقدى';
+      const bCashInsurance = String(b.row_label || '').trim() === 'تأمين نقدى';
+      if (aCashInsurance !== bCashInsurance) return aCashInsurance ? -1 : 1;
+      const aAccounting = a.source === 'monthly_accounting';
+      const bAccounting = b.source === 'monthly_accounting';
+      if (aAccounting !== bAccounting) return aAccounting ? 1 : -1;
+      return 0;
+    })
+    .map((row) => ({
     key: row.row_key,
     label: row.row_label,
-    type: 'custom',
+    type: row.source === 'monthly_accounting' ? 'accounting-auto' : 'custom',
     section: 'deduction',
-    cellClass: 'deduction-col',
-    row_key: row.row_key
+    cellClass: row.source === 'monthly_accounting' ? 'deduction-col auto-col' : 'deduction-col',
+    row_key: row.row_key,
+    source: row.source
   }));
 
   return [
@@ -11207,6 +12065,7 @@ function renderProfitMonthlyRows(rows) {
   const displayRows = buildProfitDisplayRows();
   tbody.innerHTML = displayRows.map((metric) => {
     const isCustomRow = metric.type === 'custom';
+    const isAccountingAutoRow = metric.type === 'accounting-auto';
     const labelCell = isCustomRow
       ? `
         <td class="profit-label-cell ${metric.cellClass || ''}">
@@ -11239,6 +12098,10 @@ function renderProfitMonthlyRows(rows) {
           if (metric.type === 'custom') {
             const value = getProfitCustomValue(metric.row_key, monthKey);
             return renderCustomValueInput(metric.row_key, monthKey, value, metric.cellClass);
+          }
+          if (isAccountingAutoRow) {
+            const value = getProfitCustomValue(metric.row_key, monthKey);
+            return renderNumberCell(value, metric.cellClass, metric.numberFormat);
           }
           if (metric.type === 'auto-net') {
             const value = parseAnnualInventoryValue(monthRow[metric.key]);
@@ -11590,12 +12453,36 @@ async function loadProfitMonthlyData(explicitRange = null) {
       .map((row) => normalizeProfitCustomRow(row))
       .filter(Boolean);
 
+    const accountingRowsByKey = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      (Array.isArray(row?.accounting_custom_rows) ? row.accounting_custom_rows : []).forEach((entry) => {
+        const normalizedRow = normalizeProfitCustomRow({
+          ...entry,
+          source: 'monthly_accounting'
+        });
+        if (normalizedRow && !accountingRowsByKey.has(normalizedRow.row_key)) {
+          accountingRowsByKey.set(normalizedRow.row_key, normalizedRow);
+        }
+      });
+    });
+    profitCustomRowsCache = [
+      ...profitCustomRowsCache,
+      ...Array.from(accountingRowsByKey.values())
+    ];
+
     profitCustomValuesMap = new Map();
     (Array.isArray(customValues) ? customValues : []).forEach((entry) => {
       const rowKey = String(entry?.row_key || '').trim();
       const monthKey = normalizeMonthKey(entry?.month_key);
       if (!rowKey || !monthKey) return;
       setProfitCustomValue(rowKey, monthKey, parseAnnualInventoryValue(entry?.amount));
+    });
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const monthKey = normalizeMonthKey(row?.month_key);
+      if (!monthKey || !row?.accounting_values || typeof row.accounting_values !== 'object') return;
+      Object.entries(row.accounting_values).forEach(([rowKey, amount]) => {
+        setProfitCustomValue(rowKey, monthKey, parseAnnualInventoryValue(amount));
+      });
     });
 
     profitRowsCache = (Array.isArray(rows) ? rows : []).map((row) => ({ ...row }));

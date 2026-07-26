@@ -35,6 +35,7 @@ class DatabaseSchema {
     this.createMonthlyProfitInputsTable(db);
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
+    this.createMonthlyAccountingDocumentsTable(db);
     this.createAppUsersTable(db);
     this.createAppDevicesTable(db);
     this.createLandTables(db);
@@ -449,6 +450,21 @@ class DatabaseSchema {
     `);
   }
 
+  static createMonthlyAccountingDocumentsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS monthly_accounting_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month_key TEXT NOT NULL UNIQUE,
+        draft_data TEXT DEFAULT '{}',
+        final_data TEXT DEFAULT '{}',
+        is_final INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        finalized_at INTEGER
+      )
+    `);
+  }
+
   static createLandTables(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS land_seasons (
@@ -615,6 +631,7 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_rows_type_order ON monthly_profit_custom_rows(row_type, display_order)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_month_key ON monthly_profit_custom_values(month_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_accounting_documents_month_key ON monthly_accounting_documents(month_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
@@ -941,6 +958,12 @@ class DatabaseSchema {
       if (monthlyProfitCustomValuesInfo.length === 0) {
         console.log('Creating monthly_profit_custom_values table...');
         this.createMonthlyProfitCustomValuesTable(db);
+      }
+
+      const monthlyAccountingDocumentsInfo = db.prepare("PRAGMA table_info(monthly_accounting_documents)").all();
+      if (monthlyAccountingDocumentsInfo.length === 0) {
+        console.log('Creating monthly_accounting_documents table...');
+        this.createMonthlyAccountingDocumentsTable(db);
       }
 
       const appDevicesInfo = db.prepare("PRAGMA table_info(app_devices)").all();

@@ -145,7 +145,14 @@
                     <p>متابعة حركات الدخول والخروج</p>
                   </div>
 
-                  <!-- Card 8 - Profit -->
+                  <!-- Card 8 - Monthly Accounting -->
+                  <div class="action-card" onclick="showScreen('accounting', 'home')">
+                    <div class="card-icon">🧾</div>
+                    <h3>المحاسبة</h3>
+                    <p>تجهيز كشف المحاسبة الشهري</p>
+                  </div>
+
+                  <!-- Card 8b - Profit -->
                   <div class="action-card" onclick="showScreen('profit', 'home')">
                     <div class="card-icon">📈</div>
                     <h3>المكسب</h3>
@@ -720,6 +727,103 @@
             </div>
             <div id="profit-empty" class="empty-state" style="display:none;">لا توجد بيانات في الفترة المحددة</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Monthly Accounting Screen -->
+      <div id="accounting-screen" class="screen">
+        <div class="accounting-page">
+          <div class="accounting-header">
+            <div>
+              <h2>المحاسبة</h2>
+              <p class="summary-subtitle">تسجيل كشف المحاسبة الشهري الوارد من الشركة</p>
+            </div>
+            <div class="accounting-actions">
+              <div class="accounting-month-control" aria-label="اختيار الشهر">
+                <button type="button" class="customer-week-nav-btn accounting-month-btn" id="accounting-prev-month" title="الشهر السابق" aria-label="الشهر السابق">‹</button>
+                <input type="month" id="accounting-month-input" class="form-input">
+                <button type="button" class="customer-week-nav-btn accounting-month-btn" id="accounting-next-month" title="الشهر التالي" aria-label="الشهر التالي">›</button>
+              </div>
+              <button type="button" class="btn btn-secondary" id="accounting-edit-btn" style="display:none;">تعديل</button>
+              <button type="button" class="btn btn-primary" id="accounting-save-btn">حفظ</button>
+              <div id="accounting-save-status" class="accounting-save-status">جاهز</div>
+            </div>
+          </div>
+
+          <div id="accounting-loading" class="accounting-loading" style="display:none;">جاري التحميل...</div>
+
+          <div class="accounting-ledger-grid" id="accounting-ledger-grid">
+            <section class="accounting-ledger-section">
+              <div class="accounting-section-header">
+                <h3>الجانب المدين</h3>
+              </div>
+              <table class="base-table accounting-table">
+                <thead>
+                  <tr>
+                    <th>بيان</th>
+                    <th>مبلغ</th>
+                  </tr>
+                </thead>
+                <tbody id="accounting-debit-body"></tbody>
+                <tfoot>
+                  <tr>
+                    <th>إجمالي الجانب المدين</th>
+                    <th id="accounting-debit-total">٠ ج.م.‏</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </section>
+
+            <section class="accounting-ledger-section">
+              <div class="accounting-section-header">
+                <h3>الجانب الدائن</h3>
+              </div>
+              <table class="base-table accounting-table">
+                <thead>
+                  <tr>
+                    <th>بيان</th>
+                    <th>مبلغ</th>
+                  </tr>
+                </thead>
+                <tbody id="accounting-credit-body"></tbody>
+                <tfoot>
+                  <tr>
+                    <th>إجمالي الجانب الدائن</th>
+                    <th id="accounting-credit-total">٠ ج.م.‏</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </section>
+          </div>
+
+          <div class="accounting-increase-total">
+            <span>زيادة المحاسبة</span>
+            <strong id="accounting-increase-total">٠ ج.م.‏</strong>
+          </div>
+
+          <section class="accounting-fuel-section" id="accounting-fuel-section">
+            <div class="accounting-section-header accounting-fuel-header-row">
+              <h3>تفاصيل مسحوبات الوقود</h3>
+              <button type="button" class="btn btn-secondary accounting-fuel-add-btn" id="accounting-add-fuel-row">إضافة صف وقود</button>
+            </div>
+            <div class="accounting-fuel-table-shell">
+              <div class="accounting-fuel-table accounting-fuel-table-header">
+                <div>التاريخ</div>
+                <div>الوقود</div>
+                <div>الكمية</div>
+                <div>سعر الشراء</div>
+                <div>الإجمالي</div>
+                <div></div>
+              </div>
+              <div id="accounting-fuel-rows"></div>
+            </div>
+            <div class="accounting-fuel-summary">
+              <div>
+                <span>تأمين نقدى</span>
+                <strong id="accounting-cash-insurance-total">٠ ج.م.‏</strong>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 

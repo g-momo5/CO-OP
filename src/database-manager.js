@@ -702,6 +702,22 @@ class DatabaseManager {
       console.log('Monthly profit custom indexes creation:', err.message);
     }
 
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS monthly_accounting_documents (
+      id SERIAL PRIMARY KEY,
+      month_key TEXT NOT NULL UNIQUE,
+      draft_data TEXT DEFAULT '{}',
+      final_data TEXT DEFAULT '{}',
+      is_final INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      finalized_at TIMESTAMP
+    )`);
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_monthly_accounting_documents_month_key ON monthly_accounting_documents(month_key)`);
+    } catch (err) {
+      console.log('Monthly accounting documents index creation:', err.message);
+    }
+
     await this.createPostgreSQLLandTables();
   }
 
@@ -1131,6 +1147,7 @@ class DatabaseManager {
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'company_voucher_settlements', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
+      'monthly_accounting_documents',
       'app_devices', 'app_users',
       'land_seasons', 'land_plots', 'land_plot_terms', 'land_tenants',
       'land_assignments', 'land_installments', 'land_payments', 'land_receipts', 'land_settings'

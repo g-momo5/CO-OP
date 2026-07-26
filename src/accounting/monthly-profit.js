@@ -9,9 +9,13 @@ const { getFuelProfitValue } = require('./fuel-accounting');
 const { getOilProfitValue } = require('./oil-accounting');
 const { normalizeShiftRecord } = require('./shift-accounting');
 const {
-  groupFuelPurchasesByMonth,
-  groupOilPurchasesByMonth
+  groupOilPurchasesByMonth,
+  normalizeFuelProfitKey
 } = require('./invoice-accounting');
+const {
+  buildAccountingFuelPurchaseMaps,
+  buildAccountingProfitRows
+} = require('./monthly-accounting');
 
 function mapMonthlyInputs(rows = []) {
   const byMonth = new Map();
@@ -52,6 +56,7 @@ function calculateMonthlyProfit({
   monthlyInputs = [],
   customRows = [],
   customValues = [],
+  monthlyAccountingDocuments = [],
   fromMonth,
   toMonth
 } = {}) {
@@ -81,13 +86,26 @@ function calculateMonthlyProfit({
     expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + shift.total_expenses);
   });
 
-  const { purchases: fuelPurchases, insuranceByMonth } = groupFuelPurchasesByMonth(fuelInvoices);
+  const { purchases: fuelPurchases, insuranceByMonth } = buildAccountingFuelPurchaseMaps(
+    monthlyAccountingDocuments,
+    normalizeFuelProfitKey
+  );
   const oilPurchases = groupOilPurchasesByMonth(oilInvoices);
+  const accountingProfit = buildAccountingProfitRows(monthlyAccountingDocuments);
   const customValuesByRow = mapCustomValues(customValues);
-  const normalizedCustomRows = customRows.map((row) => ({
-    row_key: String(row.row_key || '').trim(),
-    row_type: row.row_type === 'deduction' ? 'deduction' : 'revenue'
-  })).filter((row) => row.row_key);
+  const accountingValuesByRow = mapCustomValues(accountingProfit.values);
+  const normalizedCustomRows = [
+    ...customRows.map((row) => ({
+      row_key: String(row.row_key || '').trim(),
+      row_type: row.row_type === 'deduction' ? 'deduction' : 'revenue',
+      source: 'monthly_profit'
+    })),
+    ...accountingProfit.rows.map((row) => ({
+      row_key: String(row.row_key || '').trim(),
+      row_type: row.row_type === 'deduction' ? 'deduction' : 'revenue',
+      source: 'monthly_accounting'
+    }))
+  ].filter((row) => row.row_key);
 
   return months.map((monthKey) => {
     const manual = manualByMonth.get(monthKey) || {};
@@ -113,15 +131,19 @@ function calculateMonthlyProfit({
     let custom_revenue_total = 0;
     let custom_deduction_total = 0;
     const custom_values = {};
+    const accounting_values = {};
     normalizedCustomRows.forEach((row) => {
-      const amount = toNumber(customValuesByRow.get(row.row_key)?.get(monthKey));
-      custom_values[row.row_key] = amount;
+      const amount = row.source === 'monthly_accounting'
+        ? toNumber(accountingValuesByRow.get(row.row_key)?.get(monthKey))
+        : toNumber(customValuesByRow.get(row.row_key)?.get(monthKey));
+      if (row.source === 'monthly_accounting') accounting_values[row.row_key] = amount;
+      else custom_values[row.row_key] = amount;
       if (row.row_type === 'deduction') custom_deduction_total += amount;
       else custom_revenue_total += amount;
     });
 
-    const total_positive = fuel_total_month + oil_total + wash_lube_month + bonuses + commission_diff + custom_revenue_total;
-    const total_deductions = cash_insurance_month + expenses_month + deposit_tax + bonus_tax + custom_deduction_total;
+    const total_positive = fuel_total_month + oil_total + wash_lube_month + custom_revenue_total;
+    const total_deductions = expenses_month + custom_deduction_total;
     const net_profit = total_positive - total_deductions;
 
     return {
@@ -146,7 +168,8 @@ function calculateMonthlyProfit({
       custom_deduction_total: roundMoney(custom_deduction_total),
       total_deductions: roundMoney(total_deductions),
       net_profit: roundMoney(net_profit),
-      custom_values
+      custom_values,
+      accounting_values
     };
   });
 }

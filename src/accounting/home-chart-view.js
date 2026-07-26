@@ -1,5 +1,6 @@
-const { getEntryName, normalizeDate, roundQuantity, toNumber } = require('./common');
+const { getEntryName, normalizeDate, parseObject, roundQuantity, toNumber } = require('./common');
 const { getShiftFuelSoldQuantity } = require('./fuel-accounting');
+const { extractAccountingFuelPurchaseRows } = require('./monthly-accounting');
 
 const HOME_CHART_MODES = {
   SALES: 'sales',
@@ -7,6 +8,7 @@ const HOME_CHART_MODES = {
 };
 
 const HOME_CHART_FUEL_TYPES = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
+const HOME_CHART_PURCHASE_FUEL_TYPES = HOME_CHART_FUEL_TYPES.filter((fuelType) => fuelType !== 'غاز سيارات');
 
 function normalizeFuelTypeForChart(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -29,11 +31,11 @@ function normalizeFuelTypeForChart(value) {
   return text;
 }
 
-function addChartQuantity(entries, date, fuelType, quantity) {
+function addChartQuantity(entries, date, fuelType, quantity, allowedFuelTypes = HOME_CHART_FUEL_TYPES) {
   const day = normalizeDate(date);
   const normalizedFuelType = normalizeFuelTypeForChart(fuelType);
   const amount = toNumber(quantity);
-  if (!day || !normalizedFuelType || amount <= 0 || !HOME_CHART_FUEL_TYPES.includes(normalizedFuelType)) return;
+  if (!day || !normalizedFuelType || amount <= 0 || !allowedFuelTypes.includes(normalizedFuelType)) return;
   entries.push({
     date: day,
     fuel_type: normalizedFuelType,
@@ -57,14 +59,17 @@ function aggregateChartEntries(entries = []) {
   ));
 }
 
-function buildHomeChartData({ mode = HOME_CHART_MODES.SALES, sales = [], shifts = [], fuelMovements = [] } = {}) {
+function buildHomeChartData({ mode = HOME_CHART_MODES.SALES, sales = [], shifts = [], fuelMovements = [], monthlyAccountingDocuments = [] } = {}) {
   const selectedMode = mode === HOME_CHART_MODES.PURCHASES ? HOME_CHART_MODES.PURCHASES : HOME_CHART_MODES.SALES;
   const entries = [];
 
   if (selectedMode === HOME_CHART_MODES.PURCHASES) {
-    fuelMovements.forEach((movement) => {
-      if (movement?.type && movement.type !== 'in') return;
-      addChartQuantity(entries, movement?.date, movement?.fuel_type || movement?.product_name, movement?.quantity);
+    (Array.isArray(monthlyAccountingDocuments) ? monthlyAccountingDocuments : []).forEach((document) => {
+      if (!(document?.is_final === true || document?.is_final === 1)) return;
+      const finalData = parseObject(document.final_data, {});
+      extractAccountingFuelPurchaseRows(finalData).forEach((row) => {
+        addChartQuantity(entries, row.date, row.fuel_type, row.quantity, HOME_CHART_PURCHASE_FUEL_TYPES);
+      });
     });
     return { mode: selectedMode, entries: aggregateChartEntries(entries) };
   }

@@ -31,16 +31,39 @@ test('builds home chart sales from manual sales and saved shifts', () => {
   ]);
 });
 
-test('builds home chart purchases from incoming fuel movements only', () => {
+test('builds home chart purchases from finalized monthly accounting fuel rows', () => {
   const result = buildHomeChartData({
     mode: 'purchases',
     fuelMovements: [
-      { date: '2026-07-01', fuel_type: 'بنزين ٨٠', type: 'in', quantity: 100 },
-      { date: '2026-07-02', fuel_type: 'بنزين ٨٠', type: 'out', quantity: 50 }
+      { date: '2026-07-01', fuel_type: 'بنزين ٨٠', type: 'in', quantity: 999 }
+    ],
+    monthlyAccountingDocuments: [
+      {
+        is_final: 1,
+        final_data: {
+          month_key: '2026-07',
+          fuel_purchase_rows: [
+            { date: '2026-07-01', fuel_type: 'بنزين ٨٠', quantity: 100, purchase_price: 10 },
+            { date: '2026-07-01', fuel_type: 'بنزين ٨٠', quantity: 25, purchase_price: 11 },
+            { date: '2026-07-02', fuel_type: 'سولار', quantity: 50, purchase_price: 12 },
+            { date: '2026-07-02', fuel_type: 'غاز سيارات', quantity: 30, purchase_price: 7 }
+          ]
+        }
+      },
+      {
+        is_final: 0,
+        final_data: {
+          month_key: '2026-07',
+          fuel_purchase_rows: [
+            { date: '2026-07-03', fuel_type: 'بنزين ٩٢', quantity: 999, purchase_price: 10 }
+          ]
+        }
+      }
     ]
   });
 
   assert.deepEqual(result.entries, [
-    { date: '2026-07-01', fuel_type: 'بنزين ٨٠', quantity: 100 }
+    { date: '2026-07-01', fuel_type: 'بنزين ٨٠', quantity: 125 },
+    { date: '2026-07-02', fuel_type: 'سولار', quantity: 50 }
   ]);
 });

@@ -1920,6 +1920,386 @@ body.modal-scroll-lock {
   justify-content: flex-start;
 }
 
+/* Monthly accounting page */
+.accounting-page {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.accounting-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.accounting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  direction: rtl;
+}
+
+.accounting-month-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  direction: rtl;
+}
+
+.accounting-month-control .form-input {
+  width: 160px;
+  min-width: 160px;
+  height: 38px;
+  padding: 0 0.8rem;
+  border: 1px solid #d7dde4 !important;
+  border-radius: 6px !important;
+  background: #fff;
+  color: #2c3e50;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 38px;
+  text-align: center !important;
+  text-align-last: center !important;
+  box-shadow: none;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.accounting-month-control .form-input:hover:not(:disabled) {
+  background: #fff5f4;
+  border-color: #c4291d !important;
+  color: #c4291d;
+}
+
+.accounting-month-control .form-input:focus {
+  outline: none;
+  border-color: #c4291d !important;
+  box-shadow: 0 0 0 3px rgba(196, 41, 29, 0.12);
+}
+
+.accounting-month-control .form-input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.accounting-month-control .form-input::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+  margin-inline-start: 0;
+  margin-inline-end: -0.15rem;
+}
+
+.accounting-month-btn {
+  margin: 0;
+}
+
+.accounting-save-status {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid #dbe1e8;
+  color: #495a6d;
+  background: #f8fafc;
+  white-space: nowrap;
+}
+
+.accounting-save-status.saving,
+.accounting-save-status.status-loading {
+  color: #9f5f00;
+  border-color: rgba(159, 95, 0, 0.35);
+  background: rgba(255, 237, 196, 0.5);
+}
+
+.accounting-save-status.saved {
+  color: #1f8f3a;
+  border-color: rgba(31, 143, 58, 0.35);
+  background: rgba(213, 245, 220, 0.5);
+}
+
+.accounting-save-status.dirty {
+  color: #6d4b00;
+  border-color: rgba(109, 75, 0, 0.28);
+  background: rgba(255, 247, 214, 0.7);
+}
+
+.accounting-save-status.error {
+  color: #c4291d;
+  border-color: rgba(196, 41, 29, 0.35);
+  background: rgba(255, 221, 221, 0.6);
+}
+
+.accounting-loading {
+  padding: 0.8rem 1rem;
+  border: 1px solid #e9ecef;
+  background: #fff;
+  color: #667;
+  font-weight: 700;
+  text-align: center;
+}
+
+.accounting-ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 0.9rem;
+  align-items: start;
+  direction: rtl;
+}
+
+.accounting-ledger-section {
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
+}
+
+.accounting-section-header {
+  padding: 0.75rem 0.95rem;
+  border-bottom: 1px solid #e9ecef;
+  background: #f8fafc;
+}
+
+.accounting-section-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.05rem;
+}
+
+.base-table.accounting-table {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.base-table.accounting-table th,
+.base-table.accounting-table td {
+  vertical-align: middle;
+}
+
+.base-table.accounting-table th:first-child,
+.base-table.accounting-table td:first-child {
+  width: auto;
+  min-width: max-content;
+  white-space: nowrap;
+  text-align: right !important;
+}
+
+.base-table.accounting-table th:last-child,
+.base-table.accounting-table td:last-child {
+  width: 160px;
+  min-width: 130px;
+  text-align: center !important;
+}
+
+.accounting-row-label,
+.accounting-row-amount {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #dbe1e8;
+  background: #fff;
+  color: #2c3e50;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 0.95rem;
+  padding: 0 0.65rem;
+}
+
+.accounting-row-label {
+  min-width: 220px;
+  text-align: right !important;
+  direction: rtl;
+}
+
+.accounting-row-amount {
+  text-align: center !important;
+  direction: ltr;
+}
+
+.accounting-row-label:disabled,
+.accounting-row-amount:disabled {
+  background: #f8fafc;
+  color: #495a6d;
+  opacity: 1;
+}
+
+.accounting-row-label[readonly],
+.accounting-row-amount[readonly] {
+  background: #f8fafc;
+}
+
+.base-table.accounting-table tfoot th {
+  background: #f8fafc;
+  color: #2c3e50;
+  font-weight: 900;
+}
+
+.accounting-increase-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 2px solid rgba(31, 143, 58, 0.28);
+  border-radius: 8px;
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 900;
+}
+
+.accounting-increase-total strong {
+  color: #1f8f3a;
+  font-size: 1.2rem;
+}
+
+.accounting-fuel-section {
+  margin-top: 1rem;
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
+}
+
+.accounting-fuel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.accounting-fuel-add-btn {
+  min-height: 36px;
+  padding: 0.35rem 0.8rem;
+}
+
+.accounting-fuel-table-shell {
+  overflow-x: auto;
+  padding: 0.65rem;
+}
+
+.accounting-fuel-table {
+  display: grid;
+  grid-template-columns: 150px minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) 42px;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 760px;
+  direction: rtl;
+}
+
+.accounting-fuel-table-header {
+  padding: 0 0 0.45rem;
+  border-bottom: 2px solid #c4291d;
+  color: #2c3e50;
+  font-weight: 800;
+  text-align: center;
+}
+
+.accounting-fuel-table-header > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.accounting-fuel-row {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.accounting-fuel-row:last-child {
+  border-bottom: 0;
+}
+
+.accounting-fuel-input,
+.accounting-fuel-select {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #dbe1e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #2c3e50;
+  font-family: 'Noto Naskh Arabic', serif;
+  font-size: 0.95rem;
+  padding: 0 0.55rem;
+  text-align: center;
+}
+
+.accounting-fuel-select {
+  text-align: right;
+}
+
+.accounting-fuel-input:disabled,
+.accounting-fuel-select:disabled {
+  background: #f8fafc;
+  color: #495a6d;
+  opacity: 1;
+}
+
+.accounting-fuel-input[readonly] {
+  background: #f8fafc;
+  color: #495a6d;
+}
+
+.accounting-fuel-remove {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #c4291d;
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.accounting-fuel-remove:disabled {
+  color: #9aa5b1;
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.accounting-fuel-remove-placeholder {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.accounting-fuel-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr);
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid #e9ecef;
+  background: #f8fafc;
+}
+
+.accounting-fuel-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #2c3e50;
+  font-weight: 800;
+}
+
+.accounting-fuel-summary strong {
+  color: #1f8f3a;
+  font-size: 1.05rem;
+}
+
 .profit-table-shell {
   width: 100%;
 }
@@ -1940,7 +2320,7 @@ body.modal-scroll-lock {
 .profit-table {
   width: max-content;
   min-width: 100%;
-  table-layout: fixed;
+  table-layout: auto;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -1966,6 +2346,7 @@ body.modal-scroll-lock {
   padding: 0 0.22rem;
   font-size: 0.8rem;
   line-height: 1;
+  overflow: hidden;
 }
 
 .profit-insert-row td {
@@ -2031,8 +2412,9 @@ body.modal-scroll-lock {
   position: sticky;
   inset-inline-end: 0;
   right: 0;
-  min-width: 190px;
-  max-width: 190px;
+  width: 1%;
+  min-width: max-content;
+  max-width: none;
   z-index: 4;
   text-align: right;
   padding-right: 0.7rem;
@@ -2089,6 +2471,10 @@ body.modal-scroll-lock {
   font-weight: 800;
 }
 
+.profit-table tr.profit-deduction-start-row td {
+  border-top: 3px solid rgba(44, 62, 80, 0.22);
+}
+
 .profit-table tr[data-profit-row-key="total_positive"] td,
 .profit-table tr[data-profit-row-key="net_profit"] td {
   border-top: 3px solid rgba(44, 62, 80, 0.28);
@@ -2117,11 +2503,15 @@ body.modal-scroll-lock {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  min-width: 0;
+  width: 100%;
 }
 
 .profit-custom-label-input {
   width: 100%;
-  min-width: 220px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid #d8dde5;
   border-radius: 8px;
   height: 30px;
@@ -2156,7 +2546,9 @@ body.modal-scroll-lock {
 
 .profit-manual-input {
   width: 100%;
-  min-width: 176px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid #d8dde5;
   border-radius: 8px;
   height: 30px;
@@ -5441,7 +5833,7 @@ body.modal-scroll-lock {
   border-radius: 0 !important;
   overflow: visible !important;
   box-shadow: none !important;
-  table-layout: fixed !important;
+  table-layout: auto !important;
 }
 
 .base-table.profit-table tbody tr {
@@ -5777,8 +6169,9 @@ body.modal-scroll-lock {
 
   .profit-table th:first-child,
   .profit-table td:first-child {
-    min-width: 160px;
-    max-width: 160px;
+    width: 1%;
+    min-width: max-content;
+    max-width: none;
   }
 
   .home-chart-header {
@@ -9826,6 +10219,10 @@ body.module-fuel .nav-land {
   .land-form-grid {
     grid-template-columns: 1fr 1fr;
   }
+
+  .accounting-ledger-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -9838,6 +10235,31 @@ body.module-fuel .nav-land {
 
   .app-module-panel {
     padding: 1rem;
+  }
+
+  .accounting-header,
+  .accounting-actions {
+    align-items: stretch;
+  }
+
+  .accounting-save-status {
+    align-self: center;
+  }
+
+  .accounting-actions,
+  .accounting-month-control {
+    width: 100%;
+  }
+
+  .accounting-month-control .form-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .base-table.accounting-table th:last-child,
+  .base-table.accounting-table td:last-child {
+    width: 120px;
+    min-width: 110px;
   }
 }
 
@@ -9873,4 +10295,18 @@ textarea.form-control {
 input::placeholder,
 textarea::placeholder {
   text-align: center !important;
+}
+
+.accounting-row-label,
+.accounting-row-amount {
+  border-radius: 8px !important;
+}
+
+.profit-manual-input,
+.profit-custom-label-input,
+.profit-custom-value-input {
+  border-radius: 8px !important;
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
 }

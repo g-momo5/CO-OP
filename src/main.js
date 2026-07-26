@@ -17,6 +17,16 @@ const { buildHomeChartData, HOME_CHART_MODES } = require('./accounting/home-char
 const { buildSafeBookView } = require('./accounting/safe-book-view');
 const { buildSalesSummaryView } = require('./accounting/sales-summary-view');
 const { TimedViewCache } = require('./accounting/view-cache');
+const {
+  buildAccountingFuelPurchaseMaps,
+  buildAccountingDocumentData,
+  buildAccountingProfitRows,
+  calculateAccountingTotals,
+  getPreviousMonthKey,
+  selectDefaultAccountingMonth,
+  shiftMonth,
+  splitDraftAndFinal
+} = require('./accounting/monthly-accounting');
 
 let mainWindow;
 let splashWindow = null;
@@ -2091,7 +2101,135 @@ function setupIPCHandlers() {
       console.warn('Unable to read monthly_profit_custom_values months:', error.message);
     }
 
+    try {
+      const rows = await executeQuery('SELECT month_key FROM monthly_accounting_documents WHERE is_final = 1 ORDER BY month_key ASC');
+      rows.forEach((row) => addMonth(row.month_key));
+    } catch (error) {
+      console.warn('Unable to read monthly_accounting_documents months:', error.message);
+    }
+
     return Array.from(monthSet).sort((a, b) => a.localeCompare(b));
+  };
+
+  const getCurrentMonthKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const getFinalizedAccountingMonths = async () => {
+    const rows = await executeQuery(
+      'SELECT month_key FROM monthly_accounting_documents WHERE is_final = 1 ORDER BY month_key ASC',
+      []
+    );
+    return rows
+      .map((row) => normalizeMonthKey(row.month_key))
+      .filter(Boolean);
+  };
+
+  const getPreviousAccountingIncreaseValue = async (monthKey) => {
+    const normalizedMonth = normalizeMonthKey(monthKey);
+    if (!normalizedMonth) return { previous_month_key: null, accounting_increase: 0 };
+
+    const previousMonthKey = getPreviousMonthKey(normalizedMonth);
+    if (!previousMonthKey) return { previous_month_key: null, accounting_increase: 0 };
+
+    const rows = await executeQuery(
+      'SELECT final_data FROM monthly_accounting_documents WHERE month_key = $1 AND is_final = 1 LIMIT 1',
+      [previousMonthKey]
+    );
+    if (!rows.length) {
+      return { previous_month_key: previousMonthKey, accounting_increase: 0 };
+    }
+
+    const finalData = parseStoredObject(rows[0].final_data, {});
+    const savedIncrease = parseOptionalNumber(finalData?.totals?.accounting_increase);
+    const calculatedTotals = savedIncrease === null ? calculateAccountingTotals(finalData) : null;
+    return {
+      previous_month_key: previousMonthKey,
+      accounting_increase: savedIncrease === null
+        ? toNumber(calculatedTotals?.accounting_increase)
+        : savedIncrease
+    };
+  };
+
+  const readMonthlyAccountingDocument = async (monthKey) => {
+    const normalizedMonth = normalizeMonthKey(monthKey);
+    if (!normalizedMonth) {
+      throw new Error('صيغة الشهر غير صحيحة');
+    }
+
+    const previous = await getPreviousAccountingIncreaseValue(normalizedMonth);
+    const rows = await executeQuery(
+      'SELECT * FROM monthly_accounting_documents WHERE month_key = $1 LIMIT 1',
+      [normalizedMonth]
+    );
+    const rawRecord = rows[0] || {
+      month_key: normalizedMonth,
+      draft_data: {},
+      final_data: {},
+      is_final: 0
+    };
+    const record = splitDraftAndFinal({
+      ...rawRecord,
+      draft_data: parseStoredObject(rawRecord.draft_data, {}),
+      final_data: parseStoredObject(rawRecord.final_data, {})
+    }, previous.accounting_increase);
+
+    return {
+      ...record,
+      data: record.active_data,
+      totals: record.active_data?.totals || { debit_total: 0, credit_total: 0, accounting_increase: 0 },
+      previous_month_key: previous.previous_month_key,
+      previous_increase: previous.accounting_increase,
+      updated_at: rawRecord.updated_at || null,
+      finalized_at: rawRecord.finalized_at || null
+    };
+  };
+
+  const cascadeFinalMonthlyAccountingDocuments = async (savedMonthKey, savedDocumentData) => {
+    const startMonth = normalizeMonthKey(savedMonthKey);
+    if (!startMonth) {
+      return { updated_count: 0, updated_months: [] };
+    }
+
+    const rows = await executeQuery(
+      'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE month_key > $1 AND is_final = 1 ORDER BY month_key ASC',
+      [startMonth]
+    ).catch((error) => {
+      console.warn('Unable to read following accounting documents for cascade:', error.message);
+      return [];
+    });
+
+    let previousFinalMonth = startMonth;
+    let previousIncrease = toNumber(savedDocumentData?.totals?.accounting_increase);
+    let updatedCount = 0;
+    const updatedMonths = [];
+
+    for (const row of rows) {
+      const monthKey = normalizeMonthKey(row.month_key);
+      if (!monthKey) continue;
+
+      const expectedPreviousMonth = shiftMonth(previousFinalMonth, 1);
+      const inheritedIncrease = monthKey === expectedPreviousMonth ? previousIncrease : 0;
+      const finalData = parseStoredObject(row.final_data, {});
+      const recalculatedData = buildAccountingDocumentData(finalData, {
+        month_key: monthKey,
+        previousIncrease: inheritedIncrease,
+        forcePreviousIncrease: true
+      });
+
+      await executeUpdate(
+        'UPDATE monthly_accounting_documents SET final_data = $1, updated_at = CURRENT_TIMESTAMP WHERE month_key = $2 AND is_final = 1',
+        [JSON.stringify(recalculatedData), monthKey]
+      );
+
+      updatedCount += 1;
+      updatedMonths.push(monthKey);
+      previousFinalMonth = monthKey;
+      previousIncrease = toNumber(recalculatedData?.totals?.accounting_increase);
+    }
+
+    return { updated_count: updatedCount, updated_months: updatedMonths };
   };
 
   const REPORT_FUEL_TYPES = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
@@ -2112,12 +2250,7 @@ function setupIPCHandlers() {
     { key: 'fuel_95', label: 'بنزين ٩٥', section: 'revenue' },
     { key: 'oil_total', label: 'الزيوت', section: 'revenue' },
     { key: 'wash_lube_month', label: 'غسيل و تشحيم', section: 'revenue' },
-    { key: 'bonuses', label: 'حوافز', section: 'revenue' },
-    { key: 'commission_diff', label: 'فرق العمولة', section: 'revenue' },
-    { key: 'expenses_month', label: 'المصاريف', section: 'deduction' },
-    { key: 'cash_insurance_month', label: 'تأمين نقدى', section: 'deduction' },
-    { key: 'deposit_tax', label: 'ضريبة المنبع', section: 'deduction' },
-      { key: 'bonus_tax', label: 'ضرائب الحافز', section: 'deduction' }
+    { key: 'expenses_month', label: 'المصاريف', section: 'deduction' }
   ];
   const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
   const normalizeReportExpenseDescription = (value) => String(value ?? '')
@@ -2242,17 +2375,6 @@ function setupIPCHandlers() {
       [startDate, endDate]
     ).catch(() => []);
 
-    const invoiceRows = await executeQuery(
-      'SELECT date, invoice_number, fuel_type, total, invoice_total FROM fuel_invoices WHERE date BETWEEN $1 AND $2',
-      [startDate, endDate]
-    ).catch(async () => {
-      const fallbackRows = await executeQuery(
-        'SELECT date, invoice_number, fuel_type, total FROM fuel_invoices WHERE date BETWEEN $1 AND $2',
-        [startDate, endDate]
-      ).catch(() => []);
-      return fallbackRows.map((row) => ({ ...row, invoice_total: null }));
-    });
-
     const oilInvoiceRows = await executeQuery(
       'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
       [startDate, endDate]
@@ -2264,6 +2386,11 @@ function setupIPCHandlers() {
 
     const customValueRows = await executeQuery(
       'SELECT row_key, month_key, amount FROM monthly_profit_custom_values WHERE month_key BETWEEN $1 AND $2',
+      [fromMonth, toMonth]
+    ).catch(() => []);
+
+    const accountingDocumentRows = await executeQuery(
+      'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE month_key BETWEEN $1 AND $2 AND is_final = 1 ORDER BY month_key ASC',
       [fromMonth, toMonth]
     ).catch(() => []);
 
@@ -2303,44 +2430,15 @@ function setupIPCHandlers() {
       expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + toNumber(row.total_expenses));
     });
 
-    const groupedInvoices = new Map();
-    const fuelPurchasesByMonth = {
-      fuel_diesel: new Map(),
-      fuel_80: new Map(),
-      fuel_92: new Map(),
-      fuel_95: new Map()
-    };
-    invoiceRows.forEach((row) => {
-      const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
-      if (!monthKey) return;
-      const fuelProfitKey = normalizeFuelProfitKey(row?.fuel_type);
-      if (fuelProfitKey && fuelPurchasesByMonth[fuelProfitKey]) {
-        const purchaseMap = fuelPurchasesByMonth[fuelProfitKey];
-        purchaseMap.set(monthKey, (purchaseMap.get(monthKey) || 0) + toNumber(row?.total));
-      }
-
-      const invoiceNumber = String(row?.invoice_number || '').trim() || '__unknown__';
-      const groupKey = `${monthKey}__${invoiceNumber}`;
-      if (!groupedInvoices.has(groupKey)) {
-        groupedInvoices.set(groupKey, { monthKey, sumRowsTotal: 0, maxInvoiceTotal: null });
-      }
-
-      const entry = groupedInvoices.get(groupKey);
-      entry.sumRowsTotal += toNumber(row?.total);
-      const invoiceTotalValue = parseFloat(row?.invoice_total);
-      if (Number.isFinite(invoiceTotalValue)) {
-        entry.maxInvoiceTotal = entry.maxInvoiceTotal === null
-          ? invoiceTotalValue
-          : Math.max(entry.maxInvoiceTotal, invoiceTotalValue);
-      }
-    });
-
-    const insuranceByMonth = new Map();
-    groupedInvoices.forEach((entry) => {
-      const invoiceTotal = entry.maxInvoiceTotal === null ? entry.sumRowsTotal : entry.maxInvoiceTotal;
-      const insurance = invoiceTotal - entry.sumRowsTotal;
-      insuranceByMonth.set(entry.monthKey, (insuranceByMonth.get(entry.monthKey) || 0) + insurance);
-    });
+    const normalizedAccountingDocuments = accountingDocumentRows.map((row) => ({
+      month_key: normalizeMonthKey(row.month_key),
+      final_data: parseStoredObject(row.final_data, {}),
+      is_final: row.is_final
+    }));
+    const { purchases: fuelPurchasesByMonth, insuranceByMonth } = buildAccountingFuelPurchaseMaps(
+      normalizedAccountingDocuments,
+      normalizeFuelProfitKey
+    );
 
     const groupedOilInvoices = new Map();
     oilInvoiceRows.forEach((row) => {
@@ -2393,7 +2491,14 @@ function setupIPCHandlers() {
       })
       .filter(Boolean);
 
+    const accountingProfit = buildAccountingProfitRows(normalizedAccountingDocuments);
+    const accountingRows = accountingProfit.rows.map((row, index) => ({
+      ...row,
+      display_order: normalizedCustomRows.length + index + 1
+    }));
+
     const customValuesByRow = new Map();
+    const accountingValuesByRow = new Map();
     const customRevenueByMonth = new Map();
     const customDeductionByMonth = new Map();
     customValueRows.forEach((row) => {
@@ -2406,6 +2511,23 @@ function setupIPCHandlers() {
       rowMap.set(monthKey, (rowMap.get(monthKey) || 0) + value);
 
       const rowDefinition = normalizedCustomRows.find((definition) => definition.row_key === rowKey);
+      if (rowDefinition?.row_type === 'deduction') {
+        customDeductionByMonth.set(monthKey, (customDeductionByMonth.get(monthKey) || 0) + value);
+      } else {
+        customRevenueByMonth.set(monthKey, (customRevenueByMonth.get(monthKey) || 0) + value);
+      }
+    });
+
+    accountingProfit.values.forEach((row) => {
+      const rowKey = String(row?.row_key || '').trim();
+      const monthKey = normalizeMonthKey(row?.month_key);
+      if (!rowKey || !monthKey) return;
+      if (!accountingValuesByRow.has(rowKey)) accountingValuesByRow.set(rowKey, new Map());
+      const value = toNumber(row?.amount);
+      const rowMap = accountingValuesByRow.get(rowKey);
+      rowMap.set(monthKey, (rowMap.get(monthKey) || 0) + value);
+
+      const rowDefinition = accountingRows.find((definition) => definition.row_key === rowKey);
       if (rowDefinition?.row_type === 'deduction') {
         customDeductionByMonth.set(monthKey, (customDeductionByMonth.get(monthKey) || 0) + value);
       } else {
@@ -2436,13 +2558,16 @@ function setupIPCHandlers() {
       const cash_insurance_month = toNumber(insuranceByMonth.get(monthKey));
       const custom_revenue_total = toNumber(customRevenueByMonth.get(monthKey));
       const custom_deduction_total = toNumber(customDeductionByMonth.get(monthKey));
-      const total_positive = fuel_total_month + oil_total_month + wash_lube_month + bonuses + commission_diff + custom_revenue_total;
-      const total_deductions = cash_insurance_month + expenses_month + deposit_tax + bonus_tax + custom_deduction_total;
+      const total_positive = fuel_total_month + oil_total_month + wash_lube_month + custom_revenue_total;
+      const total_deductions = expenses_month + custom_deduction_total;
       const net_profit = total_positive - total_deductions;
 
       const custom_values = {};
       normalizedCustomRows.forEach((customRow) => {
         custom_values[customRow.row_key] = toNumber(customValuesByRow.get(customRow.row_key)?.get(monthKey));
+      });
+      accountingRows.forEach((customRow) => {
+        custom_values[customRow.row_key] = toNumber(accountingValuesByRow.get(customRow.row_key)?.get(monthKey));
       });
 
       return {
@@ -2465,13 +2590,14 @@ function setupIPCHandlers() {
         custom_deduction_total,
         total_deductions,
         net_profit,
-        custom_values
+        custom_values,
+        accounting_custom_rows: accountingRows
       };
     });
 
     return {
       rows,
-      customRows: normalizedCustomRows
+      customRows: [...normalizedCustomRows, ...accountingRows]
     };
   };
 
@@ -3834,13 +3960,20 @@ ipcMain.handle('get-sales-summary', async () => {
     return viewCache.getOrSet(cacheKey, async () => {
       try {
         if (mode === HOME_CHART_MODES.PURCHASES) {
-          const fuelMovements = await executeQuery(
-            "SELECT date, fuel_type, quantity, type FROM fuel_movements WHERE type = 'in' ORDER BY date ASC, id ASC"
+          const monthlyAccountingDocuments = await executeQuery(
+            'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE is_final = 1 ORDER BY month_key ASC'
           ).catch((error) => {
-            console.warn('Unable to read fuel movements for home chart:', error.message);
+            console.warn('Unable to read monthly accounting documents for home chart:', error.message);
             return [];
           });
-          return buildHomeChartData({ mode, fuelMovements });
+          return buildHomeChartData({
+            mode,
+            monthlyAccountingDocuments: monthlyAccountingDocuments.map((row) => ({
+              month_key: normalizeMonthKey(row.month_key),
+              final_data: parseStoredObject(row.final_data, {}),
+              is_final: row.is_final
+            }))
+          });
         }
 
         const sales = dbManager?.isOnline
@@ -4235,6 +4368,117 @@ ipcMain.handle('get-sales-summary', async () => {
     });
   });
 
+  ipcMain.handle('get-accounting-default-month', async () => {
+    try {
+      const finalizedMonths = await getFinalizedAccountingMonths();
+      return selectDefaultAccountingMonth(finalizedMonths, getCurrentMonthKey());
+    } catch (error) {
+      console.error('Error getting default accounting month:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-previous-accounting-increase', async (_event, payload = {}) => {
+    try {
+      const monthKey = normalizeMonthKey(payload?.month_key);
+      if (!monthKey) {
+        throw new Error('صيغة الشهر غير صحيحة');
+      }
+      return await getPreviousAccountingIncreaseValue(monthKey);
+    } catch (error) {
+      console.error('Error getting previous accounting increase:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-monthly-accounting-document', async (_event, payload = {}) => {
+    try {
+      const monthKey = normalizeMonthKey(payload?.month_key);
+      if (!monthKey) {
+        throw new Error('صيغة الشهر غير صحيحة');
+      }
+      return await readMonthlyAccountingDocument(monthKey);
+    } catch (error) {
+      console.error('Error getting monthly accounting document:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('save-monthly-accounting-draft', async (_event, payload = {}) => {
+    try {
+      const monthKey = normalizeMonthKey(payload?.month_key);
+      if (!monthKey) {
+        throw new Error('صيغة الشهر غير صحيحة');
+      }
+
+      const existingRows = await executeQuery(
+        'SELECT is_final FROM monthly_accounting_documents WHERE month_key = $1 LIMIT 1',
+        [monthKey]
+      );
+      if (existingRows[0]?.is_final === 1 || existingRows[0]?.is_final === true) {
+        throw new Error('هذا الشهر محفوظ نهائياً. اضغط تعديل لتحديث النسخة النهائية');
+      }
+
+      const previous = await getPreviousAccountingIncreaseValue(monthKey);
+      const documentData = buildAccountingDocumentData(payload?.data || payload, {
+        month_key: monthKey,
+        previousIncrease: previous.accounting_increase
+      });
+      const query = `
+        INSERT INTO monthly_accounting_documents (
+          month_key, draft_data, is_final, created_at, updated_at
+        )
+        VALUES ($1, $2, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (month_key)
+        DO UPDATE SET
+          draft_data = EXCLUDED.draft_data,
+          updated_at = CURRENT_TIMESTAMP
+      `;
+      await executeUpdate(query, [monthKey, JSON.stringify(documentData)]);
+      return await readMonthlyAccountingDocument(monthKey);
+    } catch (error) {
+      console.error('Error saving monthly accounting draft:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('finalize-monthly-accounting-document', async (_event, payload = {}) => {
+    try {
+      const monthKey = normalizeMonthKey(payload?.month_key);
+      if (!monthKey) {
+        throw new Error('صيغة الشهر غير صحيحة');
+      }
+
+      const previous = await getPreviousAccountingIncreaseValue(monthKey);
+      const documentData = buildAccountingDocumentData(payload?.data || payload, {
+        month_key: monthKey,
+        previousIncrease: previous.accounting_increase
+      });
+      const query = `
+        INSERT INTO monthly_accounting_documents (
+          month_key, final_data, is_final, created_at, updated_at, finalized_at
+        )
+        VALUES ($1, $2, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (month_key)
+        DO UPDATE SET
+          final_data = EXCLUDED.final_data,
+          is_final = 1,
+          updated_at = CURRENT_TIMESTAMP,
+          finalized_at = CURRENT_TIMESTAMP
+      `;
+      await executeUpdate(query, [monthKey, JSON.stringify(documentData)]);
+      const cascade = await cascadeFinalMonthlyAccountingDocuments(monthKey, documentData);
+      const record = await readMonthlyAccountingDocument(monthKey);
+      return {
+        ...record,
+        cascade
+      };
+    } catch (error) {
+      console.error('Error finalizing monthly accounting document:', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('get-profit-available-months', async () => {
     try {
       return await collectAvailableProfitMonths();
@@ -4496,26 +4740,19 @@ ipcMain.handle('get-sales-summary', async () => {
         return [];
       });
 
-      const invoiceRows = await executeQuery(
-        'SELECT date, invoice_number, fuel_type, total, invoice_total FROM fuel_invoices WHERE date BETWEEN $1 AND $2',
-        [startDate, endDate]
-      ).catch(async (error) => {
-        console.warn('Unable to read fuel invoices with invoice_total, fallback to totals only:', error.message);
-        const fallbackRows = await executeQuery(
-          'SELECT date, invoice_number, fuel_type, total FROM fuel_invoices WHERE date BETWEEN $1 AND $2',
-          [startDate, endDate]
-        ).catch((fallbackError) => {
-          console.warn('Unable to read fuel invoices fallback:', fallbackError.message);
-          return [];
-        });
-        return fallbackRows.map((row) => ({ ...row, invoice_total: null }));
-      });
-
       const oilInvoiceRows = await executeQuery(
         'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
         [startDate, endDate]
       ).catch((error) => {
         console.warn('Unable to read oil invoices for profit calculation:', error.message);
+        return [];
+      });
+
+      const accountingDocumentRows = await executeQuery(
+        'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE month_key BETWEEN $1 AND $2 AND is_final = 1 ORDER BY month_key ASC',
+        [fromMonth, toMonth]
+      ).catch((error) => {
+        console.warn('Unable to read monthly accounting documents for profit calculation:', error.message);
         return [];
       });
 
@@ -4555,50 +4792,15 @@ ipcMain.handle('get-sales-summary', async () => {
         expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + toNumber(row.total_expenses));
       }
 
-      const groupedInvoices = new Map();
-      const fuelPurchasesByMonth = {
-        fuel_diesel: new Map(),
-        fuel_80: new Map(),
-        fuel_92: new Map(),
-        fuel_95: new Map()
-      };
-      for (const row of invoiceRows) {
-        const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
-        if (!monthKey) continue;
-
-        const fuelProfitKey = normalizeFuelProfitKey(row?.fuel_type);
-        if (fuelProfitKey && fuelPurchasesByMonth[fuelProfitKey]) {
-          const purchaseMap = fuelPurchasesByMonth[fuelProfitKey];
-          purchaseMap.set(monthKey, (purchaseMap.get(monthKey) || 0) + toNumber(row?.total));
-        }
-
-        const invoiceNumber = String(row?.invoice_number || '').trim() || '__unknown__';
-        const groupKey = `${monthKey}__${invoiceNumber}`;
-        if (!groupedInvoices.has(groupKey)) {
-          groupedInvoices.set(groupKey, {
-            monthKey,
-            sumRowsTotal: 0,
-            maxInvoiceTotal: null
-          });
-        }
-
-        const entry = groupedInvoices.get(groupKey);
-        entry.sumRowsTotal += toNumber(row?.total);
-
-        const invoiceTotalValue = parseFloat(row?.invoice_total);
-        if (Number.isFinite(invoiceTotalValue)) {
-          entry.maxInvoiceTotal = entry.maxInvoiceTotal === null
-            ? invoiceTotalValue
-            : Math.max(entry.maxInvoiceTotal, invoiceTotalValue);
-        }
-      }
-
-      const insuranceByMonth = new Map();
-      for (const entry of groupedInvoices.values()) {
-        const invoiceTotal = entry.maxInvoiceTotal === null ? entry.sumRowsTotal : entry.maxInvoiceTotal;
-        const insurance = invoiceTotal - entry.sumRowsTotal;
-        insuranceByMonth.set(entry.monthKey, (insuranceByMonth.get(entry.monthKey) || 0) + insurance);
-      }
+      const normalizedAccountingDocuments = accountingDocumentRows.map((row) => ({
+        month_key: normalizeMonthKey(row.month_key),
+        final_data: parseStoredObject(row.final_data, {}),
+        is_final: row.is_final
+      }));
+      const { purchases: fuelPurchasesByMonth, insuranceByMonth } = buildAccountingFuelPurchaseMaps(
+        normalizedAccountingDocuments,
+        normalizeFuelProfitKey
+      );
 
       const groupedOilInvoices = new Map();
       for (const row of oilInvoiceRows) {
@@ -4640,6 +4842,17 @@ ipcMain.handle('get-sales-summary', async () => {
         oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
       }
 
+      const accountingProfit = buildAccountingProfitRows(normalizedAccountingDocuments);
+      const accountingValuesByRow = new Map();
+      accountingProfit.values.forEach((row) => {
+        const rowKey = String(row?.row_key || '').trim();
+        const monthKey = normalizeMonthKey(row?.month_key);
+        if (!rowKey || !monthKey) return;
+        if (!accountingValuesByRow.has(rowKey)) accountingValuesByRow.set(rowKey, new Map());
+        const rowMap = accountingValuesByRow.get(rowKey);
+        rowMap.set(monthKey, (rowMap.get(monthKey) || 0) + toNumber(row?.amount));
+      });
+
       const monthlyRows = monthRange.map((monthKey) => {
         const manual = manualByMonth.get(monthKey) || {};
         const grossFuelDiesel = dieselByMonth.has(monthKey)
@@ -4673,9 +4886,13 @@ ipcMain.handle('get-sales-summary', async () => {
         const expenses_month = toNumber(expensesByMonth.get(monthKey));
         const cash_insurance_month = toNumber(insuranceByMonth.get(monthKey));
 
-        const total_positive = fuel_total_month + oil_total_month + wash_lube_month + bonuses + commission_diff;
-        const total_deductions = cash_insurance_month + expenses_month + deposit_tax + bonus_tax;
+        const total_positive = fuel_total_month + oil_total_month + wash_lube_month;
+        const total_deductions = expenses_month;
         const net_profit = total_positive - total_deductions;
+        const accounting_values = {};
+        accountingProfit.rows.forEach((row) => {
+          accounting_values[row.row_key] = toNumber(accountingValuesByRow.get(row.row_key)?.get(monthKey));
+        });
 
         return {
           month_key: monthKey,
@@ -4693,8 +4910,13 @@ ipcMain.handle('get-sales-summary', async () => {
           expenses_month,
           deposit_tax,
           bonus_tax,
+          custom_revenue_total: 0,
+          custom_deduction_total: 0,
           total_deductions,
-          net_profit
+          net_profit,
+          custom_values: {},
+          accounting_values,
+          accounting_custom_rows: accountingProfit.rows
         };
       });
 
@@ -6054,6 +6276,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const monthlyProfitInputs = await executeQuery('SELECT * FROM monthly_profit_inputs ORDER BY month_key DESC');
       const monthlyProfitCustomRows = await executeQuery('SELECT * FROM monthly_profit_custom_rows ORDER BY row_type ASC, display_order ASC');
       const monthlyProfitCustomValues = await executeQuery('SELECT * FROM monthly_profit_custom_values ORDER BY month_key DESC');
+      const monthlyAccountingDocuments = await executeQuery('SELECT * FROM monthly_accounting_documents ORDER BY month_key DESC');
       const appUsers = await executeQuery('SELECT * FROM app_users ORDER BY id ASC');
       const landData = {};
       for (const tableName of LAND_TABLES) {
@@ -6082,6 +6305,7 @@ ipcMain.handle('get-sales-summary', async () => {
         monthlyProfitInputs,
         monthlyProfitCustomRows,
         monthlyProfitCustomValues,
+        monthlyAccountingDocuments,
         appUsers,
         landData,
         generalSettings
@@ -6395,6 +6619,39 @@ ipcMain.handle('get-sales-summary', async () => {
             entry.created_at || null,
             entry.updated_at || null
           ], 'monthly_profit_custom_values');
+        }
+      }
+
+      if (backupData.monthlyAccountingDocuments) {
+        for (const entry of backupData.monthlyAccountingDocuments) {
+          const monthKey = normalizeMonthKey(entry.month_key);
+          if (!monthKey) continue;
+
+          const draftData = parseStoredObject(entry.draft_data, {});
+          const finalData = parseStoredObject(entry.final_data, {});
+          const query = `
+            INSERT INTO monthly_accounting_documents (
+              month_key, draft_data, final_data, is_final, created_at, updated_at, finalized_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (month_key)
+            DO UPDATE SET
+              draft_data = EXCLUDED.draft_data,
+              final_data = EXCLUDED.final_data,
+              is_final = EXCLUDED.is_final,
+              updated_at = EXCLUDED.updated_at,
+              finalized_at = EXCLUDED.finalized_at
+          `;
+
+          await executeInsert(query, [
+            monthKey,
+            JSON.stringify(draftData),
+            JSON.stringify(finalData),
+            entry.is_final === true || entry.is_final === 1 ? 1 : 0,
+            entry.created_at || null,
+            entry.updated_at || null,
+            entry.finalized_at || null
+          ], 'monthly_accounting_documents');
         }
       }
 

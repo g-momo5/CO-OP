@@ -1,6 +1,6 @@
 {
   "name": "coop2",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "main": "src/main.js",
   "scripts": {
     "dev": "node scripts/run-electron.cjs",
