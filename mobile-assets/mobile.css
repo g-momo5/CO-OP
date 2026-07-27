@@ -674,6 +674,7 @@ button {
 
 .bar-fill {
   display: block;
+  width: var(--bar-width, 0%);
   height: 100%;
   min-width: 2px;
   border-radius: inherit;

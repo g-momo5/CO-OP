@@ -1,4 +1,5 @@
 const { ipcRenderer } = require('electron');
+const readonlyUi = (typeof window !== 'undefined' && window.CoopReadonlyUI) ? window.CoopReadonlyUI : null;
 const landTexts = require('./land-texts');
 
 let XLSX = null;
@@ -1544,6 +1545,9 @@ async function loadTodayStats() {
 }
 
 function escapeHtml(value) {
+  if (readonlyUi?.escapeHtml) {
+    return readonlyUi.escapeHtml(value);
+  }
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -11632,6 +11636,7 @@ function bindAccountingEvents() {
 function formatProfitMonthLabel(monthKey) {
   const normalized = normalizeMonthKey(monthKey);
   if (!normalized) return '-';
+  if (readonlyUi?.monthLabel) return convertToArabicNumerals(readonlyUi.monthLabel(normalized));
   const [yearText, monthText] = normalized.split('-');
   const monthIndex = Math.max(0, Math.min(11, parseInt(monthText, 10) - 1));
   return `${SAFE_BOOK_MONTH_NAMES[monthIndex]} ${convertToArabicNumerals(yearText)}`;
@@ -12541,6 +12546,7 @@ function buildMonthRange(fromMonth, toMonth) {
 function formatExpenseMonthLabel(monthKey) {
   const normalized = normalizeMonthKey(monthKey);
   if (!normalized) return '-';
+  if (readonlyUi?.monthLabel) return convertToArabicNumerals(readonlyUi.monthLabel(normalized));
   const [yearText, monthText] = normalized.split('-');
   const monthIndex = Math.max(0, Math.min(11, parseInt(monthText, 10) - 1));
   return `${SAFE_BOOK_MONTH_NAMES[monthIndex]} ${convertToArabicNumerals(yearText)}`;
