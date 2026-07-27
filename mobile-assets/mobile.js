@@ -34,6 +34,13 @@
     if (lastSync) lastSync.textContent = ui.formatDate(value);
   }
 
+  function setAppTitleLines(lines) {
+    if (!appTitle) return;
+    appTitle.innerHTML = lines
+      .map((line) => `<span>${ui.escapeHtml(line)}</span>`)
+      .join('');
+  }
+
   function buildUrl(base, params) {
     const url = new URL(base, window.location.origin);
     Object.entries(params).forEach(([key, value]) => {
@@ -291,11 +298,9 @@
   function switchModule(moduleName) {
     state.currentModule = moduleName === 'land' ? 'land' : 'fuel';
     document.body.classList.toggle('mobile-module-land', state.currentModule === 'land');
-    if (appTitle) {
-      appTitle.textContent = state.currentModule === 'land'
-        ? 'إدارة الأراضي الزراعية'
-        : 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
-    }
+    setAppTitleLines(state.currentModule === 'land'
+      ? ['إدارة الأراضي الزراعية']
+      : ['محطة بنزين سمنود', 'الجمعية التعاونية للبترول']);
     moduleButtons.forEach((button) => {
       button.classList.toggle('active', button.dataset.module === state.currentModule);
     });

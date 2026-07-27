@@ -241,19 +241,31 @@ body.readonly-web {
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: end;
+  max-width: 100%;
   padding: 1rem;
+  overflow: hidden;
 }
 
 .readonly-web .filter-bar label {
+  flex: 1 1 170px;
+  min-width: 0;
+  max-width: 240px;
   display: grid;
   gap: 0.35rem;
   color: var(--coop-ink);
   font-weight: 700;
 }
 
+.readonly-web .filter-bar.land-season-filter label {
+  max-width: 220px;
+}
+
 .readonly-web .filter-bar input,
 .readonly-web .filter-bar select {
+  width: 100%;
+  max-width: 100%;
   min-height: 42px;
+  min-width: 0;
   border: 1px solid #ddd;
   border-radius: 999px;
   padding: 0.45rem 0.85rem;
@@ -264,7 +276,9 @@ body.readonly-web {
 }
 
 .readonly-web .filter-bar button {
+  flex: 0 0 auto;
   min-height: 42px;
+  max-width: 100%;
   border: 2px solid var(--coop-red);
   border-radius: 999px;
   padding: 0.45rem 1.1rem;
@@ -326,6 +340,14 @@ body.readonly-web {
   color: var(--coop-ink);
 }
 
+.readonly-web .base-table th:first-child,
+.readonly-web .base-table td:first-child {
+  min-width: 190px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
 .readonly-web .financial-summary-table {
   width: max-content;
   min-width: 100%;
@@ -360,13 +382,15 @@ body.readonly-web {
   position: sticky;
   right: 0;
   z-index: 8;
-  width: 150px;
-  min-width: 150px;
-  max-width: 150px;
-  overflow: hidden;
+  width: 260px;
+  min-width: 260px;
+  max-width: 340px;
+  overflow: visible;
   background: #ffffff;
   box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .readonly-web .financial-summary-table th:first-child,
@@ -379,6 +403,49 @@ body.readonly-web {
 
 .readonly-web .sales-summary-table .sales-first-oil-row td {
   border-top: 4px solid rgba(196, 41, 29, 0.55);
+}
+
+.readonly-web .profit-summary-table tbody tr td {
+  transition: background 0.2s ease;
+}
+
+.readonly-web .profit-summary-table .profit-revenue-row td {
+  background: #eefaf1;
+}
+
+.readonly-web .profit-summary-table .profit-revenue-row td:first-child,
+.readonly-web .profit-summary-table .profit-revenue-row strong {
+  color: #166534;
+}
+
+.readonly-web .profit-summary-table .profit-deduction-row td {
+  background: #fff4e5;
+}
+
+.readonly-web .profit-summary-table .profit-deduction-row td:first-child,
+.readonly-web .profit-summary-table .profit-deduction-row strong {
+  color: #9a3412;
+}
+
+.readonly-web .profit-summary-table .profit-summary-row td {
+  background: #edf5ff;
+  font-weight: 800;
+}
+
+.readonly-web .profit-summary-table .profit-summary-row td:first-child,
+.readonly-web .profit-summary-table .profit-summary-row strong {
+  color: #1d4ed8;
+}
+
+.readonly-web .profit-summary-table .profit-net-row td {
+  background: #f0fdf4;
+  color: #14532d;
+  font-weight: 900;
+}
+
+.readonly-web .profit-summary-table .profit-net-row td:first-child,
+.readonly-web .profit-summary-table .profit-net-row strong {
+  color: #14532d;
 }
 
 .readonly-web .home-chart-box,
@@ -535,8 +602,9 @@ body.readonly-web {
   right: 0;
   left: auto;
   z-index: 5;
-  width: 154px;
-  min-width: 154px;
+  width: 240px;
+  min-width: 240px;
+  max-width: 320px;
   white-space: normal;
 }
 
@@ -636,15 +704,29 @@ body.readonly-web {
     width: 100%;
   }
 
+  .readonly-web .filter-bar label,
+  .readonly-web .filter-bar button {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
+  }
+
   .readonly-web .financial-summary-table {
-    min-width: 700px;
+    min-width: 780px;
   }
 
   .readonly-web .financial-summary-table th:first-child,
   .readonly-web .financial-summary-table td:first-child {
-    width: 128px;
-    min-width: 128px;
-    max-width: 128px;
+    width: 218px;
+    min-width: 218px;
+    max-width: 260px;
+  }
+
+  .readonly-web .land-dashboard-contracts-table th:first-child,
+  .readonly-web .land-dashboard-contracts-table td:first-child {
+    width: 210px;
+    min-width: 210px;
+    max-width: 250px;
   }
 
   .readonly-web .base-table th,
