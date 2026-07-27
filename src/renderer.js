@@ -13334,7 +13334,8 @@ function renderSavedShiftOilRows(oilData = {}) {
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-added" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="added">
+                 id="oil-${oilId}-added" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="added"
+                 oninput="calculateOilRow('${oilId}')">
         </div>
       </td>
       <td>
@@ -13352,20 +13353,23 @@ function renderSavedShiftOilRows(oilData = {}) {
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-remaining" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="remaining">
+                 id="oil-${oilId}-remaining" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="remaining"
+                 oninput="calculateOilRow('${oilId}')">
         </div>
       </td>
       <td class="spacer-cell"></td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-open" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="open">
+                 id="oil-${oilId}-open" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="open"
+                 oninput="calculateOilRow('${oilId}')">
         </div>
       </td>
       <td>
         <div class="oil-cell-center">
           <input type="number" step="0.01" class="form-control shift-oil-input"
-                 id="oil-${oilId}-customers" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customers">
+                 id="oil-${oilId}-customers" data-oil="${oilNameHtml}" data-oil-code="${oilCodeAttr}" data-field="customers"
+                 oninput="calculateOilRow('${oilId}')">
         </div>
       </td>
       <td>
@@ -16597,7 +16601,7 @@ async function loadShiftHistory(date, shiftNumber, messageEl) {
   }
 }
 
-function startShiftCorrection() {
+async function startShiftCorrection() {
   if (shiftViewMode !== 'history' || !currentShiftData.isSaved) {
     showMessage('افتح وردية محفوظة أولاً قبل التصحيح', 'error');
     return;
@@ -16610,6 +16614,9 @@ function startShiftCorrection() {
   updateShiftTitle();
   toggleHistoryBar(true);
   setShiftDraftStatus('idle', 'وضع تصحيح الوردية');
+  recalculateFuelDerivedRows();
+  await recalculateShiftOilDerivedRows();
+  currentShiftData.hasUnsavedChanges = false;
 }
 
 async function cancelShiftCorrection() {
