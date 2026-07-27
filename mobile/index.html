@@ -22,9 +22,9 @@
   <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20260727-readonly-shared">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
 </head>
-<body>
-  <div class="app-shell">
-    <header class="topbar">
+<body class="readonly-web">
+  <div class="app-container">
+    <header class="header">
       <div class="header-top">
         <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
       </div>
@@ -36,26 +36,26 @@
       </div>
     </main>
 
-    <nav class="tabs bottom-navigation" aria-label="Mobile sections">
+    <nav class="bottom-navigation" aria-label="Mobile sections">
       <div class="mobile-module-switch" aria-label="اختيار النظام">
-        <button type="button" class="active" data-module="fuel" aria-label="محطة البنزين">
+        <button type="button" class="nav-btn active" data-module="fuel" aria-label="محطة البنزين">
           <img src="/assets/logo_cpc.png" alt="">
         </button>
-        <button type="button" data-module="land" aria-label="الأراضي">
+        <button type="button" class="nav-btn" data-module="land" aria-label="الأراضي">
           <span aria-hidden="true">🌾</span>
         </button>
       </div>
       <span class="mobile-nav-separator" aria-hidden="true">|</span>
-      <button class="active" data-view="overview"><span>🏠</span>الرئيسية</button>
-      <button data-view="sales-summary"><span>📊</span>ملخص المبيعات</button>
-      <button data-view="profit"><span>📈</span>المكسب</button>
-      <button data-view="expenses"><span>📉</span>المصاريف</button>
-      <button data-view="annual-inventory"><span>📒</span>جرد سنوي</button>
-      <button data-view="shift-day-summaries"><span>📋</span>سجل الورديات</button>
-      <button class="land-tab" data-view="land-dashboard"><span>🌾</span>الأراضي</button>
-      <button class="land-tab" data-view="land-plots"><span>📍</span>قطع الأرض</button>
-      <button class="land-tab" data-view="land-tenants"><span>👥</span>المستأجرون</button>
-      <button class="land-tab" data-view="land-reports"><span>📋</span>تقارير</button>
+      <button class="nav-btn active" data-view="overview">الرئيسية</button>
+      <button class="nav-btn" data-view="sales-summary">ملخص المبيعات</button>
+      <button class="nav-btn" data-view="profit">المكسب</button>
+      <button class="nav-btn" data-view="expenses">المصاريف</button>
+      <button class="nav-btn" data-view="annual-inventory">جرد سنوي</button>
+      <button class="nav-btn" data-view="shift-day-summaries">سجل الورديات</button>
+      <button class="nav-btn nav-land land-tab" data-view="land-dashboard">الأراضي</button>
+      <button class="nav-btn nav-land land-tab" data-view="land-plots">قطع الأرض</button>
+      <button class="nav-btn nav-land land-tab" data-view="land-tenants">المستأجرون</button>
+      <button class="nav-btn nav-land land-tab" data-view="land-reports">تقارير</button>
     </nav>
   </div>
 

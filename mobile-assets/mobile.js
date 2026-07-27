@@ -268,7 +268,7 @@
 
   async function loadView(view) {
     state.currentView = view;
-    document.querySelectorAll('.tabs button[data-view]').forEach((button) => {
+    document.querySelectorAll('.bottom-navigation button[data-view]').forEach((button) => {
       button.classList.toggle('active', button.dataset.view === view);
     });
 
@@ -306,7 +306,7 @@
     button.addEventListener('click', () => switchModule(button.dataset.module));
   });
 
-  document.querySelectorAll('.tabs button[data-view]').forEach((button) => {
+  document.querySelectorAll('.bottom-navigation button[data-view]').forEach((button) => {
     button.addEventListener('click', () => loadView(button.dataset.view));
   });
 
