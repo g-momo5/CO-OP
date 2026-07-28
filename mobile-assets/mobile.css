@@ -587,14 +587,14 @@ body.readonly-web {
   top: 0;
   margin-inline-start: auto;
   display: flex;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 50%;
-  background: var(--coop-red);
-  color: #ffffff;
+  border-radius: 0;
+  background: transparent;
+  color: var(--coop-ink);
   font-size: 1.35rem;
 }
 
@@ -682,17 +682,17 @@ body.readonly-web {
 
 @media (max-width: 768px) {
   .readonly-web .header {
-    min-height: 94px;
-    padding: 0.8rem 0.85rem 0.9rem;
+    min-height: 78px;
+    padding: 0.55rem 0.8rem 0.65rem;
   }
 
   .readonly-web .app-title {
-    font-size: clamp(0.98rem, 3.95vw, 1.18rem);
-    line-height: 1.24;
+    font-size: clamp(1.12rem, 4.45vw, 1.36rem);
+    line-height: 1.18;
   }
 
   .readonly-web .main-content {
-    padding: 112px 0.75rem 168px;
+    padding: 94px 0.75rem 168px;
   }
 
   .readonly-web .bottom-navigation {
@@ -788,11 +788,11 @@ body.readonly-web {
 
 @media (max-width: 640px) {
   .readonly-web .header {
-    min-height: 84px;
+    min-height: 72px;
   }
 
   .readonly-web .main-content {
-    padding: 100px 0.55rem 156px;
+    padding: 86px 0.55rem 156px;
   }
 
   .readonly-web .content,
@@ -871,22 +871,33 @@ body.readonly-web {
     gap: 0.35rem;
   }
 
+  .readonly-web .shift-day-heading {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .readonly-web .shift-day-heading .title-main {
+    justify-content: center;
+    width: 100%;
+  }
+
   .readonly-web .shift-total-box {
-    min-height: 88px;
-    padding: 0.45rem 0.28rem;
+    min-height: 76px;
+    gap: 0.18rem;
+    padding: 0.34rem 0.22rem;
   }
 
   .readonly-web .shift-total-icon {
-    font-size: 1.15rem;
+    font-size: 1.03rem;
   }
 
   .readonly-web .shift-total-box span:not(.shift-total-icon) {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     line-height: 1.25;
   }
 
   .readonly-web .shift-total-box strong {
-    font-size: 0.82rem;
+    font-size: 0.76rem;
     line-height: 1.25;
   }
 
@@ -1114,9 +1125,9 @@ body.readonly-web {
   }
 
   .readonly-web .modal-close {
-    width: 38px;
-    height: 38px;
-    font-size: 1.5rem;
+    width: 32px;
+    height: 32px;
+    font-size: 1.55rem;
   }
 
   .readonly-web .modal-title-row {
@@ -1201,7 +1212,7 @@ body.readonly-web {
 
 @media (max-width: 380px) {
   .readonly-web .app-title {
-    font-size: 0.92rem;
+    font-size: 1.03rem;
   }
 
   .readonly-web .main-content {
@@ -1222,15 +1233,15 @@ body.readonly-web {
   }
 
   .readonly-web .shift-total-box {
-    min-height: 84px;
-    padding: 0.38rem 0.2rem;
+    min-height: 72px;
+    padding: 0.3rem 0.18rem;
   }
 
   .readonly-web .shift-total-box span:not(.shift-total-icon) {
-    font-size: 0.72rem;
+    font-size: 0.68rem;
   }
 
   .readonly-web .shift-total-box strong {
-    font-size: 0.76rem;
+    font-size: 0.71rem;
   }
 }
