@@ -79,10 +79,35 @@
   }
 
   function wireMonthFilter(formId, render) {
-    document.getElementById(formId)?.addEventListener('submit', (event) => {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    bindMonthPickers(form);
+    form.addEventListener('submit', (event) => {
       event.preventDefault();
+      syncMonthPickers(event.currentTarget);
       const form = new FormData(event.currentTarget);
       render(form.get('fromMonth'), form.get('toMonth'));
+    });
+  }
+
+  function syncMonthPicker(picker) {
+    const month = picker.querySelector('[data-month-picker-month]')?.value;
+    const year = picker.querySelector('[data-month-picker-year]')?.value;
+    const input = picker.querySelector('input[type="hidden"]');
+    if (!input || !month || !year) return;
+    input.value = `${year}-${month}`;
+  }
+
+  function syncMonthPickers(form) {
+    form?.querySelectorAll('[data-month-picker]').forEach(syncMonthPicker);
+  }
+
+  function bindMonthPickers(form) {
+    form?.querySelectorAll('[data-month-picker]').forEach((picker) => {
+      syncMonthPicker(picker);
+      picker.querySelectorAll('select').forEach((select) => {
+        select.addEventListener('change', () => syncMonthPicker(picker));
+      });
     });
   }
 
@@ -179,8 +204,11 @@
       ${ui.monthFilter('expensesFilter', range, 'تحديث', extra)}
       <div id="expensesBody" class="loading">جار التحميل...</div>
     `;
-    document.getElementById('expensesFilter')?.addEventListener('submit', (event) => {
+    const expensesFilter = document.getElementById('expensesFilter');
+    bindMonthPickers(expensesFilter);
+    expensesFilter?.addEventListener('submit', (event) => {
       event.preventDefault();
+      syncMonthPickers(event.currentTarget);
       const form = new FormData(event.currentTarget);
       renderExpenses(form.get('fromMonth'), form.get('toMonth'), form.get('searchTerm'));
     });

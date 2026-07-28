@@ -114,6 +114,46 @@
     return `${monthNames[monthIndex] || monthKey} ${year}`;
   }
 
+  function normalizeMonthKey(value, fallback = getMonthKey()) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+    return match ? `${match[1]}-${match[2]}` : fallback;
+  }
+
+  function monthPickerYears(...monthKeys) {
+    const currentYear = new Date().getFullYear();
+    const years = monthKeys
+      .map((monthKey) => parseInt(String(monthKey || '').slice(0, 4), 10))
+      .filter((year) => Number.isInteger(year));
+    const minYear = Math.min(currentYear - 5, ...years);
+    const maxYear = Math.max(currentYear + 1, ...years);
+    const options = [];
+    for (let year = minYear; year <= maxYear; year += 1) options.push(String(year));
+    return options;
+  }
+
+  function monthPickerField(name, label, value, years) {
+    const safeValue = normalizeMonthKey(value);
+    const selectedYear = safeValue.slice(0, 4);
+    const selectedMonth = safeValue.slice(5, 7);
+    return `
+      <label class="filter-field month-filter-field">
+        <span>${escapeHtml(label)}</span>
+        <span class="month-picker" data-month-picker="${escapeHtml(name)}">
+          <select aria-label="${escapeHtml(label)} - الشهر" data-month-picker-month>
+            ${monthNames.map((monthName, index) => {
+              const monthValue = String(index + 1).padStart(2, '0');
+              return `<option value="${monthValue}"${monthValue === selectedMonth ? ' selected' : ''}>${escapeHtml(monthName)}</option>`;
+            }).join('')}
+          </select>
+          <select aria-label="${escapeHtml(label)} - السنة" data-month-picker-year>
+            ${years.map((year) => `<option value="${escapeHtml(year)}"${year === selectedYear ? ' selected' : ''}>${escapeHtml(year)}</option>`).join('')}
+          </select>
+          <input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(safeValue)}">
+        </span>
+      </label>
+    `;
+  }
+
   function currentMonthRange(now = new Date()) {
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -184,14 +224,13 @@
   }
 
   function monthFilter(formId, defaults, buttonText = 'تحديث', extra = '') {
+    const fromMonth = normalizeMonthKey(defaults.fromMonth);
+    const toMonth = normalizeMonthKey(defaults.toMonth);
+    const years = monthPickerYears(fromMonth, toMonth);
     return `
       <form id="${escapeHtml(formId)}" class="filter-bar">
-        <label>من شهر
-          <input type="month" name="fromMonth" value="${escapeHtml(defaults.fromMonth)}">
-        </label>
-        <label>إلى شهر
-          <input type="month" name="toMonth" value="${escapeHtml(defaults.toMonth)}">
-        </label>
+        ${monthPickerField('fromMonth', 'من شهر', fromMonth, years)}
+        ${monthPickerField('toMonth', 'إلى شهر', toMonth, years)}
         ${extra}
         <button type="submit">${escapeHtml(buttonText)}</button>
       </form>
