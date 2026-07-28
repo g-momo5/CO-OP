@@ -360,10 +360,20 @@
         : monthRow?.custom_values;
       return sourceValues?.[item.key] || 0;
     };
+    const profitValueClass = (item, value) => {
+      if (item.kind !== 'net') return '';
+      const numericValue = Number(value) || 0;
+      if (numericValue > 0) return ' class="profit-net-positive"';
+      if (numericValue < 0) return ' class="profit-net-negative"';
+      return ' class="profit-net-zero"';
+    };
     const tableRows = displayRows.map((item) => `
       <tr class="profit-${item.kind}-row">
         <td data-label="البند"><strong>${escapeHtml(item.label)}</strong></td>
-        ${months.map((month) => `<td data-label="${escapeHtml(monthLabel(month))}">${formatMoney(getValue(byMonth.get(month), item))}</td>`).join('')}
+        ${months.map((month) => {
+          const value = getValue(byMonth.get(month), item);
+          return `<td${profitValueClass(item, value)} data-label="${escapeHtml(monthLabel(month))}">${formatMoney(value)}</td>`;
+        }).join('')}
       </tr>
     `);
     return sectionCard(
