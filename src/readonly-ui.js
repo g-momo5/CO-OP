@@ -141,7 +141,8 @@
 
   function table(headers, rows, emptyText = 'لا توجد بيانات', tableClass = '') {
     if (!rows.length) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
-    const wrapperClass = ['table-wrap', tableClass ? `${tableClass}-wrap` : ''].filter(Boolean).join(' ');
+    const tableClasses = String(tableClass || '').split(/\s+/).filter(Boolean);
+    const wrapperClass = ['table-wrap', ...tableClasses.map((className) => `${className}-wrap`)].join(' ');
     return `
       <div class="${escapeHtml(wrapperClass)}">
         <table class="base-table ${escapeHtml(tableClass)}">

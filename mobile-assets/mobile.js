@@ -99,10 +99,17 @@
 
   function keepActiveNavigationVisible() {
     requestAnimationFrame(() => {
-      document.querySelector('.bottom-navigation button[data-view].active')?.scrollIntoView({
-        block: 'nearest',
-        inline: 'center'
-      });
+      const activeButton = document.querySelector('.bottom-navigation button[data-view].active');
+      const navigation = activeButton?.closest('.bottom-navigation');
+      if (!activeButton || !navigation) return;
+      const navRect = navigation.getBoundingClientRect();
+      const buttonRect = activeButton.getBoundingClientRect();
+      const padding = 12;
+      if (buttonRect.left < navRect.left + padding) {
+        navigation.scrollBy({ left: buttonRect.left - navRect.left - padding, behavior: 'smooth' });
+      } else if (buttonRect.right > navRect.right - padding) {
+        navigation.scrollBy({ left: buttonRect.right - navRect.right + padding, behavior: 'smooth' });
+      }
     });
   }
 

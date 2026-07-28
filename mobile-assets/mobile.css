@@ -16,6 +16,8 @@
 
 html {
   direction: rtl;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body.readonly-web {
@@ -159,6 +161,13 @@ body.readonly-web {
 .readonly-web .modal-section-stack {
   display: grid;
   gap: 1rem;
+}
+
+.readonly-web .content > *,
+.readonly-web .section-stack > *,
+.readonly-web .grid > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .readonly-web .grid.two {
@@ -924,6 +933,115 @@ body.readonly-web {
   .readonly-web .profit-summary-table .profit-summary-row td:first-child,
   .readonly-web .profit-summary-table .profit-net-row td:first-child {
     background: inherit;
+  }
+
+  .readonly-web #profitBody .table-wrap {
+    max-height: calc(100vh - 360px);
+    min-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--coop-line);
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .readonly-web #profitBody .profit-summary-table {
+    display: table;
+    width: max-content;
+    min-width: 100%;
+    border: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #ffffff;
+    box-shadow: none;
+  }
+
+  .readonly-web #profitBody .profit-summary-table thead {
+    display: table-header-group;
+  }
+
+  .readonly-web #profitBody .profit-summary-table tbody {
+    display: table-row-group;
+  }
+
+  .readonly-web #profitBody .profit-summary-table tr {
+    display: table-row;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .readonly-web #profitBody .profit-summary-table th,
+  .readonly-web #profitBody .profit-summary-table td,
+  .readonly-web #profitBody .profit-summary-table th:not(:first-child),
+  .readonly-web #profitBody .profit-summary-table td:not(:first-child),
+  .readonly-web #profitBody .profit-summary-table th:first-child,
+  .readonly-web #profitBody .profit-summary-table td:first-child {
+    display: table-cell;
+    position: static;
+    width: auto;
+    min-width: 76px;
+    max-width: none;
+    padding: 0.54rem 0.62rem;
+    border-bottom: 1px solid #edf0f2;
+    box-shadow: none;
+    font-size: 0.82rem;
+    line-height: 1.28;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .readonly-web #profitBody .profit-summary-table th:first-child,
+  .readonly-web #profitBody .profit-summary-table td:first-child {
+    position: sticky;
+    right: 0;
+    left: auto;
+    z-index: 8;
+    width: 142px;
+    min-width: 142px;
+    max-width: 142px;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
+  }
+
+  .readonly-web #profitBody .profit-summary-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--coop-ink);
+    color: #ffffff;
+    font-weight: 800;
+  }
+
+  .readonly-web #profitBody .profit-summary-table thead th:first-child {
+    z-index: 12;
+  }
+
+  .readonly-web #profitBody .profit-summary-table td:not(:first-child) {
+    direction: ltr;
+    text-align: center;
+  }
+
+  .readonly-web #profitBody .profit-summary-table td:not(:first-child)::before {
+    content: none;
+  }
+
+  .readonly-web #profitBody .profit-summary-table .profit-revenue-row td:first-child {
+    background: #eefaf1;
+  }
+
+  .readonly-web #profitBody .profit-summary-table .profit-deduction-row td:first-child {
+    background: #fff4e5;
+  }
+
+  .readonly-web #profitBody .profit-summary-table .profit-summary-row td:first-child {
+    background: #edf5ff;
+  }
+
+  .readonly-web #profitBody .profit-summary-table .profit-net-row td:first-child {
+    background: #f0fdf4;
   }
 
   .readonly-web .home-chart-box,
