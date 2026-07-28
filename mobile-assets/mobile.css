@@ -752,3 +752,211 @@ body.readonly-web {
     max-height: calc(100vh - 1rem);
   }
 }
+
+@media (max-width: 640px) {
+  .readonly-web .header {
+    min-height: 84px;
+  }
+
+  .readonly-web .main-content {
+    padding: 100px 0.55rem 108px;
+  }
+
+  .readonly-web .content,
+  .readonly-web .section-stack {
+    gap: 0.75rem;
+  }
+
+  .readonly-web .card,
+  .readonly-web .filter-bar,
+  .readonly-web .loading,
+  .readonly-web .error,
+  .readonly-web .empty {
+    border-radius: 12px;
+  }
+
+  .readonly-web .card {
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .readonly-web .title-icon,
+  .readonly-web .metric-icon {
+    font-size: 1.35rem;
+  }
+
+  .readonly-web .card-title-row .title-main {
+    min-width: 0;
+    font-size: 1.18rem;
+    line-height: 1.25;
+  }
+
+  .readonly-web .filter-bar {
+    gap: 0.65rem;
+    padding: 0.8rem;
+  }
+
+  .readonly-web .filter-bar label {
+    gap: 0.25rem;
+    font-size: 0.95rem;
+  }
+
+  .readonly-web .filter-bar input,
+  .readonly-web .filter-bar select,
+  .readonly-web .filter-bar button {
+    min-height: 40px;
+    border-radius: 14px;
+    padding: 0.42rem 0.75rem;
+    font-size: 0.95rem;
+  }
+
+  .readonly-web .bottom-navigation {
+    gap: 0.35rem;
+    padding: 0.42rem 0.5rem calc(0.7rem + env(safe-area-inset-bottom));
+  }
+
+  .readonly-web .nav-btn {
+    min-width: 78px;
+    min-height: 34px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.84rem;
+  }
+
+  .readonly-web .mobile-module-switch .nav-btn {
+    width: 36px;
+    min-width: 36px;
+    height: 34px;
+  }
+
+  .readonly-web .mobile-module-switch img {
+    width: 21px;
+    height: 21px;
+  }
+
+  .readonly-web #salesSummaryBody .table-wrap,
+  .readonly-web #profitBody .table-wrap,
+  .readonly-web #expensesBody .table-wrap {
+    max-height: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .readonly-web .financial-summary-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .readonly-web .financial-summary-table thead {
+    display: none;
+  }
+
+  .readonly-web .financial-summary-table tbody {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .readonly-web .financial-summary-table tr {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--coop-line);
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  }
+
+  .readonly-web .financial-summary-table th,
+  .readonly-web .financial-summary-table td,
+  .readonly-web .financial-summary-table th:not(:first-child),
+  .readonly-web .financial-summary-table td:not(:first-child),
+  .readonly-web .financial-summary-table th:first-child,
+  .readonly-web .financial-summary-table td:first-child {
+    position: static;
+    z-index: auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    box-shadow: none;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .readonly-web .financial-summary-table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.58rem 0.72rem;
+    border-bottom: 1px solid #edf0f2;
+    line-height: 1.4;
+  }
+
+  .readonly-web .financial-summary-table td:first-child {
+    display: block;
+    padding: 0.72rem;
+    background: #f8f9fa;
+    color: var(--coop-ink);
+    font-size: 1rem;
+  }
+
+  .readonly-web .financial-summary-table td:not(:first-child) {
+    direction: ltr;
+    text-align: left;
+  }
+
+  .readonly-web .financial-summary-table td:not(:first-child)::before {
+    content: attr(data-label);
+    direction: rtl;
+    color: var(--coop-muted);
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .readonly-web .financial-summary-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .readonly-web .profit-summary-table .profit-revenue-row td:first-child,
+  .readonly-web .profit-summary-table .profit-deduction-row td:first-child,
+  .readonly-web .profit-summary-table .profit-summary-row td:first-child,
+  .readonly-web .profit-summary-table .profit-net-row td:first-child {
+    background: inherit;
+  }
+
+  .readonly-web .home-chart-box,
+  .readonly-web .home-chart-box canvas {
+    height: 260px;
+    min-height: 260px;
+  }
+
+  .readonly-web .bar-row {
+    grid-template-columns: 1fr;
+    gap: 0.32rem;
+  }
+
+  .readonly-web .bar-row strong {
+    text-align: right;
+  }
+}
+
+@media (max-width: 380px) {
+  .readonly-web .app-title {
+    font-size: 0.92rem;
+  }
+
+  .readonly-web .main-content {
+    padding-inline: 0.4rem;
+  }
+
+  .readonly-web .card {
+    padding: 0.65rem;
+  }
+
+  .readonly-web .nav-btn {
+    min-width: 70px;
+    font-size: 0.78rem;
+  }
+}

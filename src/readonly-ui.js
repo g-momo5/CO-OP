@@ -297,9 +297,9 @@
       if (row.type === 'oil') hasSeenOil = true;
       return `
         <tr class="${isFirstOil ? 'sales-first-oil-row' : ''}">
-          <td><strong>${escapeHtml(row.name)}</strong></td>
-          ${months.map((month) => `<td>${formatNumber(row.byMonth?.[month] || 0)}</td>`).join('')}
-          <td class="cell-total">${formatNumber(row.total)}</td>
+          <td data-label="المنتج"><strong>${escapeHtml(row.name)}</strong></td>
+          ${months.map((month) => `<td data-label="${escapeHtml(monthLabel(month))}">${formatNumber(row.byMonth?.[month] || 0)}</td>`).join('')}
+          <td class="cell-total" data-label="الإجمالي">${formatNumber(row.total)}</td>
         </tr>
       `;
     });
@@ -361,8 +361,8 @@
     };
     const tableRows = displayRows.map((item) => `
       <tr class="profit-${item.kind}-row">
-        <td><strong>${escapeHtml(item.label)}</strong></td>
-        ${months.map((month) => `<td>${formatMoney(getValue(byMonth.get(month), item))}</td>`).join('')}
+        <td data-label="البند"><strong>${escapeHtml(item.label)}</strong></td>
+        ${months.map((month) => `<td data-label="${escapeHtml(monthLabel(month))}">${formatMoney(getValue(byMonth.get(month), item))}</td>`).join('')}
       </tr>
     `);
     return sectionCard(
@@ -377,9 +377,9 @@
     const months = expenses.months || [];
     const rows = (expenses.rows || []).map((row) => `
       <tr>
-        <td><strong>${escapeHtml(row.description)}</strong></td>
-        ${months.map((month) => `<td>${row.byMonth?.[month] ? formatMoney(row.byMonth[month]) : ''}</td>`).join('')}
-        <td class="cell-total">${formatMoney(row.total)}</td>
+        <td data-label="المصروف"><strong>${escapeHtml(row.description)}</strong></td>
+        ${months.map((month) => `<td data-label="${escapeHtml(monthLabel(month))}">${row.byMonth?.[month] ? formatMoney(row.byMonth[month]) : ''}</td>`).join('')}
+        <td class="cell-total" data-label="الإجمالي">${formatMoney(row.total)}</td>
       </tr>
     `);
     return sectionCard(

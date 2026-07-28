@@ -97,6 +97,15 @@
     });
   }
 
+  function keepActiveNavigationVisible() {
+    requestAnimationFrame(() => {
+      document.querySelector('.bottom-navigation button[data-view].active')?.scrollIntoView({
+        block: 'nearest',
+        inline: 'center'
+      });
+    });
+  }
+
   function scrollLandTablesToStart() {
     requestAnimationFrame(() => {
       content.querySelectorAll('.land-dashboard-contracts-table-wrap').forEach((tableWrap) => {
@@ -278,6 +287,7 @@
     document.querySelectorAll('.bottom-navigation button[data-view]').forEach((button) => {
       button.classList.toggle('active', button.dataset.view === view);
     });
+    keepActiveNavigationVisible();
 
     try {
       if (view === 'overview') await loadOverview();
