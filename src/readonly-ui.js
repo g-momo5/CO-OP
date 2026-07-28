@@ -133,23 +133,15 @@
 
   function monthPickerField(name, label, value, years) {
     const safeValue = normalizeMonthKey(value);
-    const selectedYear = safeValue.slice(0, 4);
-    const selectedMonth = safeValue.slice(5, 7);
     return `
       <label class="filter-field month-filter-field">
         <span>${escapeHtml(label)}</span>
-        <span class="month-picker" data-month-picker="${escapeHtml(name)}">
-          <select aria-label="${escapeHtml(label)} - الشهر" data-month-picker-month>
-            ${monthNames.map((monthName, index) => {
-              const monthValue = String(index + 1).padStart(2, '0');
-              return `<option value="${monthValue}"${monthValue === selectedMonth ? ' selected' : ''}>${escapeHtml(monthName)}</option>`;
-            }).join('')}
-          </select>
-          <select aria-label="${escapeHtml(label)} - السنة" data-month-picker-year>
-            ${years.map((year) => `<option value="${escapeHtml(year)}"${year === selectedYear ? ' selected' : ''}>${escapeHtml(year)}</option>`).join('')}
-          </select>
-          <input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(safeValue)}">
-        </span>
+        <select name="${escapeHtml(name)}" class="month-picker-select" aria-label="${escapeHtml(label)}">
+          ${years.map((year) => monthNames.map((monthName, index) => {
+            const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
+            return `<option value="${escapeHtml(monthValue)}"${monthValue === safeValue ? ' selected' : ''}>${escapeHtml(monthName)} ${escapeHtml(year)}</option>`;
+          }).join('')).join('')}
+        </select>
       </label>
     `;
   }
@@ -228,7 +220,7 @@
     const toMonth = normalizeMonthKey(defaults.toMonth);
     const years = monthPickerYears(fromMonth, toMonth);
     return `
-      <form id="${escapeHtml(formId)}" class="filter-bar">
+      <form id="${escapeHtml(formId)}" class="filter-bar${extra ? ' has-extra-filter' : ''}">
         ${monthPickerField('fromMonth', 'من شهر', fromMonth, years)}
         ${monthPickerField('toMonth', 'إلى شهر', toMonth, years)}
         ${extra}
@@ -263,8 +255,17 @@
     return '<div class="home-chart-box"><canvas id="homeFuelSalesChart"></canvas></div>';
   }
 
+  function renderHomeChartFallback(chart) {
+    const months = Array.isArray(chart?.months) ? chart.months : [];
+    const rows = (chart?.rows || []).map((row) => ({
+      name: row.name,
+      quantity: months.reduce((sum, month) => sum + (Number(row.byMonth?.[month]) || 0), 0)
+    }));
+    return renderBarChart(rows);
+  }
+
   function mountHomeChart(chart, chartRef = {}) {
-    if (!root.Chart || !chart?.months?.length) return chartRef.current || null;
+    if (!chart?.months?.length) return chartRef.current || null;
     const canvas = root.document?.getElementById('homeFuelSalesChart');
     if (!canvas) return chartRef.current || null;
     if (chartRef.current) chartRef.current.destroy();
@@ -277,6 +278,11 @@
     const rows = (chart.rows || []).filter((row) => (
       chart.months.some((month) => Number(row.byMonth?.[month]) > 0)
     ));
+    if (!root.Chart || !rows.length) {
+      canvas.closest('.home-chart-box').innerHTML = renderHomeChartFallback({ ...chart, rows });
+      chartRef.current = null;
+      return null;
+    }
 
     chartRef.current = new root.Chart(canvas.getContext('2d'), {
       type: 'line',

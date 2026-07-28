@@ -13,6 +13,11 @@ if (process.env.VERCEL) {
   fs.mkdirSync(path.join(publicDir, 'shared'), { recursive: true });
   fs.copyFileSync(path.join(root, 'src', 'styles.css'), path.join(publicDir, 'shared', 'styles.css'));
   fs.copyFileSync(path.join(root, 'src', 'readonly-ui.js'), path.join(publicDir, 'shared', 'readonly-ui.js'));
+  fs.mkdirSync(path.join(publicDir, 'vendor'), { recursive: true });
+  fs.copyFileSync(
+    path.join(root, 'node_modules', 'chart.js', 'dist', 'chart.umd.min.js'),
+    path.join(publicDir, 'vendor', 'chart.umd.min.js')
+  );
   fs.mkdirSync(path.join(publicDir, 'assets'), { recursive: true });
   fs.copyFileSync(path.join(root, 'assets', 'logo_cpc.png'), path.join(publicDir, 'assets', 'logo_cpc.png'));
   fs.copyFileSync(path.join(root, 'mobile', 'index.html'), path.join(publicDir, 'index.html'));

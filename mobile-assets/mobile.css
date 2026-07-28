@@ -270,14 +270,6 @@ body.readonly-web {
   max-width: 220px;
 }
 
-.readonly-web .month-picker {
-  width: 100%;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(76px, 0.75fr);
-  gap: 0.45rem;
-}
-
 .readonly-web .filter-bar input,
 .readonly-web .filter-bar select {
   width: 100%;
@@ -690,17 +682,17 @@ body.readonly-web {
 
 @media (max-width: 768px) {
   .readonly-web .header {
-    min-height: 78px;
-    padding: 0.55rem 0.8rem 0.65rem;
+    min-height: 82px;
+    padding: 0.55rem 0.72rem 0.62rem;
   }
 
   .readonly-web .app-title {
-    font-size: clamp(1.2rem, 4.7vw, 1.46rem);
-    line-height: 1.14;
+    font-size: clamp(1.38rem, 5.35vw, 1.66rem);
+    line-height: 1.1;
   }
 
   .readonly-web .main-content {
-    padding: 94px 0.75rem 168px;
+    padding: 98px 0.75rem 168px;
   }
 
   .readonly-web .bottom-navigation {
@@ -733,10 +725,19 @@ body.readonly-web {
     padding: 0.95rem;
   }
 
-  .readonly-web .card-title-row,
-  .readonly-web .filter-bar {
+  .readonly-web .card-title-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .readonly-web .filter-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .readonly-web .filter-bar.has-extra-filter {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .readonly-web .filter-bar input,
@@ -746,17 +747,18 @@ body.readonly-web {
   }
 
   .readonly-web .filter-bar label {
-    flex: 0 0 auto;
+    flex: initial;
     width: 100%;
     max-width: 100%;
     display: grid;
-    grid-template-columns: minmax(58px, max-content) minmax(0, 1fr);
-    gap: 0.55rem;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.42rem;
     align-items: center;
   }
 
   .readonly-web .filter-bar button {
-    flex: 0 0 auto;
+    grid-column: 1 / -1;
+    flex: initial;
     width: 100%;
     max-width: 100%;
   }
@@ -805,11 +807,11 @@ body.readonly-web {
 
 @media (max-width: 640px) {
   .readonly-web .header {
-    min-height: 72px;
+    min-height: 78px;
   }
 
   .readonly-web .main-content {
-    padding: 86px 0.55rem 156px;
+    padding: 92px 0.55rem 156px;
   }
 
   .readonly-web .content,
@@ -842,13 +844,13 @@ body.readonly-web {
   }
 
   .readonly-web .filter-bar {
-    gap: 0.58rem;
+    gap: 0.5rem;
     padding: 0.8rem;
   }
 
   .readonly-web .filter-bar label {
-    gap: 0.48rem;
-    font-size: 0.95rem;
+    gap: 0.32rem;
+    font-size: 0.84rem;
   }
 
   .readonly-web .filter-bar input,
@@ -856,17 +858,12 @@ body.readonly-web {
   .readonly-web .filter-bar button {
     min-height: 40px;
     border-radius: 14px;
-    padding: 0.4rem 0.58rem;
-    font-size: 0.95rem;
+    padding: 0.38rem 0.42rem;
+    font-size: 0.84rem;
   }
 
   .readonly-web .filter-bar button {
     margin-top: 0.05rem;
-  }
-
-  .readonly-web .month-picker {
-    grid-template-columns: minmax(0, 1.2fr) minmax(70px, 0.8fr);
-    gap: 0.36rem;
   }
 
   .readonly-web .bottom-navigation {
@@ -1273,7 +1270,7 @@ body.readonly-web {
 
 @media (max-width: 380px) {
   .readonly-web .app-title {
-    font-size: 1.12rem;
+    font-size: 1.28rem;
   }
 
   .readonly-web .main-content {
