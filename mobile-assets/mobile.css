@@ -372,7 +372,7 @@ body.readonly-web {
   max-height: calc(100vh - 270px);
   min-height: 260px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .readonly-web .financial-summary-table th:not(:first-child),
@@ -994,16 +994,21 @@ body.readonly-web {
     background: inherit;
   }
 
-  .readonly-web #profitBody .table-wrap {
+  .readonly-web #salesSummaryBody .table-wrap,
+  .readonly-web #profitBody .table-wrap,
+  .readonly-web #expensesBody .table-wrap {
     max-height: calc(100vh - 360px);
     min-height: 240px;
     overflow: auto;
     border: 1px solid var(--coop-line);
     border-radius: 10px;
     background: #ffffff;
+    overscroll-behavior: auto;
   }
 
-  .readonly-web #profitBody .profit-summary-table {
+  .readonly-web #salesSummaryBody .financial-summary-table,
+  .readonly-web #profitBody .financial-summary-table,
+  .readonly-web #expensesBody .financial-summary-table {
     display: table;
     width: max-content;
     min-width: 100%;
@@ -1014,18 +1019,24 @@ body.readonly-web {
     box-shadow: none;
   }
 
-  .readonly-web #profitBody .profit-summary-table thead {
+  .readonly-web #salesSummaryBody .financial-summary-table thead,
+  .readonly-web #profitBody .financial-summary-table thead,
+  .readonly-web #expensesBody .financial-summary-table thead {
     display: table-header-group;
     position: sticky;
     top: 0;
     z-index: 20;
   }
 
-  .readonly-web #profitBody .profit-summary-table tbody {
+  .readonly-web #salesSummaryBody .financial-summary-table tbody,
+  .readonly-web #profitBody .financial-summary-table tbody,
+  .readonly-web #expensesBody .financial-summary-table tbody {
     display: table-row-group;
   }
 
-  .readonly-web #profitBody .profit-summary-table tr {
+  .readonly-web #salesSummaryBody .financial-summary-table tr,
+  .readonly-web #profitBody .financial-summary-table tr,
+  .readonly-web #expensesBody .financial-summary-table tr {
     display: table-row;
     border: 0;
     border-radius: 0;
@@ -1033,12 +1044,24 @@ body.readonly-web {
     box-shadow: none;
   }
 
-  .readonly-web #profitBody .profit-summary-table th,
-  .readonly-web #profitBody .profit-summary-table td,
-  .readonly-web #profitBody .profit-summary-table th:not(:first-child),
-  .readonly-web #profitBody .profit-summary-table td:not(:first-child),
-  .readonly-web #profitBody .profit-summary-table th:first-child,
-  .readonly-web #profitBody .profit-summary-table td:first-child {
+  .readonly-web #salesSummaryBody .financial-summary-table th,
+  .readonly-web #salesSummaryBody .financial-summary-table td,
+  .readonly-web #salesSummaryBody .financial-summary-table th:not(:first-child),
+  .readonly-web #salesSummaryBody .financial-summary-table td:not(:first-child),
+  .readonly-web #salesSummaryBody .financial-summary-table th:first-child,
+  .readonly-web #salesSummaryBody .financial-summary-table td:first-child,
+  .readonly-web #profitBody .financial-summary-table th,
+  .readonly-web #profitBody .financial-summary-table td,
+  .readonly-web #profitBody .financial-summary-table th:not(:first-child),
+  .readonly-web #profitBody .financial-summary-table td:not(:first-child),
+  .readonly-web #profitBody .financial-summary-table th:first-child,
+  .readonly-web #profitBody .financial-summary-table td:first-child,
+  .readonly-web #expensesBody .financial-summary-table th,
+  .readonly-web #expensesBody .financial-summary-table td,
+  .readonly-web #expensesBody .financial-summary-table th:not(:first-child),
+  .readonly-web #expensesBody .financial-summary-table td:not(:first-child),
+  .readonly-web #expensesBody .financial-summary-table th:first-child,
+  .readonly-web #expensesBody .financial-summary-table td:first-child {
     display: table-cell;
     position: static;
     width: auto;
@@ -1053,8 +1076,12 @@ body.readonly-web {
     white-space: nowrap;
   }
 
-  .readonly-web #profitBody .profit-summary-table th:first-child,
-  .readonly-web #profitBody .profit-summary-table td:first-child {
+  .readonly-web #salesSummaryBody .financial-summary-table th:first-child,
+  .readonly-web #salesSummaryBody .financial-summary-table td:first-child,
+  .readonly-web #profitBody .financial-summary-table th:first-child,
+  .readonly-web #profitBody .financial-summary-table td:first-child,
+  .readonly-web #expensesBody .financial-summary-table th:first-child,
+  .readonly-web #expensesBody .financial-summary-table td:first-child {
     position: sticky;
     right: 0;
     left: auto;
@@ -1068,7 +1095,9 @@ body.readonly-web {
     box-shadow: -8px 0 10px -12px rgba(0, 0, 0, 0.35);
   }
 
-  .readonly-web #profitBody .profit-summary-table thead th {
+  .readonly-web #salesSummaryBody .financial-summary-table thead th,
+  .readonly-web #profitBody .financial-summary-table thead th,
+  .readonly-web #expensesBody .financial-summary-table thead th {
     position: sticky;
     top: 0;
     z-index: 21;
@@ -1077,16 +1106,22 @@ body.readonly-web {
     font-weight: 800;
   }
 
-  .readonly-web #profitBody .profit-summary-table thead th:first-child {
+  .readonly-web #salesSummaryBody .financial-summary-table thead th:first-child,
+  .readonly-web #profitBody .financial-summary-table thead th:first-child,
+  .readonly-web #expensesBody .financial-summary-table thead th:first-child {
     z-index: 23;
   }
 
-  .readonly-web #profitBody .profit-summary-table td:not(:first-child) {
+  .readonly-web #salesSummaryBody .financial-summary-table td:not(:first-child),
+  .readonly-web #profitBody .financial-summary-table td:not(:first-child),
+  .readonly-web #expensesBody .financial-summary-table td:not(:first-child) {
     direction: ltr;
     text-align: center;
   }
 
-  .readonly-web #profitBody .profit-summary-table td:not(:first-child)::before {
+  .readonly-web #salesSummaryBody .financial-summary-table td:not(:first-child)::before,
+  .readonly-web #profitBody .financial-summary-table td:not(:first-child)::before,
+  .readonly-web #expensesBody .financial-summary-table td:not(:first-child)::before {
     content: none;
   }
 
