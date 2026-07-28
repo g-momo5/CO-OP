@@ -448,26 +448,29 @@ body.readonly-web {
 }
 
 .readonly-web .profit-summary-table .profit-net-row td {
-  background: #101010;
-  color: #ffffff;
+  background: #f8f9fa;
+  color: var(--coop-ink);
   font-weight: 900;
 }
 
 .readonly-web .profit-summary-table .profit-net-row td:first-child,
 .readonly-web .profit-summary-table .profit-net-row strong {
-  color: #ffffff;
+  color: var(--coop-ink);
 }
 
 .readonly-web .profit-summary-table .profit-net-row .profit-net-positive {
-  color: #5ee182;
+  background: #dcfce7;
+  color: #166534;
 }
 
 .readonly-web .profit-summary-table .profit-net-row .profit-net-negative {
-  color: #ff7a7a;
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .readonly-web .profit-summary-table .profit-net-row .profit-net-zero {
-  color: #facc15;
+  background: #fef9c3;
+  color: #854d0e;
 }
 
 .readonly-web .home-chart-box,
@@ -558,6 +561,7 @@ body.readonly-web {
 .readonly-web .mobile-modal {
   width: min(960px, calc(100% - 2rem));
   max-height: min(760px, calc(100vh - 2rem));
+  max-width: calc(100vw - 2rem);
   border: 0;
   border-radius: 15px;
   padding: 0;
@@ -571,6 +575,7 @@ body.readonly-web {
 .readonly-web .mobile-modal-panel {
   max-height: inherit;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 1.25rem;
   border-radius: 15px;
   background: #ffffff;
@@ -597,6 +602,12 @@ body.readonly-web {
 .readonly-web .shift-summary-box h3 {
   margin: 0 0 0.75rem;
   color: var(--coop-red);
+}
+
+.readonly-web .modal-title-row strong,
+.readonly-web .shift-summary-box h3 strong {
+  direction: ltr;
+  white-space: nowrap;
 }
 
 .readonly-web .land-dashboard-metrics-grid {
@@ -994,6 +1005,9 @@ body.readonly-web {
 
   .readonly-web #profitBody .profit-summary-table thead {
     display: table-header-group;
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
 
   .readonly-web #profitBody .profit-summary-table tbody {
@@ -1046,14 +1060,14 @@ body.readonly-web {
   .readonly-web #profitBody .profit-summary-table thead th {
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 21;
     background: var(--coop-ink);
     color: #ffffff;
     font-weight: 800;
   }
 
   .readonly-web #profitBody .profit-summary-table thead th:first-child {
-    z-index: 12;
+    z-index: 23;
   }
 
   .readonly-web #profitBody .profit-summary-table td:not(:first-child) {
@@ -1078,7 +1092,95 @@ body.readonly-web {
   }
 
   .readonly-web #profitBody .profit-summary-table .profit-net-row td:first-child {
-    background: #101010;
+    background: #f8f9fa;
+  }
+
+  .readonly-web .mobile-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .readonly-web .mobile-modal-panel {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: 0.75rem;
+    border-radius: 0;
+  }
+
+  .readonly-web .modal-close {
+    width: 38px;
+    height: 38px;
+    font-size: 1.5rem;
+  }
+
+  .readonly-web .modal-title-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--coop-line);
+  }
+
+  .readonly-web .modal-title-row h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    line-height: 1.35;
+  }
+
+  .readonly-web .modal-title-row strong {
+    color: var(--coop-red);
+    font-size: 1rem;
+    text-align: left;
+  }
+
+  .readonly-web .modal-section-stack {
+    gap: 0.65rem;
+    min-height: 0;
+    overflow: auto;
+    padding-top: 0.65rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .readonly-web .shift-summary-box {
+    min-width: 0;
+  }
+
+  .readonly-web .shift-summary-box h3 {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.98rem;
+    line-height: 1.3;
+  }
+
+  .readonly-web .shift-summary-box h3 strong {
+    font-size: 0.95rem;
+    text-align: left;
+  }
+
+  .readonly-web .mobile-modal .table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--coop-line);
+    border-radius: 10px;
+  }
+
+  .readonly-web .mobile-modal .base-table {
+    min-width: 360px;
+    box-shadow: none;
+  }
+
+  .readonly-web .mobile-modal .base-table th,
+  .readonly-web .mobile-modal .base-table td {
+    padding: 0.5rem 0.55rem;
+    font-size: 0.82rem;
   }
 
   .readonly-web .home-chart-box,

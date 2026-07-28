@@ -6,6 +6,7 @@
 })(typeof window !== 'undefined' ? window : globalThis, function createReadonlyUi() {
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  const wholeMoneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 });
 
   const monthNames = [
     'يناير',
@@ -49,6 +50,11 @@
   function formatMoney(value) {
     const numeric = Number(value);
     return moneyFormatter.format(Number.isFinite(numeric) ? numeric : 0);
+  }
+
+  function formatMoneyWhole(value) {
+    const numeric = Number(value);
+    return wholeMoneyFormatter.format(Number.isFinite(numeric) ? numeric : 0);
   }
 
   function formatWholeEgp(value) {
@@ -372,7 +378,7 @@
         <td data-label="البند"><strong>${escapeHtml(item.label)}</strong></td>
         ${months.map((month) => {
           const value = getValue(byMonth.get(month), item);
-          return `<td${profitValueClass(item, value)} data-label="${escapeHtml(monthLabel(month))}">${formatMoney(value)}</td>`;
+          return `<td${profitValueClass(item, value)} data-label="${escapeHtml(monthLabel(month))}">${formatMoneyWhole(value)}</td>`;
         }).join('')}
       </tr>
     `);
