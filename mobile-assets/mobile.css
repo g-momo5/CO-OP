@@ -480,6 +480,68 @@ body.readonly-web {
   min-height: 360px;
 }
 
+.readonly-web .readonly-line-chart {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  padding: 0.5rem 0.4rem 0.2rem;
+}
+
+.readonly-web .readonly-line-chart svg {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+  direction: ltr;
+}
+
+.readonly-web .chart-grid-line {
+  stroke: #e8edf1;
+  stroke-width: 1;
+}
+
+.readonly-web .chart-axis-line {
+  stroke: #7f8c8d;
+  stroke-width: 1.5;
+}
+
+.readonly-web .chart-axis-label,
+.readonly-web .chart-month-label {
+  fill: var(--coop-muted);
+  font-family: "Noto Naskh Arabic", Tahoma, Arial, sans-serif;
+  font-size: 18px;
+  text-anchor: middle;
+}
+
+.readonly-web .chart-axis-label {
+  text-anchor: end;
+}
+
+.readonly-web .chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem 0.85rem;
+  color: var(--coop-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.readonly-web .chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.readonly-web .chart-legend i {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--legend-color);
+}
+
 .readonly-web .bar-chart {
   display: grid;
   gap: 0.65rem;

@@ -250,89 +250,77 @@
     `;
   }
 
-  function renderHomeChartShell(chart) {
-    if (!chart?.months?.length) return renderBarChart(chart?.rows || []);
-    return '<div class="home-chart-box"><canvas id="homeFuelSalesChart"></canvas></div>';
+  function getChartRows(chart) {
+    const months = Array.isArray(chart?.months) ? chart.months : [];
+    return (chart?.rows || [])
+      .map((row) => {
+        const values = months.map((month) => Number(row.byMonth?.[month]) || 0);
+        return {
+          name: row.name,
+          values,
+          quantity: values.reduce((sum, value) => sum + value, 0)
+        };
+      })
+      .filter((row) => row.quantity > 0);
   }
 
-  function renderHomeChartFallback(chart) {
+  function renderHomeChartShell(chart) {
     const months = Array.isArray(chart?.months) ? chart.months : [];
-    const rows = (chart?.rows || []).map((row) => ({
-      name: row.name,
-      quantity: months.reduce((sum, month) => sum + (Number(row.byMonth?.[month]) || 0), 0)
-    }));
-    return renderBarChart(rows);
+    const rows = getChartRows(chart);
+    if (!months.length || !rows.length) return renderBarChart(chart?.rows || []);
+
+    const width = 920;
+    const height = 360;
+    const plot = { x: 58, y: 28, width: 800, height: 230 };
+    const maxValue = Math.max(...rows.flatMap((row) => row.values), 1);
+    const colors = ['#c4291d', '#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#15803d', '#be185d'];
+    const xFor = (index) => months.length === 1
+      ? plot.x + (plot.width / 2)
+      : plot.x + ((plot.width / (months.length - 1)) * index);
+    const yFor = (value) => plot.y + plot.height - ((Number(value) || 0) / maxValue) * plot.height;
+    const gridValues = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(maxValue * ratio));
+    const labelEvery = Math.max(1, Math.ceil(months.length / 6));
+
+    return `
+      <div class="home-chart-box readonly-line-chart" role="img" aria-label="كميات المبيعات الشهرية حسب نوع الوقود">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+          <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="#ffffff"></rect>
+          ${gridValues.map((value) => {
+            const y = yFor(value);
+            return `
+              <line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.width}" y2="${y}" class="chart-grid-line"></line>
+              <text x="${plot.x - 12}" y="${y + 4}" class="chart-axis-label">${formatNumber(value)}</text>
+            `;
+          }).join('')}
+          <line x1="${plot.x}" y1="${plot.y + plot.height}" x2="${plot.x + plot.width}" y2="${plot.y + plot.height}" class="chart-axis-line"></line>
+          <line x1="${plot.x}" y1="${plot.y}" x2="${plot.x}" y2="${plot.y + plot.height}" class="chart-axis-line"></line>
+          ${months.map((month, index) => {
+            if (index % labelEvery !== 0 && index !== months.length - 1) return '';
+            const x = xFor(index);
+            return `<text x="${x}" y="${plot.y + plot.height + 28}" class="chart-month-label">${escapeHtml(monthLabel(month))}</text>`;
+          }).join('')}
+          ${rows.map((row, rowIndex) => {
+            const color = colors[rowIndex % colors.length];
+            const points = row.values.map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ');
+            return `
+              <polyline points="${points}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+              ${row.values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="4.5" fill="${color}"></circle>`).join('')}
+            `;
+          }).join('')}
+        </svg>
+        <div class="chart-legend">
+          ${rows.map((row, index) => `
+            <span><i style="--legend-color: ${colors[index % colors.length]}"></i>${escapeHtml(row.name)}</span>
+          `).join('')}
+        </div>
+      </div>
+    `;
   }
 
   function mountHomeChart(chart, chartRef = {}) {
-    if (!chart?.months?.length) return chartRef.current || null;
-    const canvas = root.document?.getElementById('homeFuelSalesChart');
-    if (!canvas) return chartRef.current || null;
     if (chartRef.current) chartRef.current.destroy();
-
-    const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#2E7D32', '#C2185B'];
-    const currentMonthKey = getMonthKey();
-    const forecastMonthIndex = chart.months.indexOf(currentMonthKey);
-    const registeredDays = Number(chart.salesDaysByMonth?.[currentMonthKey]) || 0;
-    const hasForecast = forecastMonthIndex !== -1 && registeredDays > 0;
-    const rows = (chart.rows || []).filter((row) => (
-      chart.months.some((month) => Number(row.byMonth?.[month]) > 0)
-    ));
-    if (!root.Chart || !rows.length) {
-      canvas.closest('.home-chart-box').innerHTML = renderHomeChartFallback({ ...chart, rows });
-      chartRef.current = null;
-      return null;
-    }
-
-    chartRef.current = new root.Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: {
-        labels: chart.months.map(monthLabel),
-        datasets: rows.map((row, index) => {
-          const data = chart.months.map((month) => Number(row.byMonth?.[month]) || 0);
-          if (hasForecast) {
-            data[forecastMonthIndex] = getCurrentMonthForecastValue(data[forecastMonthIndex], currentMonthKey, registeredDays);
-          }
-          return {
-            label: row.name,
-            data,
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length],
-            borderWidth: 2,
-            tension: 0.25,
-            segment: hasForecast ? {
-              borderDash: (context) => (context.p1DataIndex === forecastMonthIndex ? [8, 5] : undefined)
-            } : undefined
-          };
-        })
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { font: { family: 'Noto Naskh Arabic' } }
-          },
-          title: {
-            display: true,
-            text: 'كميات المبيعات الشهرية حسب نوع الوقود',
-            font: { family: 'Noto Naskh Arabic', size: 16 }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: { display: true, text: 'الكمية (لتر)', font: { family: 'Noto Naskh Arabic' } },
-            ticks: { font: { family: 'Noto Naskh Arabic' } }
-          },
-          x: {
-            ticks: { font: { family: 'Noto Naskh Arabic' } }
-          }
-        }
-      }
-    });
-    return chartRef.current;
+    chartRef.current = null;
+    return null;
   }
 
   function renderOverview(data = {}) {
