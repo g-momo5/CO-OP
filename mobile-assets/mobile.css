@@ -484,6 +484,9 @@ body.readonly-web {
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 0.55rem;
   padding: 0.4rem 0.35rem 0.2rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .readonly-web .readonly-line-chart svg {
@@ -539,6 +542,49 @@ body.readonly-web {
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--legend-color);
+}
+
+.readonly-web .chart-expand-btn {
+  min-height: 36px;
+  border: 2px solid var(--coop-red);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  background: var(--coop-red);
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.readonly-web .chart-zoom-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.readonly-web .chart-zoom-scroll {
+  min-height: 0;
+  overflow: auto;
+  direction: ltr;
+  -webkit-overflow-scrolling: touch;
+}
+
+.readonly-web .chart-zoom-scroll .readonly-line-chart {
+  width: max-content;
+  min-width: 980px;
+  height: auto;
+  min-height: 0;
+  padding: 0.6rem;
+}
+
+.readonly-web .chart-zoom-scroll .readonly-line-chart svg {
+  width: 980px;
+  min-width: 980px;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 920 / 360;
+}
+
+.readonly-web .chart-zoom-scroll .chart-legend {
+  min-width: 980px;
 }
 
 .readonly-web .bar-chart {
@@ -925,6 +971,11 @@ body.readonly-web {
 
   .readonly-web .filter-bar button {
     margin-top: 0.05rem;
+  }
+
+  .readonly-web .chart-expand-btn {
+    width: 100%;
+    min-height: 40px;
   }
 
   .readonly-web .bottom-navigation {
@@ -1315,8 +1366,36 @@ body.readonly-web {
 
   .readonly-web .home-chart-box,
   .readonly-web .home-chart-box svg {
-    height: 340px;
-    min-height: 340px;
+    height: auto;
+    min-height: 0;
+  }
+
+  .readonly-web .readonly-line-chart {
+    padding: 0.35rem 0.25rem 0.25rem;
+  }
+
+  .readonly-web .readonly-line-chart svg {
+    width: 760px;
+    min-width: 760px;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 920 / 360;
+  }
+
+  .readonly-web .chart-legend {
+    min-width: 760px;
+    justify-content: flex-start;
+    padding-inline: 0.35rem;
+  }
+
+  .readonly-web .chart-zoom-scroll .readonly-line-chart {
+    min-width: 1040px;
+  }
+
+  .readonly-web .chart-zoom-scroll .readonly-line-chart svg,
+  .readonly-web .chart-zoom-scroll .chart-legend {
+    width: 1040px;
+    min-width: 1040px;
   }
 
   .readonly-web .bar-row {

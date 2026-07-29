@@ -123,6 +123,54 @@
     });
   }
 
+  function closeChartZoomDialog() {
+    const dialog = document.getElementById('chartZoomDialog');
+    if (!dialog) return;
+    if (dialog.open && dialog.close) {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  function getChartZoomDialog() {
+    let dialog = document.getElementById('chartZoomDialog');
+    if (dialog) return dialog;
+    dialog = document.createElement('dialog');
+    dialog.id = 'chartZoomDialog';
+    dialog.className = 'mobile-modal chart-zoom-modal';
+    dialog.innerHTML = `
+      <div class="mobile-modal-panel chart-zoom-panel">
+        <button class="modal-close chart-zoom-close" type="button" aria-label="Close">×</button>
+        <div class="chart-zoom-scroll"></div>
+      </div>
+    `;
+    dialog.querySelector('.chart-zoom-close')?.addEventListener('click', closeChartZoomDialog);
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) closeChartZoomDialog();
+    });
+    document.body.appendChild(dialog);
+    return dialog;
+  }
+
+  function openChartZoomDialog() {
+    const sourceChart = content.querySelector('.readonly-line-chart');
+    if (!sourceChart) return;
+    const dialog = getChartZoomDialog();
+    const target = dialog.querySelector('.chart-zoom-scroll');
+    if (!target) return;
+    target.innerHTML = sourceChart.outerHTML;
+    target.querySelector('[data-chart-expand]')?.remove();
+    if (dialog.showModal) {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+    requestAnimationFrame(() => {
+      target.scrollLeft = 0;
+    });
+  }
+
   async function loadOverview() {
     setLoading();
     const range = ui.currentMonthRange();
@@ -338,6 +386,11 @@
   closeShiftSummaryDialog?.addEventListener('click', closeSummaryModal);
   shiftSummaryDialog?.addEventListener('click', (event) => {
     if (event.target === shiftSummaryDialog) closeSummaryModal();
+  });
+  content.addEventListener('click', (event) => {
+    if (event.target?.closest?.('[data-chart-expand]')) {
+      openChartZoomDialog();
+    }
   });
 
   loadView('overview');

@@ -358,7 +358,12 @@
 
   function renderOverview(data = {}) {
     const chart = data.chart || {};
-    return sectionCard('📊', 'كميات المبيعات الشهرية حسب نوع الوقود', renderHomeChartShell(chart));
+    return sectionCard(
+      '📊',
+      'كميات المبيعات الشهرية حسب نوع الوقود',
+      renderHomeChartShell(chart),
+      '<button type="button" class="chart-expand-btn" data-chart-expand>تكبير الرسم</button>'
+    );
   }
 
   function renderSalesSummary(data = {}) {
