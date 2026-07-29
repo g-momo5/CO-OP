@@ -177,6 +177,13 @@
     return daysInMonth ? (actualQuantity / elapsedDays) * daysInMonth : actualQuantity;
   }
 
+  function getProjectedMonthValue(actualQuantity, monthKey, registeredDays) {
+    const elapsedDays = Math.max(1, parseInt(registeredDays, 10) || 0);
+    const daysInMonth = getDaysInMonthKey(monthKey);
+    if (!daysInMonth || elapsedDays >= daysInMonth) return actualQuantity;
+    return (Number(actualQuantity) || 0) / elapsedDays * daysInMonth;
+  }
+
   function table(headers, rows, emptyText = 'لا توجد بيانات', tableClass = '') {
     if (!rows.length) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
     const tableClasses = String(tableClass || '').split(/\s+/).filter(Boolean);
@@ -252,9 +259,14 @@
 
   function getChartRows(chart) {
     const months = Array.isArray(chart?.months) ? chart.months : [];
+    const projectionMonthIndex = getProjectionMonthIndex(chart, months);
     return (chart?.rows || [])
       .map((row) => {
-        const values = months.map((month) => Number(row.byMonth?.[month]) || 0);
+        const values = months.map((month, index) => {
+          const value = Number(row.byMonth?.[month]) || 0;
+          if (index !== projectionMonthIndex) return value;
+          return getProjectedMonthValue(value, month, chart.salesDaysByMonth?.[month]);
+        });
         return {
           name: row.name,
           values,
@@ -262,6 +274,16 @@
         };
       })
       .filter((row) => row.quantity > 0);
+  }
+
+  function getProjectionMonthIndex(chart, months) {
+    if (!months.length) return -1;
+    const lastIndex = months.length - 1;
+    const monthKey = months[lastIndex];
+    const registeredDays = parseInt(chart?.salesDaysByMonth?.[monthKey], 10) || 0;
+    if (registeredDays <= 0) return -1;
+    const daysInMonth = getDaysInMonthKey(monthKey);
+    return daysInMonth && registeredDays < daysInMonth ? lastIndex : -1;
   }
 
   function renderHomeChartShell(chart) {
@@ -273,6 +295,7 @@
     const height = 360;
     const plot = { x: 58, y: 28, width: 800, height: 230 };
     const maxValue = Math.max(...rows.flatMap((row) => row.values), 1);
+    const projectionMonthIndex = getProjectionMonthIndex(chart, months);
     const colors = ['#c4291d', '#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#15803d', '#be185d'];
     const xFor = (index) => months.length === 1
       ? plot.x + (plot.width / 2)
@@ -302,8 +325,18 @@
           ${rows.map((row, rowIndex) => {
             const color = colors[rowIndex % colors.length];
             const points = row.values.map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ');
+            const solidPoints = projectionMonthIndex > 0
+              ? row.values.slice(0, projectionMonthIndex).map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ')
+              : points;
+            const projectedPoints = projectionMonthIndex > 0
+              ? row.values.slice(projectionMonthIndex - 1, projectionMonthIndex + 1).map((value, offset) => {
+                const index = projectionMonthIndex - 1 + offset;
+                return `${xFor(index)},${yFor(value)}`;
+              }).join(' ')
+              : '';
             return `
-              <polyline points="${points}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+              <polyline points="${solidPoints}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+              ${projectedPoints ? `<polyline points="${projectedPoints}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 8"></polyline>` : ''}
               ${row.values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="4.5" fill="${color}"></circle>`).join('')}
             `;
           }).join('')}
