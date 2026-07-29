@@ -629,66 +629,86 @@ async function getHomeChart(queryParams) {
     fromMonth: queryParams.fromMonth || `${defaults.month.slice(0, 4)}-01`,
     toMonth: queryParams.toMonth || defaults.month
   });
-  const months = buildMonthRange(fromMonth, toMonth);
-  const fromRange = monthToRange(fromMonth);
-  const toRange = monthToRange(toMonth);
-  if (!months.length || !fromRange || !toRange) {
-    return { fromMonth, toMonth, months: [], rows: [] };
-  }
 
-  const report = await getReport({ startDate: fromRange.startDate, endDate: toRange.endDate });
-  const rowsByFuel = new Map();
-  const salesDaysByMonth = new Map(months.map((month) => [month, new Set()]));
-  FUEL_ORDER.forEach((fuelType) => {
-    rowsByFuel.set(fuelType, {
-      name: fuelType,
-      quantity: 0,
-      byMonth: Object.fromEntries(months.map((month) => [month, 0]))
+  const buildChart = async (chartFromMonth, chartToMonth) => {
+    const months = buildMonthRange(chartFromMonth, chartToMonth);
+    const fromRange = monthToRange(chartFromMonth);
+    const toRange = monthToRange(chartToMonth);
+    if (!months.length || !fromRange || !toRange) {
+      return { fromMonth: chartFromMonth, toMonth: chartToMonth, months: [], rows: [] };
+    }
+
+    const report = await getReport({ startDate: fromRange.startDate, endDate: toRange.endDate });
+    const rowsByFuel = new Map();
+    const salesDaysByMonth = new Map(months.map((month) => [month, new Set()]));
+    FUEL_ORDER.forEach((fuelType) => {
+      rowsByFuel.set(fuelType, {
+        name: fuelType,
+        quantity: 0,
+        byMonth: Object.fromEntries(months.map((month) => [month, 0]))
+      });
     });
-  });
 
-  const shiftRows = await query(
-    `SELECT date, fuel_data, data
-     FROM shifts
-     WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)
-     ORDER BY date ASC, shift_number ASC, id ASC`,
-    [fromRange.startDate, toRange.endDate]
-  ).catch(() => []);
+    const shiftRows = await query(
+      `SELECT date, fuel_data, data
+       FROM shifts
+       WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)
+       ORDER BY date ASC, shift_number ASC, id ASC`,
+      [fromRange.startDate, toRange.endDate]
+    ).catch(() => []);
 
-  shiftRows.forEach((row) => {
-    const monthKey = normalizeMonth(normalizeDate(row.date));
-    if (!monthKey || !months.includes(monthKey)) return;
-    const legacyData = parseStoredObject(row.data, {});
-    const fuelData = parseStoredObject(row.fuel_data || legacyData.fuel_data, {});
-    Object.entries(fuelData).forEach(([fuelType, data]) => {
-      const fuelName = getShiftProductDisplayName(fuelType, data);
-      if (!rowsByFuel.has(fuelName)) {
-        rowsByFuel.set(fuelName, {
-          name: fuelName,
-          quantity: 0,
-          byMonth: Object.fromEntries(months.map((month) => [month, 0]))
-        });
-      }
-      const quantity = getShiftFuelSoldQuantity(fuelName, data);
-      const entry = rowsByFuel.get(fuelName);
-      entry.byMonth[monthKey] += quantity;
-      entry.quantity += quantity;
-      if (quantity > 0) {
-        salesDaysByMonth.get(monthKey)?.add(normalizeDate(row.date));
-      }
+    shiftRows.forEach((row) => {
+      const monthKey = normalizeMonth(normalizeDate(row.date));
+      if (!monthKey || !months.includes(monthKey)) return;
+      const legacyData = parseStoredObject(row.data, {});
+      const fuelData = parseStoredObject(row.fuel_data || legacyData.fuel_data, {});
+      Object.entries(fuelData).forEach(([fuelType, data]) => {
+        const fuelName = getShiftProductDisplayName(fuelType, data);
+        if (!rowsByFuel.has(fuelName)) {
+          rowsByFuel.set(fuelName, {
+            name: fuelName,
+            quantity: 0,
+            byMonth: Object.fromEntries(months.map((month) => [month, 0]))
+          });
+        }
+        const quantity = getShiftFuelSoldQuantity(fuelName, data);
+        const entry = rowsByFuel.get(fuelName);
+        entry.byMonth[monthKey] += quantity;
+        entry.quantity += quantity;
+        if (quantity > 0) {
+          salesDaysByMonth.get(monthKey)?.add(normalizeDate(row.date));
+        }
+      });
     });
-  });
 
-  return {
-    fromMonth,
-    toMonth,
-    months,
-    salesDaysByMonth: Object.fromEntries(
-      months.map((month) => [month, salesDaysByMonth.get(month)?.size || 0])
-    ),
-    totals: report.fuelTotals || [],
-    rows: sortArabicRowsByOrder(Array.from(rowsByFuel.values()), FUEL_ORDER)
+    return {
+      fromMonth: chartFromMonth,
+      toMonth: chartToMonth,
+      months,
+      salesDaysByMonth: Object.fromEntries(
+        months.map((month) => [month, salesDaysByMonth.get(month)?.size || 0])
+      ),
+      totals: report.fuelTotals || [],
+      rows: sortArabicRowsByOrder(Array.from(rowsByFuel.values()), FUEL_ORDER)
+    };
   };
+
+  const hasChartQuantity = (chart) => (chart.rows || []).some((row) => (
+    Number(row.quantity) > 0 || Object.values(row.byMonth || {}).some((value) => Number(value) > 0)
+  ));
+
+  const currentChart = await buildChart(fromMonth, toMonth);
+  if (hasChartQuantity(currentChart)) return currentChart;
+
+  const latestRows = await query(
+    `SELECT MAX(date) AS latest_date
+     FROM shifts
+     WHERE (is_saved = 1 OR is_saved IS NULL)`
+  ).catch(() => []);
+  const latestMonth = normalizeMonth(normalizeDate(latestRows[0]?.latest_date));
+  if (!latestMonth || (latestMonth >= fromMonth && latestMonth <= toMonth)) return currentChart;
+
+  return buildChart(`${latestMonth.slice(0, 4)}-01`, latestMonth);
 }
 
 async function getSalesSummary(queryParams) {
