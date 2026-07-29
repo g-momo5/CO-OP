@@ -534,18 +534,19 @@
   }
 
   function renderShiftDayCard(day, index) {
+    const dayIndex = Number.isInteger(day.originalIndex) ? day.originalIndex : index;
     return `
       <section class="card shift-day-card">
         <div class="shift-day-heading">
           <span class="title-main"><span class="title-icon">📋</span>${formatDay(day.date)}</span>
         </div>
         <section class="shift-day-totals" aria-label="إجماليات اليوم">
-          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${index}" data-summary-kind="revenues">
+          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${dayIndex}" data-summary-kind="revenues">
             <span class="shift-total-icon">💵</span>
             <span>إجمالي الإيرادات</span>
             <strong>${formatMoney(day.totals.revenue)}</strong>
           </button>
-          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${index}" data-summary-kind="expenses">
+          <button class="shift-total-box shift-total-button" type="button" data-shift-day-index="${dayIndex}" data-summary-kind="expenses">
             <span class="shift-total-icon">📉</span>
             <span>إجمالي المصاريف</span>
             <strong>${formatMoney(day.totals.expenses)}</strong>
@@ -560,10 +561,33 @@
     `;
   }
 
-  function renderShiftDaySummaries(data = {}) {
-    const days = data.summaries?.days || data.days || [];
-    if (!days.length) return '<div class="empty">لا توجد ورديات محفوظة</div>';
-    return days.map(renderShiftDayCard).join('');
+  function renderShiftDaySelector(days, selectedDate = '') {
+    return `
+      <section class="card shift-day-filter-card">
+        <label for="shiftDaySelect">اليوم</label>
+        <select id="shiftDaySelect" class="shift-day-select">
+          <option value=""${selectedDate ? '' : ' selected'}>آخر الأيام</option>
+          ${days.map((day) => `
+            <option value="${escapeHtml(day.date)}"${selectedDate === day.date ? ' selected' : ''}>${formatDay(day.date)}</option>
+          `).join('')}
+        </select>
+      </section>
+    `;
+  }
+
+  function renderShiftDaySummaries(data = {}, options = {}) {
+    const allDays = options.allDays || data.summaries?.days || data.days || [];
+    const days = options.days || allDays;
+    if (!allDays.length) return '<div class="empty">لا توجد ورديات محفوظة</div>';
+    const selectedDate = options.selectedDate || '';
+    const hasMore = Boolean(options.hasMore);
+    return `
+      ${renderShiftDaySelector(allDays, selectedDate)}
+      <div class="shift-day-list">
+        ${days.length ? days.map(renderShiftDayCard).join('') : '<div class="empty">لا توجد ورديات لهذا اليوم</div>'}
+      </div>
+      ${hasMore ? '<div class="shift-day-load-sentinel" data-shift-load-more>جار تحميل المزيد...</div>' : ''}
+    `;
   }
 
   function renderShiftRevenueSummary(shift) {

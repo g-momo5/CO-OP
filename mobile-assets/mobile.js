@@ -10,7 +10,11 @@
     currentView: 'overview',
     landSeasonKey: String(new Date().getFullYear()),
     landSeasons: [],
-    shiftDays: []
+    shiftDays: [],
+    shiftSelectedDate: '',
+    shiftVisibleCount: 10,
+    shiftPageSize: 10,
+    shiftLoadObserver: null
   };
 
   const content = document.getElementById('content');
@@ -22,7 +26,13 @@
   const moduleButtons = document.querySelectorAll('[data-module]');
   const homeChartRef = { current: null };
 
+  function disconnectShiftLoadObserver() {
+    state.shiftLoadObserver?.disconnect();
+    state.shiftLoadObserver = null;
+  }
+
   function setLoading() {
+    disconnectShiftLoadObserver();
     content.innerHTML = '<div class="loading">جار التحميل...</div>';
   }
 
@@ -256,11 +266,60 @@
 
   async function loadShiftDaySummaries() {
     setLoading();
-    const data = await api('shift-day-summaries', { limit: 45 });
+    const data = await api('shift-day-summaries', { limit: 120 });
     setLastSync(data.lastSync);
     state.shiftDays = data.summaries?.days || [];
-    content.innerHTML = ui.renderShiftDaySummaries(data);
+    state.shiftSelectedDate = '';
+    state.shiftVisibleCount = state.shiftPageSize;
+    renderShiftDaySummariesView();
+  }
+
+  function getIndexedShiftDays() {
+    return state.shiftDays.map((day, index) => ({ ...day, originalIndex: index }));
+  }
+
+  function renderShiftDaySummariesView() {
+    const allDays = getIndexedShiftDays();
+    const visibleDays = state.shiftSelectedDate
+      ? allDays.filter((day) => day.date === state.shiftSelectedDate)
+      : allDays.slice(0, state.shiftVisibleCount);
+    content.innerHTML = ui.renderShiftDaySummaries({ days: visibleDays }, {
+      allDays,
+      days: visibleDays,
+      selectedDate: state.shiftSelectedDate,
+      hasMore: !state.shiftSelectedDate && state.shiftVisibleCount < allDays.length
+    });
+    wireShiftDaySelect();
     wireShiftTotalButtons();
+    wireShiftLoadMore();
+  }
+
+  function wireShiftDaySelect() {
+    const select = document.getElementById('shiftDaySelect');
+    if (!select) return;
+    select.addEventListener('change', () => {
+      state.shiftSelectedDate = select.value || '';
+      if (!state.shiftSelectedDate) {
+        state.shiftVisibleCount = state.shiftPageSize;
+      }
+      renderShiftDaySummariesView();
+    });
+  }
+
+  function wireShiftLoadMore() {
+    disconnectShiftLoadObserver();
+    const sentinel = content.querySelector('[data-shift-load-more]');
+    if (!sentinel || state.shiftSelectedDate) return;
+
+    state.shiftLoadObserver = new IntersectionObserver((entries) => {
+      if (state.currentView !== 'shift-day-summaries') return;
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      const nextCount = Math.min(state.shiftVisibleCount + state.shiftPageSize, state.shiftDays.length);
+      if (nextCount === state.shiftVisibleCount) return;
+      state.shiftVisibleCount = nextCount;
+      renderShiftDaySummariesView();
+    }, { root: null, rootMargin: '160px 0px', threshold: 0.01 });
+    state.shiftLoadObserver.observe(sentinel);
   }
 
   async function loadLandDashboard() {

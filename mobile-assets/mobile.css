@@ -625,6 +625,44 @@ body.readonly-web {
   gap: 0.5rem;
 }
 
+.readonly-web .shift-day-filter-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.readonly-web .shift-day-filter-card label {
+  color: var(--coop-ink);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.readonly-web .shift-day-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--coop-line);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  background: #ffffff;
+  color: var(--coop-ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+.readonly-web .shift-day-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.readonly-web .shift-day-load-sentinel {
+  min-height: 2.5rem;
+  display: grid;
+  place-items: center;
+  color: var(--coop-muted);
+  font-weight: 700;
+}
+
 .readonly-web .shift-day-heading,
 .readonly-web .modal-title-row,
 .readonly-web .shift-summary-box h3 {
@@ -636,7 +674,7 @@ body.readonly-web {
 
 .readonly-web .shift-day-heading {
   color: var(--coop-red);
-  font-size: 1.2rem;
+  font-size: 1.08rem;
   font-weight: 700;
 }
 
@@ -1009,6 +1047,7 @@ body.readonly-web {
   .readonly-web .shift-day-heading {
     justify-content: center;
     text-align: center;
+    font-size: 0.98rem;
   }
 
   .readonly-web .shift-day-heading .title-main {
@@ -1443,5 +1482,9 @@ body.readonly-web {
 
   .readonly-web .shift-total-box strong {
     font-size: 0.71rem;
+  }
+
+  .readonly-web .shift-day-heading {
+    font-size: 0.92rem;
   }
 }
