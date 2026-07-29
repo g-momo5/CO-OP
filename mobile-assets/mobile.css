@@ -473,8 +473,7 @@ body.readonly-web {
   color: #854d0e;
 }
 
-.readonly-web .home-chart-box,
-.readonly-web .home-chart-box canvas {
+.readonly-web .home-chart-box {
   width: 100%;
   height: 360px;
   min-height: 360px;
@@ -483,15 +482,15 @@ body.readonly-web {
 .readonly-web .readonly-line-chart {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  gap: 0.65rem;
-  padding: 0.5rem 0.4rem 0.2rem;
+  gap: 0.55rem;
+  padding: 0.4rem 0.35rem 0.2rem;
 }
 
 .readonly-web .readonly-line-chart svg {
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
   direction: ltr;
 }
 
@@ -509,7 +508,7 @@ body.readonly-web {
 .readonly-web .chart-month-label {
   fill: var(--coop-muted);
   font-family: "Noto Naskh Arabic", Tahoma, Arial, sans-serif;
-  font-size: 18px;
+  font-size: 14px;
   text-anchor: middle;
 }
 
@@ -850,7 +849,7 @@ body.readonly-web {
   }
 
   .readonly-web .home-chart-box,
-  .readonly-web .home-chart-box canvas {
+  .readonly-web .home-chart-box svg {
     height: 310px;
     min-height: 310px;
   }
@@ -1315,9 +1314,9 @@ body.readonly-web {
   }
 
   .readonly-web .home-chart-box,
-  .readonly-web .home-chart-box canvas {
-    height: 260px;
-    min-height: 260px;
+  .readonly-web .home-chart-box svg {
+    height: 240px;
+    min-height: 240px;
   }
 
   .readonly-web .bar-row {

@@ -306,7 +306,7 @@
 
     return `
       <div class="home-chart-box readonly-line-chart" role="img" aria-label="كميات المبيعات الشهرية حسب نوع الوقود">
-        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="#ffffff"></rect>
           ${gridValues.map((value) => {
             const y = yFor(value);
@@ -335,9 +335,9 @@
               }).join(' ')
               : '';
             return `
-              <polyline points="${solidPoints}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-              ${projectedPoints ? `<polyline points="${projectedPoints}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 8"></polyline>` : ''}
-              ${row.values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="4.5" fill="${color}"></circle>`).join('')}
+              <polyline points="${solidPoints}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></polyline>
+              ${projectedPoints ? `<polyline points="${projectedPoints}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 7"></polyline>` : ''}
+              ${row.values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="3.4" fill="${color}"></circle>`).join('')}
             `;
           }).join('')}
         </svg>
