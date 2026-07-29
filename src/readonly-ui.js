@@ -292,8 +292,8 @@
     if (!months.length || !rows.length) return renderBarChart(chart?.rows || []);
 
     const width = 920;
-    const height = 360;
-    const plot = { x: 58, y: 28, width: 800, height: 230 };
+    const height = 520;
+    const plot = { x: 58, y: 42, width: 800, height: 360 };
     const maxValue = Math.max(...rows.flatMap((row) => row.values), 1);
     const projectionMonthIndex = getProjectionMonthIndex(chart, months);
     const colors = ['#c4291d', '#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#15803d', '#be185d'];
@@ -320,7 +320,7 @@
           ${months.map((month, index) => {
             if (index % labelEvery !== 0 && index !== months.length - 1) return '';
             const x = xFor(index);
-            return `<text x="${x}" y="${plot.y + plot.height + 28}" class="chart-month-label">${escapeHtml(monthLabel(month))}</text>`;
+            return `<text x="${x}" y="${plot.y + plot.height + 36}" class="chart-month-label">${escapeHtml(monthLabel(month))}</text>`;
           }).join('')}
           ${rows.map((row, rowIndex) => {
             const color = colors[rowIndex % colors.length];
