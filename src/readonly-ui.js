@@ -565,16 +565,14 @@
     return `
       <section class="card shift-day-filter-card">
         <span class="shift-day-filter-label">اليوم</span>
-        <button
+        <input
           id="shiftDaySelect"
           class="shift-day-select"
-          type="button"
-          data-shift-calendar-toggle
-          aria-expanded="false"
-          aria-controls="shiftDayCalendar"
-        >${selectedDate ? formatDay(selectedDate) : 'اختر التاريخ'}</button>
+          type="date"
+          autocomplete="off"
+          ${selectedDate ? `value="${escapeHtml(selectedDate)}"` : ''}
+        >
         <button class="shift-day-clear" type="button" data-shift-day-clear aria-label="مسح التاريخ">×</button>
-        <div id="shiftDayCalendar" class="shift-day-calendar" data-shift-calendar hidden></div>
       </section>
     `;
   }

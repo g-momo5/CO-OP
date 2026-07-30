@@ -626,7 +626,7 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-filter-card {
-  grid-template-columns: 42px minmax(0, 160px) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   grid-template-areas: "clear input label";
   align-items: center;
   gap: 0.5rem;
@@ -658,11 +658,10 @@ body.readonly-web {
   padding: 0.45rem 0.65rem;
   background: #ffffff;
   color: var(--coop-ink);
-  direction: rtl;
+  direction: ltr;
   font: inherit;
   font-weight: 700;
   text-align: center;
-  cursor: pointer;
 }
 
 .readonly-web .shift-day-clear {
@@ -678,75 +677,6 @@ body.readonly-web {
   font-size: 2.1rem;
   font-weight: 900;
   line-height: 1;
-}
-
-.readonly-web .shift-day-calendar {
-  grid-column: 1 / -1;
-  direction: rtl;
-  border: 1px solid var(--coop-line);
-  border-radius: 10px;
-  padding: 0.65rem;
-  background: #ffffff;
-  box-shadow: var(--coop-shadow);
-}
-
-.readonly-web .shift-calendar-head,
-.readonly-web .shift-calendar-weekdays,
-.readonly-web .shift-calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.readonly-web .shift-calendar-head {
-  grid-template-columns: 36px 1fr 36px;
-  margin-bottom: 0.45rem;
-}
-
-.readonly-web .shift-calendar-head strong {
-  color: var(--coop-ink);
-  text-align: center;
-  font-weight: 800;
-}
-
-.readonly-web .shift-calendar-head button,
-.readonly-web .shift-calendar-day {
-  border: 1px solid var(--coop-line);
-  border-radius: 8px;
-  background: #ffffff;
-  color: var(--coop-ink);
-  font: inherit;
-  font-weight: 800;
-}
-
-.readonly-web .shift-calendar-head button {
-  height: 34px;
-  font-size: 1.35rem;
-}
-
-.readonly-web .shift-calendar-weekdays {
-  margin-bottom: 0.25rem;
-  color: var(--coop-muted);
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-align: center;
-}
-
-.readonly-web .shift-calendar-day,
-.readonly-web .shift-calendar-empty {
-  min-height: 34px;
-}
-
-.readonly-web .shift-calendar-day.active {
-  border-color: var(--coop-red);
-  background: var(--coop-red);
-  color: #ffffff;
-}
-
-.readonly-web .shift-calendar-day:disabled,
-.readonly-web .shift-calendar-head button:disabled {
-  opacity: 0.35;
 }
 
 .readonly-web .shift-day-list {
@@ -1150,7 +1080,7 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-filter-card {
-    grid-template-columns: 40px minmax(0, 150px) auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
     gap: 0.42rem;
     padding: 0.65rem;
   }
@@ -1166,15 +1096,6 @@ body.readonly-web {
     width: 40px;
     height: 42px;
     font-size: 2.15rem;
-  }
-
-  .readonly-web .shift-day-calendar {
-    padding: 0.55rem;
-  }
-
-  .readonly-web .shift-calendar-day,
-  .readonly-web .shift-calendar-empty {
-    min-height: 32px;
   }
 
   .readonly-web .shift-day-heading .title-main {

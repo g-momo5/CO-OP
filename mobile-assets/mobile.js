@@ -12,7 +12,6 @@
     landSeasons: [],
     shiftDays: [],
     shiftSelectedDate: '',
-    shiftCalendarMonth: '',
     shiftVisibleCount: 10,
     shiftPageSize: 10,
     shiftLoadScrollHandler: null
@@ -272,7 +271,6 @@
     setLastSync(data.lastSync);
     state.shiftDays = data.summaries?.days || [];
     state.shiftSelectedDate = '';
-    state.shiftCalendarMonth = getDefaultShiftCalendarMonth();
     state.shiftVisibleCount = state.shiftPageSize;
     renderShiftDaySummariesView();
   }
@@ -297,99 +295,48 @@
     wireShiftLoadMore();
   }
 
-  function getDefaultShiftCalendarMonth() {
-    const firstDate = state.shiftDays[0]?.date || '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(firstDate)) return firstDate.slice(0, 7);
+  function getTodayDateKey() {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  function shiftCalendarMonthLabel(monthKey) {
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-    const [year, month] = String(monthKey || '').split('-').map((value) => parseInt(value, 10));
-    if (!Number.isInteger(year) || !Number.isInteger(month)) return '';
-    return `${monthNames[month - 1] || ''} ${year}`;
-  }
-
-  function shiftCalendarMonthOffset(monthKey, offset) {
-    const [year, month] = String(monthKey || getDefaultShiftCalendarMonth()).split('-').map((value) => parseInt(value, 10));
-    const date = new Date(year, (month - 1) + offset, 1);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  function buildShiftCalendarHtml(days, monthKey) {
-    const availableDates = new Set(days.map((day) => day.date));
-    const availableMonths = days.map((day) => String(day.date || '').slice(0, 7)).filter(Boolean);
-    const minMonth = availableMonths[availableMonths.length - 1] || monthKey;
-    const maxMonth = availableMonths[0] || monthKey;
-    const [year, month] = String(monthKey || getDefaultShiftCalendarMonth()).split('-').map((value) => parseInt(value, 10));
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const firstDayOffset = (new Date(year, month - 1, 1).getDay() + 1) % 7;
-    const cells = [];
-    for (let index = 0; index < firstDayOffset; index += 1) {
-      cells.push('<span class="shift-calendar-empty"></span>');
-    }
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const isAvailable = availableDates.has(dateKey);
-      const isSelected = state.shiftSelectedDate === dateKey;
-      cells.push(`
-        <button
-          class="shift-calendar-day${isSelected ? ' active' : ''}"
-          type="button"
-          ${isAvailable ? `data-shift-calendar-date="${dateKey}"` : 'disabled'}
-        >${day}</button>
-      `);
-    }
-
-    return `
-      <div class="shift-calendar-head">
-        <button type="button" data-shift-calendar-month="-1"${monthKey <= minMonth ? ' disabled' : ''}>‹</button>
-        <strong>${ui.escapeHtml(shiftCalendarMonthLabel(monthKey))}</strong>
-        <button type="button" data-shift-calendar-month="1"${monthKey >= maxMonth ? ' disabled' : ''}>›</button>
-      </div>
-      <div class="shift-calendar-weekdays">
-        <span>س</span><span>ح</span><span>ن</span><span>ث</span><span>ر</span><span>خ</span><span>ج</span>
-      </div>
-      <div class="shift-calendar-grid">${cells.join('')}</div>
-    `;
-  }
-
-  function renderShiftCalendarPanel(isOpen = false) {
-    const panel = document.querySelector('[data-shift-calendar]');
-    const toggle = document.querySelector('[data-shift-calendar-toggle]');
-    if (!panel || !toggle) return;
-    const days = getIndexedShiftDays();
-    state.shiftCalendarMonth = state.shiftCalendarMonth || getDefaultShiftCalendarMonth();
-    panel.innerHTML = buildShiftCalendarHtml(days, state.shiftCalendarMonth);
-    panel.hidden = !isOpen;
-    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }
 
   function wireShiftDaySelect() {
-    const toggle = document.querySelector('[data-shift-calendar-toggle]');
+    const dateInput = document.getElementById('shiftDaySelect');
     const clearButton = document.querySelector('[data-shift-day-clear]');
-    renderShiftCalendarPanel(false);
-    toggle?.addEventListener('click', () => {
-      const panel = document.querySelector('[data-shift-calendar]');
-      renderShiftCalendarPanel(panel?.hidden ?? true);
-    });
-    clearButton?.addEventListener('click', () => {
-      if (!state.shiftSelectedDate) return;
-      state.shiftSelectedDate = '';
-      state.shiftVisibleCount = state.shiftPageSize;
-      renderShiftDaySummariesView();
-    });
-    document.querySelector('[data-shift-calendar]')?.addEventListener('click', (event) => {
-      const monthButton = event.target.closest('[data-shift-calendar-month]');
-      if (monthButton) {
-        state.shiftCalendarMonth = shiftCalendarMonthOffset(state.shiftCalendarMonth, Number(monthButton.dataset.shiftCalendarMonth) || 0);
-        renderShiftCalendarPanel(true);
+    if (!dateInput) return;
+    let openedAt = 0;
+    let valueBeforeOpen = '';
+
+    const markPickerOpen = () => {
+      openedAt = Date.now();
+      valueBeforeOpen = dateInput.value || '';
+    };
+    const updateSelectedDate = () => {
+      const selectedDate = dateInput.value || '';
+      const looksLikeAutoToday = !valueBeforeOpen
+        && !state.shiftSelectedDate
+        && selectedDate === getTodayDateKey()
+        && Date.now() - openedAt < 900;
+      if (looksLikeAutoToday) {
+        dateInput.value = '';
         return;
       }
-      const dayButton = event.target.closest('[data-shift-calendar-date]');
-      if (!dayButton) return;
-      state.shiftSelectedDate = dayButton.dataset.shiftCalendarDate || '';
+      if (selectedDate === state.shiftSelectedDate) return;
+      state.shiftSelectedDate = selectedDate;
+      if (!state.shiftSelectedDate) {
+        state.shiftVisibleCount = state.shiftPageSize;
+      }
+      renderShiftDaySummariesView();
+    };
+
+    dateInput.addEventListener('pointerdown', markPickerOpen);
+    dateInput.addEventListener('focus', markPickerOpen);
+    dateInput.addEventListener('change', updateSelectedDate);
+    clearButton?.addEventListener('click', () => {
+      if (!dateInput.value && !state.shiftSelectedDate) return;
+      dateInput.value = '';
+      state.shiftSelectedDate = '';
+      state.shiftVisibleCount = state.shiftPageSize;
       renderShiftDaySummariesView();
     });
   }
