@@ -626,7 +626,7 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-filter-card {
-  grid-template-columns: auto minmax(0, 260px);
+  grid-template-columns: auto minmax(0, 250px);
   align-items: center;
   gap: 0.75rem;
   justify-content: start;
@@ -640,8 +640,8 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-select {
-  width: 180px;
-  inline-size: 180px;
+  width: 178px;
+  inline-size: 178px;
   min-width: 0;
   min-inline-size: 0;
   max-width: 100%;
@@ -662,16 +662,16 @@ body.readonly-web {
 .readonly-web .shift-day-calendar-wrap {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 180px) 52px;
+  grid-template-columns: minmax(0, 178px) 44px;
   align-items: center;
   justify-content: start;
-  gap: 0.55rem;
-  direction: ltr;
+  gap: 0.5rem;
+  direction: rtl;
 }
 
 .readonly-web .shift-day-clear {
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border: 0;
@@ -1084,30 +1084,30 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-filter-card {
-    grid-template-columns: auto minmax(0, 205px);
+    grid-template-columns: auto minmax(0, 225px);
     justify-content: start;
     gap: 0.5rem;
     padding: 0.65rem;
   }
 
   .readonly-web .shift-day-calendar-wrap {
-    grid-template-columns: minmax(0, 145px) 52px;
+    grid-template-columns: minmax(0, 170px) 44px;
     justify-content: start;
     gap: 0.42rem;
   }
 
   .readonly-web .shift-day-select {
-    width: 145px;
-    inline-size: 145px;
+    width: 170px;
+    inline-size: 170px;
     min-height: 40px;
     padding: 0.36rem 0.28rem;
     font-size: 0.86rem;
   }
 
   .readonly-web .shift-day-clear {
-    width: 52px;
-    height: 48px;
-    font-size: 2.35rem;
+    width: 44px;
+    height: 44px;
+    font-size: 2.45rem;
   }
 
   .readonly-web .shift-day-heading .title-main {
