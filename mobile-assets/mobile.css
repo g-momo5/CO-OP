@@ -626,31 +626,36 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-filter-card {
-  grid-template-columns: auto minmax(0, 260px);
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  grid-template-areas: "clear input label";
   align-items: center;
-  gap: 0.75rem;
-  justify-content: start;
+  gap: 0.55rem;
   min-width: 0;
+  direction: ltr;
 }
 
 .readonly-web .shift-day-filter-card label {
+  grid-area: label;
   color: var(--coop-ink);
+  direction: rtl;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .readonly-web .shift-day-select {
-  width: 186px;
-  inline-size: 186px;
+  grid-area: input;
+  width: 100%;
+  inline-size: 100%;
   min-width: 0;
   min-inline-size: 0;
   max-width: 100%;
   max-inline-size: 100%;
   box-sizing: border-box;
-  min-height: 48px;
+  height: 50px;
+  min-height: 50px;
   border: 1px solid var(--coop-line);
   border-radius: 8px;
-  padding: 0.45rem 0.7rem;
+  padding: 0.55rem 0.7rem;
   background: #ffffff;
   color: var(--coop-ink);
   direction: ltr;
@@ -659,19 +664,10 @@ body.readonly-web {
   text-align: center;
 }
 
-.readonly-web .shift-day-calendar-wrap {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 186px) 44px;
-  align-items: center;
-  justify-content: start;
-  gap: 0.5rem;
-  direction: rtl;
-}
-
 .readonly-web .shift-day-clear {
-  width: 44px;
-  height: 44px;
+  grid-area: clear;
+  width: 52px;
+  height: 50px;
   display: grid;
   place-items: center;
   border: 0;
@@ -1084,30 +1080,22 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-filter-card {
-    grid-template-columns: auto minmax(0, 232px);
-    justify-content: start;
-    gap: 0.5rem;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 0.42rem;
     padding: 0.65rem;
   }
 
-  .readonly-web .shift-day-calendar-wrap {
-    grid-template-columns: minmax(0, 178px) 44px;
-    justify-content: start;
-    gap: 0.42rem;
-  }
-
   .readonly-web .shift-day-select {
-    width: 178px;
-    inline-size: 178px;
-    min-height: 46px;
-    padding: 0.42rem 0.34rem;
-    font-size: 0.92rem;
+    height: 50px;
+    min-height: 50px;
+    padding: 0.5rem 0.45rem;
+    font-size: 0.95rem;
   }
 
   .readonly-web .shift-day-clear {
-    width: 44px;
-    height: 44px;
-    font-size: 2.45rem;
+    width: 48px;
+    height: 50px;
+    font-size: 2.55rem;
   }
 
   .readonly-web .shift-day-heading .title-main {
