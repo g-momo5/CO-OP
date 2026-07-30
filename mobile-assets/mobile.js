@@ -295,15 +295,19 @@
   }
 
   function wireShiftDaySelect() {
-    const select = document.getElementById('shiftDaySelect');
-    if (!select) return;
-    select.addEventListener('change', () => {
-      state.shiftSelectedDate = select.value || '';
+    const dateInput = document.getElementById('shiftDaySelect');
+    if (!dateInput) return;
+    const updateSelectedDate = () => {
+      const selectedDate = dateInput.value || '';
+      if (selectedDate === state.shiftSelectedDate) return;
+      state.shiftSelectedDate = selectedDate;
       if (!state.shiftSelectedDate) {
         state.shiftVisibleCount = state.shiftPageSize;
       }
       renderShiftDaySummariesView();
-    });
+    };
+    dateInput.addEventListener('input', updateSelectedDate);
+    dateInput.addEventListener('change', updateSelectedDate);
   }
 
   function wireShiftLoadMore() {

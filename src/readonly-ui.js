@@ -562,15 +562,20 @@
   }
 
   function renderShiftDaySelector(days, selectedDate = '') {
+    const dateValues = days.map((day) => String(day.date || '')).filter(Boolean);
+    const minDate = dateValues.length ? dateValues[dateValues.length - 1] : '';
+    const maxDate = dateValues.length ? dateValues[0] : '';
     return `
       <section class="card shift-day-filter-card">
         <label for="shiftDaySelect">اليوم</label>
-        <select id="shiftDaySelect" class="shift-day-select">
-          <option value=""${selectedDate ? '' : ' selected'}>آخر الأيام</option>
-          ${days.map((day) => `
-            <option value="${escapeHtml(day.date)}"${selectedDate === day.date ? ' selected' : ''}>${formatDay(day.date)}</option>
-          `).join('')}
-        </select>
+        <input
+          id="shiftDaySelect"
+          class="shift-day-select"
+          type="date"
+          value="${escapeHtml(selectedDate)}"
+          ${minDate ? `min="${escapeHtml(minDate)}"` : ''}
+          ${maxDate ? `max="${escapeHtml(maxDate)}"` : ''}
+        >
       </section>
     `;
   }
