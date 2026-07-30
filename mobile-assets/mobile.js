@@ -296,6 +296,7 @@
 
   function wireShiftDaySelect() {
     const dateInput = document.getElementById('shiftDaySelect');
+    const clearButton = document.querySelector('[data-shift-day-clear]');
     if (!dateInput) return;
     const updateSelectedDate = () => {
       const selectedDate = dateInput.value || '';
@@ -308,6 +309,13 @@
     };
     dateInput.addEventListener('input', updateSelectedDate);
     dateInput.addEventListener('change', updateSelectedDate);
+    clearButton?.addEventListener('click', () => {
+      if (!dateInput.value && !state.shiftSelectedDate) return;
+      dateInput.value = '';
+      state.shiftSelectedDate = '';
+      state.shiftVisibleCount = state.shiftPageSize;
+      renderShiftDaySummariesView();
+    });
   }
 
   function wireShiftLoadMore() {

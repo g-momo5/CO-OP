@@ -568,14 +568,18 @@
     return `
       <section class="card shift-day-filter-card">
         <label for="shiftDaySelect">اليوم</label>
-        <input
-          id="shiftDaySelect"
-          class="shift-day-select"
-          type="date"
-          value="${escapeHtml(selectedDate)}"
-          ${minDate ? `min="${escapeHtml(minDate)}"` : ''}
-          ${maxDate ? `max="${escapeHtml(maxDate)}"` : ''}
-        >
+        <div class="shift-day-calendar-wrap">
+          <input
+            id="shiftDaySelect"
+            class="shift-day-select"
+            type="date"
+            autocomplete="off"
+            ${selectedDate ? `value="${escapeHtml(selectedDate)}"` : ''}
+            ${minDate ? `min="${escapeHtml(minDate)}"` : ''}
+            ${maxDate ? `max="${escapeHtml(maxDate)}"` : ''}
+          >
+          <button class="shift-day-clear" type="button" data-shift-day-clear aria-label="مسح التاريخ">×</button>
+        </div>
       </section>
     `;
   }
