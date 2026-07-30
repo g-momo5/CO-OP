@@ -308,7 +308,6 @@
       }
       renderShiftDaySummariesView();
     };
-    dateInput.addEventListener('input', updateSelectedDate);
     dateInput.addEventListener('change', updateSelectedDate);
     clearButton?.addEventListener('click', () => {
       if (!dateInput.value && !state.shiftSelectedDate) return;
