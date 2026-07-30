@@ -659,21 +659,22 @@ body.readonly-web {
 .readonly-web .shift-day-calendar-wrap {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 0.82fr) 42px;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: end;
+  gap: 0.45rem;
 }
 
 .readonly-web .shift-day-clear {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--coop-ink);
-  font-size: 1.35rem;
+  font-size: 1.75rem;
   font-weight: 800;
   line-height: 1;
 }
@@ -1085,8 +1086,8 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-calendar-wrap {
-    grid-template-columns: minmax(0, 1fr) 28px;
-    gap: 0.25rem;
+    grid-template-columns: minmax(0, 0.78fr) 36px;
+    gap: 0.34rem;
   }
 
   .readonly-web .shift-day-select {
@@ -1096,9 +1097,9 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-clear {
-    width: 28px;
-    height: 28px;
-    font-size: 1.18rem;
+    width: 36px;
+    height: 36px;
+    font-size: 1.55rem;
   }
 
   .readonly-web .shift-day-heading .title-main {

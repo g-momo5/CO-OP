@@ -14,7 +14,7 @@
     shiftSelectedDate: '',
     shiftVisibleCount: 10,
     shiftPageSize: 10,
-    shiftLoadObserver: null
+    shiftLoadScrollHandler: null
   };
 
   const content = document.getElementById('content');
@@ -26,13 +26,14 @@
   const moduleButtons = document.querySelectorAll('[data-module]');
   const homeChartRef = { current: null };
 
-  function disconnectShiftLoadObserver() {
-    state.shiftLoadObserver?.disconnect();
-    state.shiftLoadObserver = null;
+  function disconnectShiftLoadHandler() {
+    if (!state.shiftLoadScrollHandler) return;
+    window.removeEventListener('scroll', state.shiftLoadScrollHandler);
+    state.shiftLoadScrollHandler = null;
   }
 
   function setLoading() {
-    disconnectShiftLoadObserver();
+    disconnectShiftLoadHandler();
     content.innerHTML = '<div class="loading">جار التحميل...</div>';
   }
 
@@ -319,19 +320,22 @@
   }
 
   function wireShiftLoadMore() {
-    disconnectShiftLoadObserver();
+    disconnectShiftLoadHandler();
     const sentinel = content.querySelector('[data-shift-load-more]');
     if (!sentinel || state.shiftSelectedDate) return;
 
-    state.shiftLoadObserver = new IntersectionObserver((entries) => {
+    state.shiftLoadScrollHandler = () => {
       if (state.currentView !== 'shift-day-summaries') return;
-      if (!entries.some((entry) => entry.isIntersecting)) return;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const documentHeight = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+      if (scrollTop + viewportHeight < documentHeight - 180) return;
       const nextCount = Math.min(state.shiftVisibleCount + state.shiftPageSize, state.shiftDays.length);
       if (nextCount === state.shiftVisibleCount) return;
       state.shiftVisibleCount = nextCount;
       renderShiftDaySummariesView();
-    }, { root: null, rootMargin: '160px 0px', threshold: 0.01 });
-    state.shiftLoadObserver.observe(sentinel);
+    };
+    window.addEventListener('scroll', state.shiftLoadScrollHandler, { passive: true });
   }
 
   async function loadLandDashboard() {
