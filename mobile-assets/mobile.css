@@ -626,9 +626,10 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-filter-card {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 260px);
   align-items: center;
   gap: 0.75rem;
+  justify-content: start;
   min-width: 0;
 }
 
@@ -639,8 +640,8 @@ body.readonly-web {
 }
 
 .readonly-web .shift-day-select {
-  width: 100%;
-  inline-size: 100%;
+  width: 180px;
+  inline-size: 180px;
   min-width: 0;
   min-inline-size: 0;
   max-width: 100%;
@@ -652,30 +653,33 @@ body.readonly-web {
   padding: 0.45rem 0.7rem;
   background: #ffffff;
   color: var(--coop-ink);
+  direction: ltr;
   font: inherit;
   font-weight: 700;
+  text-align: center;
 }
 
 .readonly-web .shift-day-calendar-wrap {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 0.82fr) 42px;
+  grid-template-columns: minmax(0, 180px) 52px;
   align-items: center;
-  justify-content: end;
-  gap: 0.45rem;
+  justify-content: start;
+  gap: 0.55rem;
+  direction: ltr;
 }
 
 .readonly-web .shift-day-clear {
-  width: 42px;
-  height: 42px;
+  width: 52px;
+  height: 52px;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--coop-ink);
-  font-size: 1.75rem;
-  font-weight: 800;
+  font-size: 2.45rem;
+  font-weight: 900;
   line-height: 1;
 }
 
@@ -1080,26 +1084,30 @@ body.readonly-web {
   }
 
   .readonly-web .shift-day-filter-card {
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.45rem;
+    grid-template-columns: auto minmax(0, 205px);
+    justify-content: start;
+    gap: 0.5rem;
     padding: 0.65rem;
   }
 
   .readonly-web .shift-day-calendar-wrap {
-    grid-template-columns: minmax(0, 0.78fr) 36px;
-    gap: 0.34rem;
+    grid-template-columns: minmax(0, 145px) 52px;
+    justify-content: start;
+    gap: 0.42rem;
   }
 
   .readonly-web .shift-day-select {
+    width: 145px;
+    inline-size: 145px;
     min-height: 40px;
-    padding: 0.36rem 0.42rem;
+    padding: 0.36rem 0.28rem;
     font-size: 0.86rem;
   }
 
   .readonly-web .shift-day-clear {
-    width: 36px;
-    height: 36px;
-    font-size: 1.55rem;
+    width: 52px;
+    height: 48px;
+    font-size: 2.35rem;
   }
 
   .readonly-web .shift-day-heading .title-main {
