@@ -562,22 +562,19 @@
   }
 
   function renderShiftDaySelector(days, selectedDate = '') {
-    const dateValues = days.map((day) => String(day.date || '')).filter(Boolean);
-    const minDate = dateValues.length ? dateValues[dateValues.length - 1] : '';
-    const maxDate = dateValues.length ? dateValues[0] : '';
     return `
       <section class="card shift-day-filter-card">
-        <label for="shiftDaySelect">اليوم</label>
-        <input
+        <span class="shift-day-filter-label">اليوم</span>
+        <button
           id="shiftDaySelect"
           class="shift-day-select"
-          type="date"
-          autocomplete="off"
-          ${selectedDate ? `value="${escapeHtml(selectedDate)}"` : ''}
-          ${minDate ? `min="${escapeHtml(minDate)}"` : ''}
-          ${maxDate ? `max="${escapeHtml(maxDate)}"` : ''}
-        >
+          type="button"
+          data-shift-calendar-toggle
+          aria-expanded="false"
+          aria-controls="shiftDayCalendar"
+        >${selectedDate ? formatDay(selectedDate) : 'اختر التاريخ'}</button>
         <button class="shift-day-clear" type="button" data-shift-day-clear aria-label="مسح التاريخ">×</button>
+        <div id="shiftDayCalendar" class="shift-day-calendar" data-shift-calendar hidden></div>
       </section>
     `;
   }
