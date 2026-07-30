@@ -685,13 +685,22 @@ body.readonly-web {
   height: 40px;
   display: grid;
   place-items: center;
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--coop-ink);
-  font-size: 2.1rem;
+  font-size: 0;
   font-weight: 900;
   line-height: 1;
+}
+
+.readonly-web .shift-day-clear::before {
+  content: "×";
+  display: block;
+  font-size: 2.1rem;
+  line-height: 1;
+  transform: translateY(-0.02em);
 }
 
 .readonly-web .shift-day-list {
@@ -1111,6 +1120,9 @@ body.readonly-web {
   .readonly-web .shift-day-clear {
     width: 38px;
     height: 38px;
+  }
+
+  .readonly-web .shift-day-clear::before {
     font-size: 2rem;
   }
 
