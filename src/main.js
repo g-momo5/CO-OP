@@ -8103,11 +8103,11 @@ ipcMain.on('install-update', () => {
     });
 
     // quitAndInstall parameters:
-    // isSilent: false (show installation progress)
-    // isForceRunAfter: true (force app to run after update)
+    // isSilent: true avoids the NSIS wizard on Windows.
+    // isForceRunAfter: true reopens the app after the update finishes.
     setImmediate(() => {
       app.isQuitting = true;
-      autoUpdater.quitAndInstall(false, true);
+      autoUpdater.quitAndInstall(true, true);
     });
   } else {
     console.log('AutoUpdater not available');
