@@ -36,6 +36,8 @@ class DatabaseSchema {
     this.createMonthlyProfitCustomRowsTable(db);
     this.createMonthlyProfitCustomValuesTable(db);
     this.createMonthlyAccountingDocumentsTable(db);
+    this.createAccountingLabelDefaultsTable(db);
+    this.createHomeLayoutSettingsTable(db);
     this.createAppUsersTable(db);
     this.createAppDevicesTable(db);
     this.createLandTables(db);
@@ -465,6 +467,27 @@ class DatabaseSchema {
     `);
   }
 
+  static createAccountingLabelDefaultsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS accounting_label_defaults (
+        row_key TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        is_default INTEGER DEFAULT 1,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  }
+
+  static createHomeLayoutSettingsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS home_layout_settings (
+        key TEXT PRIMARY KEY,
+        layout_data TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  }
+
   static createLandTables(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS land_seasons (
@@ -632,6 +655,7 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_month_key ON monthly_profit_custom_values(month_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_accounting_documents_month_key ON monthly_accounting_documents(month_key)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
@@ -964,6 +988,21 @@ class DatabaseSchema {
       if (monthlyAccountingDocumentsInfo.length === 0) {
         console.log('Creating monthly_accounting_documents table...');
         this.createMonthlyAccountingDocumentsTable(db);
+      }
+
+      const accountingLabelDefaultsInfo = db.prepare("PRAGMA table_info(accounting_label_defaults)").all();
+      if (accountingLabelDefaultsInfo.length === 0) {
+        console.log('Creating accounting_label_defaults table...');
+        this.createAccountingLabelDefaultsTable(db);
+      } else {
+        ensureColumn('accounting_label_defaults', accountingLabelDefaultsInfo, 'is_default', 'INTEGER DEFAULT 1');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)');
+
+      const homeLayoutSettingsInfo = db.prepare("PRAGMA table_info(home_layout_settings)").all();
+      if (homeLayoutSettingsInfo.length === 0) {
+        console.log('Creating home_layout_settings table...');
+        this.createHomeLayoutSettingsTable(db);
       }
 
       const appDevicesInfo = db.prepare("PRAGMA table_info(app_devices)").all();

@@ -1,6 +1,17 @@
 const { ipcRenderer } = require('electron');
 const readonlyUi = (typeof window !== 'undefined' && window.CoopReadonlyUI) ? window.CoopReadonlyUI : null;
 const landTexts = require('./land-texts');
+const {
+  HOME_LAYOUT_COLUMNS,
+  HOME_LAYOUT_MAX_ROW_SPAN,
+  HOME_LAYOUT_SECTIONS,
+  getDefaultHomeLayout,
+  isHomeLayoutItemLocked,
+  calculateHomeResizePatch,
+  normalizeHomeLayout,
+  resolveHomeLayoutCollisions,
+  serializeHomeLayout
+} = require('./home-layout');
 
 let XLSX = null;
 try {
@@ -31,19 +42,29 @@ let oilItemCounter = 0;
 let navigationHistory = [];
 let isOnline = navigator.onLine !== false;
 let offlineRestricted = {
-  screens: ['report', 'charts'],
+  screens: [],
   settingsSections: ['backup']
 };
-const rootScreens = ['home', 'charts', 'report', 'settings', 'land-dashboard', 'land-plots', 'land-tenants', 'land-assignments', 'land-reports'];
 const HOME_CHART_MODE = {
   PURCHASES: 'purchases',
   SALES: 'sales'
 };
 const HOME_CHART_FORECAST_DASH = [8, 5];
+const HOME_LAYOUT_EDITING_ENABLED = true;
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
 let currentHomeChartMode = HOME_CHART_MODE.SALES;
+let homeLayoutState = {
+  layout: getDefaultHomeLayout(),
+  savedLayout: getDefaultHomeLayout(),
+  editMode: false,
+  initialized: false,
+  loaded: false,
+  drag: null,
+  resize: null,
+  lastEditedItemId: ''
+};
 window.__skipBeforeUnloadWarning = false;
 let excelSalesImportState = {
   fileName: '',
@@ -74,31 +95,6 @@ let annualInventoryRecords = {};
 let annualInventoryInitialized = false;
 let annualCustomItemCounter = 0;
 
-// Screen and section titles mapping
-const screenTitles = {
-  'home': 'الرئيسية',
-  'invoice': 'فاتورة جديدة',
-  'shift-entry': 'إدخال وردية جديدة',
-  'safe-book': 'دفتر الخزينة',
-  'charts': 'الرسوم البيانية',
-  'report': 'التقارير',
-  'settings': 'الإعدادات',
-  'depot': 'المخزن',
-  'tank-management': 'ادارة التنكات',
-  'annual-inventory': 'جرد سنوي',
-  'sales-summary': 'ملخص المبيعات',
-  'customer-invoices': 'فواتير العملاء',
-  'company-vouchers': 'بونات الشركة',
-  'profit': 'المكسب',
-  'accounting': 'المحاسبة',
-  'expenses': 'المصاريف',
-  'land-dashboard': 'إدارة الأراضي',
-  'land-plots': 'الأراضي',
-  'land-tenants': 'المستأجرون',
-  'land-assignments': 'العقود',
-  'land-reports': 'تقارير الأراضي'
-};
-
 let landState = {
   seasons: [],
   plots: [],
@@ -107,29 +103,12 @@ let landState = {
   selectedSeasonKey: String(new Date().getFullYear())
 };
 
-const settingsSectionTitles = {
-  'manage-products': 'إدارة المنتجات',
-  'manage-customers': 'إدارة العملاء',
-  'app-users': 'إدارة المستخدمين',
-  'excel-sales-import': 'استيراد مبيعات Excel',
-  'excel-expenses-import': 'استيراد مصاريف Excel',
-  'balance-history': 'سجل الأرصدة والعدادات',
-  'app-devices': 'الأجهزة المتصلة',
-  'invoices-list': 'عرض الفواتير',
-  'general': 'إعدادات عامة',
-  'backup': 'النسخ الاحتياطي'
-};
-
 function screenRequiresOnline(screenName) {
   return !isOnline && offlineRestricted.screens.includes(screenName);
 }
 
 function settingsSectionRequiresOnline(sectionName) {
   return !isOnline && offlineRestricted.settingsSections.includes(sectionName);
-}
-
-function isRootScreen(screenName) {
-  return rootScreens.includes(screenName);
 }
 
 // Lista dei tipi di olio disponibili
@@ -206,6 +185,15 @@ function invalidateInvoiceFuelProductsCache() {
 const VIEW_CACHE_TTL_MS = 15_000;
 const viewDataCache = new Map();
 const viewDataInFlight = new Map();
+const HOME_ACCOUNTING_STAT_CARD_IDS = [
+  'sales-summary',
+  'sales-reconciliation',
+  'safe-book',
+  'profit',
+  'expenses',
+  'company-vouchers',
+  'customer-invoices'
+];
 
 function getViewCacheKey(channel, payload = {}) {
   return `${channel}:${JSON.stringify(payload || {})}`;
@@ -314,6 +302,10 @@ function getUserAvatarHtml(user = {}, className = 'user-avatar') {
 
   if ((avatarType === 'asset' || avatarType === 'data_url') && avatarValue) {
     return `<img class="${className} avatar-${avatarType}" src="${escapeHtml(avatarValue)}" alt="${escapeHtml(user.display_name || user.username || '')}">`;
+  }
+
+  if (className === 'app-user-table-avatar' || className === 'app-user-avatar-preview-img') {
+    return '';
   }
 
   return `<div class="${className} avatar-initial">${initial}</div>`;
@@ -469,22 +461,26 @@ async function selectAppModule(moduleName) {
   if (currentAppModule === 'land') {
     await bootstrapCommonApp();
     showScreenWithoutHistory('land-dashboard');
-    updateBreadcrumb('land-dashboard');
+    updatePageNavigation('land-dashboard');
     await initializeLandModule();
     document.body.classList.remove('module-selecting');
   } else {
     document.body.classList.remove('module-selecting');
     await bootstrapApp();
     showScreenWithoutHistory('home');
-    updateBreadcrumb('home');
+    updatePageNavigation('home');
     stabilizeHomeLayoutAfterLogin();
   }
 }
 
 function setAppHeaderTitle(moduleName = currentAppModule) {
-  const title = moduleName === 'land' ? 'إدارة الأراضي الزراعية' : 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
+  const isLandModule = moduleName === 'land';
+  const title = isLandModule ? 'إدارة الأراضي الزراعية' : 'محطة بنزين سمنود - الجمعية التعاونية للبترول';
+  const subtitle = isLandModule ? 'نظام إدارة الأراضي والعقود' : 'نظام المحاسبة وإدارة المبيعات';
   const appTitle = document.querySelector('.app-title');
+  const appSubtitle = document.querySelector('.app-subtitle');
   if (appTitle) appTitle.textContent = title;
+  if (appSubtitle) appSubtitle.textContent = subtitle;
   document.title = title;
 }
 
@@ -501,22 +497,57 @@ function applyCurrentUserSession() {
 function renderNavCurrentUser() {
   const container = document.getElementById('nav-user-status');
   const avatar = document.getElementById('nav-user-avatar');
-  const name = document.getElementById('nav-user-name');
-  if (!container || !avatar || !name) return;
+  if (!container || !avatar) return;
 
   if (!currentAppUser) {
+    closeNavUserMenu();
     container.style.display = 'none';
     avatar.innerHTML = '';
-    name.textContent = '';
     return;
   }
 
   avatar.innerHTML = getUserAvatarHtml(currentAppUser, 'nav-user-avatar-img');
-  name.textContent = currentAppUser.display_name || currentAppUser.username || '';
   container.style.display = 'inline-flex';
 }
 
+function setNavUserMenuOpen(isOpen) {
+  const container = document.getElementById('nav-user-status');
+  const button = container?.querySelector('.nav-user-menu-btn');
+  if (!container) return;
+
+  container.classList.toggle('user-menu-open', isOpen);
+  if (button) {
+    button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function toggleNavUserMenu(event) {
+  event?.stopPropagation();
+  const container = document.getElementById('nav-user-status');
+  if (!container || container.style.display === 'none') return;
+
+  setNavUserMenuOpen(!container.classList.contains('user-menu-open'));
+}
+
+function closeNavUserMenu() {
+  setNavUserMenuOpen(false);
+}
+
+function handleNavUserMenuOutsideClick(event) {
+  const container = document.getElementById('nav-user-status');
+  if (!container || !container.classList.contains('user-menu-open')) return;
+  if (container.contains(event.target)) return;
+
+  closeNavUserMenu();
+}
+
+function openSettingsFromUserMenu() {
+  closeNavUserMenu();
+  showScreen('settings', 'home');
+}
+
 async function logoutAppUser() {
+  closeNavUserMenu();
   try {
     await ipcRenderer.invoke('logout-app-user');
   } catch (error) {
@@ -531,7 +562,7 @@ async function logoutAppUser() {
   document.body.classList.add('auth-locked');
   document.body.classList.remove('auth-ready', 'module-selecting', 'module-fuel', 'module-land');
   showScreenWithoutHistory('home');
-  updateBreadcrumb('home');
+  updatePageNavigation('home');
   await loadLoginUsers();
 }
 
@@ -540,7 +571,7 @@ function settingsSectionRequiresPermission(sectionName) {
 }
 
 function applyPermissionLocks() {
-  document.querySelectorAll('.settings-menu-item.admin-only, .settings-section.admin-only').forEach((element) => {
+  document.querySelectorAll('.settings-menu-item.admin-only, .settings-section.admin-only, .home-grid-item.admin-only').forEach((element) => {
     element.style.display = isCurrentUserAdmin() ? '' : 'none';
   });
 
@@ -786,6 +817,7 @@ async function bootstrapApp() {
 
     await Promise.allSettled([
       loadHomeChart(),
+      loadHomeAccountingStats(),
       loadTodayStats()
     ]);
   } catch (error) {
@@ -859,8 +891,8 @@ function getTodayDate() {
 }
 
 function initializeApp() {
-  // Initialize breadcrumb for home screen
-  updateBreadcrumb('home');
+  // Initialize page navigation state for home screen
+  updatePageNavigation('home');
 
   // Set today's date as default
   const today = getTodayDate();
@@ -918,21 +950,10 @@ function initializeApp() {
 
 function setupEventListeners() {
   setupHomeChartToggle();
+  initializeHomeLayoutEditor();
   setupAnnualInventoryCalculator();
   window.addEventListener('resize', scheduleHomeChartHeightSync);
   window.addEventListener('resize', scheduleSafeBookTableViewportSync);
-
-  // Navigation
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const screen = btn.dataset.screen;
-       if (screenRequiresOnline(screen)) {
-        showMessage('هذه الشاشة تتطلب اتصالاً بالإنترنت', 'warning');
-        return;
-      }
-      showScreen(screen);
-    });
-  });
 
   // Invoice type selector
   document.querySelectorAll('#invoice-screen .price-type-tab').forEach(tab => {
@@ -957,8 +978,8 @@ function setupEventListeners() {
         return;
       }
 
-      // Update breadcrumb to show: الإعدادات > [Section Name]
-      updateBreadcrumb('settings', section);
+      // Refresh the page back button for the selected settings section
+      updatePageNavigation('settings', section, currentParentScreen || 'home');
 
       // Show the section
       showSettingsSectionWithoutHistory(section);
@@ -975,6 +996,8 @@ function setupEventListeners() {
 
   // Header scroll effect
   window.addEventListener('scroll', handleHeaderScroll);
+  window.addEventListener('resize', handleHeaderScroll);
+  document.addEventListener('click', handleNavUserMenuOutsideClick);
   // Ensure header renders at full height on initial load
   handleHeaderScroll();
   initializeModalScrollLock();
@@ -1024,14 +1047,6 @@ function setupEventListeners() {
     });
   }
 
-  // Shift date change listener - reload oil prices when date changes
-  const shiftDateInput = document.getElementById('shift-date');
-  if (shiftDateInput) {
-    shiftDateInput.addEventListener('change', async () => {
-      console.log('Shift date changed, reloading oil prices...');
-      await loadAllOilPrices();
-    });
-  }
 }
 
 function setupFuelCalculationListeners() {
@@ -1080,107 +1095,95 @@ function setupOilCalculationListeners() {
   }
 }
 
-// Breadcrumb Navigation Functions
-function updateBreadcrumb(currentScreen, currentSection = null, parentScreen = null) {
-  const breadcrumbNav = document.getElementById('breadcrumb-nav');
-  const breadcrumbTrail = document.getElementById('breadcrumb-trail');
-  const mainContent = document.querySelector('.main-content');
-
-  // Hide breadcrumb for root screens (and always for settings)
-  const isRoot = currentScreen ? isRootScreen(currentScreen) : false;
-  const shouldHide =
-    !currentScreen ||
-    currentScreen === 'settings' ||
-    (isRoot && !parentScreen && !(currentScreen === 'settings' && currentSection));
-
-  if (shouldHide) {
-    breadcrumbNav.style.display = 'none';
-    mainContent.classList.remove('with-breadcrumb');
-    return;
-  }
-
-  // Build hierarchical path based on current location
-  const path = [];
-
-  // Add parent screen if exists (e.g., الرئيسية for depot)
-  if (parentScreen) {
-    path.push({ screen: parentScreen, section: null, parent: null });
-  }
-
-  // Add current screen to path
-  path.push({ screen: currentScreen, section: null, parent: parentScreen });
-
-  // Add section if in settings
-  if (currentScreen === 'settings' && currentSection) {
-    path.push({ screen: currentScreen, section: currentSection, parent: parentScreen });
-  }
-
-  // Show breadcrumb
-  breadcrumbNav.style.display = 'flex';
-  mainContent.classList.add('with-breadcrumb');
-
-  // Build breadcrumb trail
-  breadcrumbTrail.innerHTML = '';
-
-  path.forEach((item, index) => {
-    const isLast = index === path.length - 1;
-    const breadcrumbItem = document.createElement('div');
-    breadcrumbItem.className = isLast ? 'breadcrumb-item current' : 'breadcrumb-item';
-
-    let title = '';
-    if (item.section) {
-      title = settingsSectionTitles[item.section] || item.section;
-    } else if (item.screen) {
-      title = screenTitles[item.screen] || item.screen;
-    }
-
-    if (isLast) {
-      breadcrumbItem.textContent = title;
-    } else {
-      const link = document.createElement('a');
-      link.textContent = title;
-      link.onclick = () => {
-        if (item.screen && !item.section) {
-          showScreen(item.screen);
-        } else if (item.screen === 'settings' && item.section) {
-          showSettingsSection(item.section);
-        }
-      };
-      breadcrumbItem.appendChild(link);
-    }
-
-    breadcrumbTrail.appendChild(breadcrumbItem);
-
-    // Add separator if not last item
-    if (!isLast) {
-      const separator = document.createElement('span');
-      separator.className = 'breadcrumb-separator';
-      separator.textContent = '›';
-      breadcrumbTrail.appendChild(separator);
-    }
+function removePageBackButtons() {
+  document.querySelectorAll('.page-back-btn').forEach(button => button.remove());
+  document.querySelectorAll('.page-title-with-back').forEach(title => {
+    title.classList.remove('page-title-with-back');
   });
 }
 
-function pushNavigation(item) {
-  // No longer needed - we build path based on current location
-  updateBreadcrumb(item.screen, item.section, item.parent);
+function shouldShowPageBackButton(screenName) {
+  return Boolean(screenName && screenName !== 'home' && screenName !== 'land-dashboard');
+}
+
+function getPageTitleElement(screenElement, screenName) {
+  if (!screenElement) return null;
+
+  const titleSelectors = screenName === 'settings'
+    ? [
+        '.settings-section.active .settings-section-header h3',
+        '.settings-section.active > h3',
+        '.settings-content h2'
+      ]
+    : [
+        '.land-hero h2',
+        '.customer-invoices-header h2',
+        '.profit-header h2',
+        '.accounting-header h2',
+        '.expenses-header h2',
+        '.home-summary-header h2',
+        '#annual-inventory-title',
+        '#shift-entry-title',
+        '#invoice-screen-title',
+        ':scope > h2',
+        'h2'
+      ];
+
+  for (const selector of titleSelectors) {
+    const title = screenElement.querySelector(selector);
+    if (title) return title;
+  }
+
+  return null;
+}
+
+function createPageBackButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'page-back-btn';
+  button.setAttribute('aria-label', 'رجوع');
+  button.setAttribute('title', 'رجوع');
+  button.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5 12l14 0"></path>
+      <path d="M13 18l6 -6"></path>
+      <path d="M13 6l6 6"></path>
+    </svg>
+  `;
+  button.addEventListener('click', navigateBack);
+  return button;
+}
+
+function updatePageBackButton(screenName = currentScreen) {
+  removePageBackButtons();
+  if (!shouldShowPageBackButton(screenName)) return;
+
+  const screenElement = document.getElementById(`${screenName}-screen`);
+  const title = getPageTitleElement(screenElement, screenName);
+  if (!title) return;
+
+  title.classList.add('page-title-with-back');
+  title.insertBefore(createPageBackButton(), title.firstChild);
+}
+
+function updatePageNavigation(currentScreen) {
+  updatePageBackButton(currentScreen);
 }
 
 function navigateBack() {
-  // If we're inside settings, go back to settings root first
   if (currentScreen === 'settings') {
-    const activeSettingsSection = document.querySelector('.settings-section.active');
-    if (activeSettingsSection) {
-      // Clear section and show settings root
-      showSettingsSectionWithoutHistory(null);
-      showScreenWithoutHistory('settings');
-      return;
-    }
+    showScreen(currentParentScreen || 'home');
+    return;
   }
 
   // If screen has a parent (e.g., invoice/shift/depot under home), go to parent
   if (currentParentScreen) {
     showScreen(currentParentScreen);
+    return;
+  }
+
+  if (currentAppModule === 'land' && currentScreen !== 'land-dashboard') {
+    showScreen('land-dashboard');
     return;
   }
 
@@ -1246,6 +1249,10 @@ function showScreenWithoutHistory(screenName) {
     showMessage('هذه الشاشة تتطلب اتصالاً بالإنترنت', 'warning');
     return;
   }
+  if (screenName === 'home' || screenName === 'land-dashboard') {
+    currentParentScreen = null;
+  }
+
   // Hide all screens
   document.querySelectorAll('.screen').forEach(screen => {
     screen.classList.remove('active');
@@ -1253,15 +1260,6 @@ function showScreenWithoutHistory(screenName) {
 
   // Show selected screen
   document.getElementById(`${screenName}-screen`).classList.add('active');
-
-  // Update navigation buttons
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  const navBtn = document.querySelector(`[data-screen="${screenName}"]`);
-  if (navBtn) {
-    navBtn.classList.add('active');
-  }
 
   currentScreen = screenName;
   window.__currentScreen = currentScreen;
@@ -1282,7 +1280,9 @@ function showScreenWithoutHistory(screenName) {
   // Load specific data for each screen
   switch (screenName) {
     case 'home':
+      initializeHomeLayoutEditor({ reload: !homeLayoutState.editMode });
       loadHomeChart();
+      loadHomeAccountingStats();
       loadTodayStats();
       loadSafeBookMovements();
       scheduleHomeChartHeightSync();
@@ -1294,12 +1294,6 @@ function showScreenWithoutHistory(screenName) {
       setupFuelCalculationListeners();
       setupOilCalculationListeners();
       break;
-    case 'charts':
-      loadCharts();
-      break;
-    case 'report':
-      generateReport();
-      break;
     case 'settings':
       // Load manage products when opening settings
       loadManageProducts();
@@ -1308,8 +1302,14 @@ function showScreenWithoutHistory(screenName) {
       initSalesSummaryFilters();
       loadSalesSummary();
       break;
+    case 'sales-reconciliation':
+      initializeSalesReconciliationPage();
+      break;
     case 'customer-invoices':
       initializeCustomerInvoicesPage();
+      break;
+    case 'customer-balance':
+      initializeCustomerBalancePage();
       break;
     case 'company-vouchers':
       loadCompanyVouchersPage();
@@ -1317,6 +1317,10 @@ function showScreenWithoutHistory(screenName) {
     case 'safe-book':
       initSafeBookFilters();
       loadSafeBookMovements();
+      break;
+    case 'safe-book-entry':
+      initializeSafeBookEntryPage(safeBookEntryInitialMode);
+      safeBookEntryInitialMode = 'movement';
       break;
     case 'profit':
       initializeProfitDashboard();
@@ -1360,6 +1364,8 @@ function showScreenWithoutHistory(screenName) {
       loadLandReports();
       break;
   }
+
+  updatePageBackButton(screenName);
 }
 
 function showScreen(screenName, parentScreen = null) {
@@ -1383,8 +1389,8 @@ function showScreen(screenName, parentScreen = null) {
   // Update global parent screen tracker
   currentParentScreen = parentScreen;
 
-  // Update breadcrumb with current screen and parent
-  updateBreadcrumb(screenName, null, parentScreen);
+  // Refresh page navigation affordances with the current screen and parent
+  updatePageNavigation(screenName, null, parentScreen);
 
   // Call the version without history
   showScreenWithoutHistory(screenName);
@@ -1417,7 +1423,6 @@ function openNewShiftEntry() {
   currentShiftData.shiftNumber = null;
   currentShiftData.isSaved = false;
   currentShiftData.hasUnsavedChanges = false;
-  currentShiftData.draftCleanupQueue = [];
 
   showScreen('shift-entry', 'home');
   scheduleDieselLastShiftFocus();
@@ -1488,7 +1493,7 @@ function resetDepotView() {
     stockAmount.textContent = convertToArabicNumerals(0);
   }
 
-  const productLabel = document.getElementById('breadcrumb-product');
+  const productLabel = document.getElementById('depot-selected-product');
   if (productLabel) {
     productLabel.textContent = '-';
   }
@@ -1613,6 +1618,7 @@ const SAFE_BOOK_MONTH_NAMES = [
 ];
 const SAFE_BOOK_DEFAULT_VISIBLE_ROWS = 15;
 let safeBookCurrentBalance = 0;
+let safeBookEntryInitialMode = 'movement';
 
 function formatSafeBookArabicLongDate(dateString) {
   const parts = parseIsoDateParts(dateString);
@@ -1811,15 +1817,7 @@ function syncSafeBookTableViewportHeight() {
 
   const viewportHeight = window.innerHeight;
   const wrapperTop = tableWrapper.getBoundingClientRect().top;
-  const bottomNav = document.querySelector('.bottom-navigation');
-
-  let bottomReserve = 16;
-  if (bottomNav) {
-    const navRect = bottomNav.getBoundingClientRect();
-    if (navRect.top < viewportHeight) {
-      bottomReserve = Math.max(bottomReserve, (viewportHeight - navRect.top) + 12);
-    }
-  }
+  const bottomReserve = 16;
 
   const availableHeight = Math.floor(viewportHeight - wrapperTop - bottomReserve);
   if (availableHeight > 80) {
@@ -2081,6 +2079,44 @@ function toggleSafeBookForm(forceShow) {
   }
 }
 
+function setSafeBookEntryMode(mode = 'movement') {
+  const normalizedMode = mode === 'audit' ? 'audit' : 'movement';
+  const movementTab = document.getElementById('safe-book-entry-movement-tab');
+  const auditTab = document.getElementById('safe-book-entry-audit-tab');
+
+  if (movementTab) {
+    movementTab.classList.toggle('btn-primary', normalizedMode === 'movement');
+    movementTab.classList.toggle('btn-secondary', normalizedMode !== 'movement');
+  }
+  if (auditTab) {
+    auditTab.classList.toggle('btn-primary', normalizedMode === 'audit');
+    auditTab.classList.toggle('btn-secondary', normalizedMode !== 'audit');
+  }
+
+  if (normalizedMode === 'audit') {
+    toggleSafeBookForm(false);
+    toggleSafeBookAuditForm(true);
+  } else {
+    toggleSafeBookAuditForm(false);
+    toggleSafeBookForm(true);
+  }
+}
+
+async function initializeSafeBookEntryPage(mode = 'movement') {
+  await loadSafeBookMovements();
+  const balanceEl = document.getElementById('safe-book-entry-balance-value');
+  if (balanceEl) {
+    balanceEl.textContent = formatArabicCurrency(safeBookCurrentBalance);
+    balanceEl.classList.toggle('negative', safeBookCurrentBalance < 0);
+  }
+  setSafeBookEntryMode(mode);
+}
+
+function openSafeBookEntry(mode = 'movement') {
+  safeBookEntryInitialMode = mode === 'audit' ? 'audit' : 'movement';
+  showScreen('safe-book-entry', 'home');
+}
+
 function toggleSafeBookAuditForm(forceShow) {
   const form = document.getElementById('safe-book-audit-form');
   if (!form) return;
@@ -2136,6 +2172,9 @@ async function saveSafeBookAuditMovement() {
   if (Math.abs(difference) < 0.005) {
     showMessage('رصيد الخزينة مطابق للرصيد الفعلي', 'info');
     toggleSafeBookAuditForm(false);
+    if (currentScreen === 'safe-book-entry') {
+      showScreen('safe-book', 'home');
+    }
     return;
   }
 
@@ -2151,6 +2190,12 @@ async function saveSafeBookAuditMovement() {
     showMessage('تمت إضافة فرق الجرد وتحديث رصيد الخزينة', 'success');
     toggleSafeBookAuditForm(false);
     await loadSafeBookMovements();
+    if (currentScreen === 'home') {
+      loadHomeAccountingStats();
+    }
+    if (currentScreen === 'safe-book-entry') {
+      showScreen('safe-book', 'home');
+    }
   } catch (error) {
     console.error('Error saving safe book audit movement:', error);
     showMessage(error.message || 'حدث خطأ أثناء حفظ جرد الخزينة', 'error');
@@ -2200,6 +2245,12 @@ async function saveSafeBookMovement() {
     showMessage('تمت إضافة حركة الخزينة بنجاح', 'success');
     toggleSafeBookForm(false);
     await loadSafeBookMovements();
+    if (currentScreen === 'home') {
+      loadHomeAccountingStats();
+    }
+    if (currentScreen === 'safe-book-entry') {
+      showScreen('safe-book', 'home');
+    }
   } catch (error) {
     console.error('Error saving safe book movement:', error);
     showMessage(error.message || 'حدث خطأ أثناء إضافة حركة الخزينة', 'error');
@@ -2235,7 +2286,7 @@ async function loadCompanyVouchersPage() {
   const monthsBody = document.getElementById('company-vouchers-months-body');
   const detailsBody = document.getElementById('company-vouchers-details-body');
   if (monthsBody) {
-    monthsBody.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading">جاري تحميل البونات...</td></tr>';
+    monthsBody.innerHTML = '<tr><td colspan="3" class="customer-invoices-loading">جاري تحميل البونات...</td></tr>';
   }
   if (detailsBody) {
     detailsBody.innerHTML = '';
@@ -2251,7 +2302,7 @@ async function loadCompanyVouchersPage() {
   } catch (error) {
     console.error('Error loading company vouchers:', error);
     if (monthsBody) {
-      monthsBody.innerHTML = '<tr><td colspan="4" class="customer-invoices-loading error">حدث خطأ أثناء تحميل البونات</td></tr>';
+      monthsBody.innerHTML = '<tr><td colspan="3" class="customer-invoices-loading error">حدث خطأ أثناء تحميل البونات</td></tr>';
     }
     showMessage('حدث خطأ أثناء تحميل بونات الشركة', 'error');
   }
@@ -2265,29 +2316,20 @@ function selectCompanyVoucherMonth(month) {
 function renderCompanyVouchersPage() {
   const directTotalEl = document.getElementById('company-vouchers-direct-total');
   const companyTotalEl = document.getElementById('company-vouchers-company-total');
-  const paidTotalEl = document.getElementById('company-vouchers-paid-total');
-  const remainingTotalEl = document.getElementById('company-vouchers-remaining-total');
   const monthsBody = document.getElementById('company-vouchers-months-body');
   const empty = document.getElementById('company-vouchers-empty');
   const selectedMonthTitle = document.getElementById('company-vouchers-selected-month');
-  const paidAmountInput = document.getElementById('company-vouchers-paid-amount');
-  const paidDateInput = document.getElementById('company-vouchers-paid-date');
-  const notesInput = document.getElementById('company-vouchers-notes');
   const detailsBody = document.getElementById('company-vouchers-details-body');
   const detailsEmpty = document.getElementById('company-vouchers-details-empty');
 
   const totals = companyVouchersState.months.reduce((acc, item) => {
     acc.direct += parseFloat(item.direct_total) || 0;
     acc.company += parseFloat(item.company_total) || 0;
-    acc.paid += parseFloat(item.company_paid) || 0;
-    acc.remaining += parseFloat(item.company_remaining) || 0;
     return acc;
-  }, { direct: 0, company: 0, paid: 0, remaining: 0 });
+  }, { direct: 0, company: 0 });
 
   if (directTotalEl) directTotalEl.textContent = formatPrice(totals.direct);
   if (companyTotalEl) companyTotalEl.textContent = formatPrice(totals.company);
-  if (paidTotalEl) paidTotalEl.textContent = formatPrice(totals.paid);
-  if (remainingTotalEl) remainingTotalEl.textContent = formatPrice(totals.remaining);
 
   if (monthsBody) {
     monthsBody.innerHTML = '';
@@ -2298,7 +2340,6 @@ function renderCompanyVouchersPage() {
         <td>${escapeHtml(formatVoucherMonthLabel(item.month))}</td>
         <td>${formatPrice(item.direct_total || 0)}</td>
         <td>${formatPrice(item.company_total || 0)}</td>
-        <td>${formatPrice(item.company_remaining || 0)}</td>
       `;
       row.addEventListener('click', () => selectCompanyVoucherMonth(item.month));
       monthsBody.appendChild(row);
@@ -2311,18 +2352,6 @@ function renderCompanyVouchersPage() {
   const selectedMonth = getSelectedCompanyVoucherMonth();
   if (selectedMonthTitle) {
     selectedMonthTitle.textContent = selectedMonth ? formatVoucherMonthLabel(selectedMonth.month) : '-';
-  }
-  if (paidAmountInput) {
-    paidAmountInput.value = selectedMonth ? formatPrice(selectedMonth.company_paid || 0) : '';
-    paidAmountInput.disabled = !selectedMonth;
-  }
-  if (paidDateInput) {
-    paidDateInput.value = selectedMonth?.paid_at || '';
-    paidDateInput.disabled = !selectedMonth;
-  }
-  if (notesInput) {
-    notesInput.value = selectedMonth?.notes || '';
-    notesInput.disabled = !selectedMonth;
   }
 
   const items = Array.isArray(selectedMonth?.items) ? selectedMonth.items : [];
@@ -2344,32 +2373,6 @@ function renderCompanyVouchersPage() {
   }
   if (detailsEmpty) {
     detailsEmpty.style.display = items.length === 0 ? 'block' : 'none';
-  }
-}
-
-async function saveCompanyVoucherSettlement() {
-  const selectedMonth = getSelectedCompanyVoucherMonth();
-  if (!selectedMonth) {
-    showMessage('اختر شهر البونات أولاً', 'error');
-    return;
-  }
-
-  const paidAmount = parseSummaryNumber(document.getElementById('company-vouchers-paid-amount')?.value);
-  const paidAt = document.getElementById('company-vouchers-paid-date')?.value || '';
-  const notes = document.getElementById('company-vouchers-notes')?.value || '';
-
-  try {
-    await ipcRenderer.invoke('save-company-voucher-settlement', {
-      voucher_month: selectedMonth.month,
-      paid_amount: paidAmount,
-      paid_at: paidAt,
-      notes
-    });
-    showMessage('تم حفظ تحصيل بون الشركة', 'success');
-    await loadCompanyVouchersPage();
-  } catch (error) {
-    console.error('Error saving company voucher settlement:', error);
-    showMessage(error.message || 'حدث خطأ أثناء حفظ التحصيل', 'error');
   }
 }
 
@@ -2431,6 +2434,22 @@ function updateCustomerInvoiceWeekNavigationState() {
   }
 }
 
+function updateCustomerBalanceWeekNavigationState() {
+  const nextButton = document.getElementById('customer-balance-next-week-btn');
+  const currentWeekButton = document.getElementById('customer-balance-current-week-btn');
+  const isCurrentWeek = isCustomerInvoiceCurrentWeek();
+
+  if (nextButton) {
+    nextButton.disabled = isCurrentWeek;
+    nextButton.setAttribute('aria-disabled', isCurrentWeek ? 'true' : 'false');
+  }
+
+  if (currentWeekButton) {
+    currentWeekButton.disabled = isCurrentWeek;
+    currentWeekButton.setAttribute('aria-disabled', isCurrentWeek ? 'true' : 'false');
+  }
+}
+
 function clampCustomerInvoiceWeekToPresent() {
   const currentRange = getCurrentCustomerInvoiceWeekRange();
   if (!customerInvoicesState.weekStart || customerInvoicesState.weekStart > currentRange.weekStart) {
@@ -2446,6 +2465,19 @@ async function initializeCustomerInvoicesPage() {
   clampCustomerInvoiceWeekToPresent();
   updateCustomerInvoiceWeekNavigationState();
   await loadCustomerWeeklyInvoices();
+}
+
+async function initializeCustomerBalancePage() {
+  if (!customerInvoicesState.weekStart || !customerInvoicesState.weekEnd) {
+    setCustomerInvoiceWeekFromDate(new Date());
+  }
+  clampCustomerInvoiceWeekToPresent();
+  updateCustomerBalanceWeekNavigationState();
+  await loadCustomerWeeklyInvoices();
+}
+
+function openCustomerBalanceEntry() {
+  showScreen('customer-balance', 'home');
 }
 
 async function changeCustomerInvoiceWeek(direction) {
@@ -2465,6 +2497,11 @@ async function changeCustomerInvoiceWeek(direction) {
   await loadCustomerWeeklyInvoices();
 }
 
+async function changeCustomerBalanceWeek(direction) {
+  await changeCustomerInvoiceWeek(direction);
+  updateCustomerBalanceWeekNavigationState();
+}
+
 async function goToCurrentCustomerInvoiceWeek() {
   if (isCustomerInvoiceCurrentWeek()) {
     updateCustomerInvoiceWeekNavigationState();
@@ -2476,10 +2513,23 @@ async function goToCurrentCustomerInvoiceWeek() {
   await loadCustomerWeeklyInvoices();
 }
 
+async function goToCurrentCustomerBalanceWeek() {
+  await goToCurrentCustomerInvoiceWeek();
+  updateCustomerBalanceWeekNavigationState();
+}
+
 function handleCustomerInvoiceClientChange() {
   const select = document.getElementById('customer-invoices-select');
   customerInvoicesState.selectedCustomerId = select?.value || '';
   renderCustomerInvoices();
+  renderCustomerBalancePage();
+}
+
+function handleCustomerBalanceClientChange() {
+  const select = document.getElementById('customer-balance-select');
+  customerInvoicesState.selectedCustomerId = select?.value || '';
+  renderCustomerInvoices();
+  renderCustomerBalancePage();
 }
 
 async function saveCustomerInvoiceOpeningBalance() {
@@ -2504,9 +2554,44 @@ async function saveCustomerInvoiceOpeningBalance() {
       throw new Error(result?.error || 'save_failed');
     }
 
+    invalidateViewDataCaches();
     showMessage('تم حفظ الرصيد السابق', 'success');
     closeCustomerInvoiceBalanceModal();
     await loadCustomerWeeklyInvoices();
+  } catch (error) {
+    console.error('Error saving customer balance adjustment:', error);
+    showMessage('خطأ في حفظ الرصيد السابق', 'error');
+  }
+}
+
+async function saveCustomerBalanceOpeningBalance() {
+  const customerId = parseInt(customerInvoicesState.selectedCustomerId, 10);
+  const customer = customerInvoicesState.customers.find((item) => String(item.id) === String(customerInvoicesState.selectedCustomerId));
+  const input = document.getElementById('customer-balance-previous-balance');
+  if (!Number.isFinite(customerId) || customerId <= 0) {
+    showMessage('اختر العميل أولاً', 'warning');
+    return;
+  }
+
+  const balance = parseSummaryNumber(input?.value);
+  try {
+    const result = await ipcRenderer.invoke('upsert-customer-balance-adjustment', {
+      customer_id: customerId,
+      customer_name: customer?.name || '',
+      effective_date: customerInvoicesState.weekStart,
+      balance
+    });
+
+    if (!result?.success) {
+      throw new Error(result?.error || 'save_failed');
+    }
+
+    invalidateViewDataCaches();
+    showMessage('تم حفظ الرصيد السابق', 'success');
+    await loadCustomerWeeklyInvoices();
+    if (currentScreen === 'customer-balance') {
+      openCustomerInvoices();
+    }
   } catch (error) {
     console.error('Error saving customer balance adjustment:', error);
     showMessage('خطأ في حفظ الرصيد السابق', 'error');
@@ -2590,6 +2675,7 @@ async function loadCustomerWeeklyInvoices() {
     }
 
     renderCustomerInvoices();
+    renderCustomerBalancePage();
   } catch (error) {
     console.error('Error loading customer weekly invoices:', error);
     customerInvoicesState.customers = [];
@@ -2746,6 +2832,45 @@ function renderCustomerInvoices() {
   `).join('');
 }
 
+function renderCustomerBalancePage() {
+  const weekLabel = document.getElementById('customer-balance-week-label');
+  const select = document.getElementById('customer-balance-select');
+  const previousInput = document.getElementById('customer-balance-previous-balance');
+  const note = document.getElementById('customer-balance-entry-note');
+
+  if (weekLabel) {
+    weekLabel.textContent = `${formatDateOnlyDisplay(customerInvoicesState.weekStart)} - ${formatDateOnlyDisplay(customerInvoicesState.weekEnd)}`;
+  }
+  updateCustomerBalanceWeekNavigationState();
+
+  if (select) {
+    select.innerHTML = '';
+    customerInvoicesState.customers.forEach((customer) => {
+      const option = document.createElement('option');
+      option.value = String(customer.id);
+      option.textContent = customer.name;
+      select.appendChild(option);
+    });
+    select.value = customerInvoicesState.selectedCustomerId || '';
+    select.disabled = customerInvoicesState.customers.length === 0;
+  }
+
+  const selectedInvoice = getSelectedCustomerInvoice();
+  const previousBalance = parseFloat(selectedInvoice.previous_balance) || 0;
+  const hasCustomer = Boolean(customerInvoicesState.selectedCustomerId);
+
+  if (previousInput) {
+    previousInput.value = hasCustomer ? formatPrice(previousBalance) : '';
+    previousInput.disabled = !hasCustomer;
+  }
+
+  if (note) {
+    note.textContent = hasCustomer
+      ? 'سيتم تسجيل الفرق كتصحيح في جدول المدفوعات.'
+      : 'اختر عميلاً لتعديل الرصيد السابق.';
+  }
+}
+
 function setupHomeChartToggle() {
   const toggleButtons = document.querySelectorAll('.home-chart-toggle-btn');
   if (!toggleButtons.length) return;
@@ -2807,62 +2932,307 @@ function getCurrentMonthForecastValue(actualQuantity, monthKey, registeredDays, 
 function syncHomeChartHeightToCardRows() {
   const homeScreen = document.getElementById('home-screen');
   if (!homeScreen || !homeScreen.classList.contains('active')) return;
-
   const chartContainer = homeScreen.querySelector('.home-chart-container');
-  const cardsGrid = homeScreen.querySelector('.action-cards-grid');
-  if (!chartContainer || !cardsGrid) return;
-
-  const gridRect = cardsGrid.getBoundingClientRect();
-  if (gridRect.width < 280) return;
-
-  // Keep mobile sizing delegated to CSS media rules.
-  if (window.matchMedia('(max-width: 768px)').matches) {
-    chartContainer.style.removeProperty('height');
-    return;
-  }
-
-  const cards = Array.from(cardsGrid.querySelectorAll('.action-card'));
-  if (!cards.length) return;
-
-  const rowTolerance = 4;
-  const rowGroups = [];
-  cards.forEach((card) => {
-    const rect = card.getBoundingClientRect();
-    if (rect.width < 80 || rect.height < 80) return;
-    const top = rect.top;
-    const existingGroup = rowGroups.find(group => Math.abs(group.top - top) <= rowTolerance);
-
-    if (!existingGroup) {
-      rowGroups.push({ top, height: rect.height });
-      return;
-    }
-
-    existingGroup.height = Math.max(existingGroup.height, rect.height);
-  });
-
-  const sortedRowHeights = rowGroups
-    .sort((a, b) => a.top - b.top)
-    .map(group => group.height);
-
-  if (sortedRowHeights.length < 2) return;
-
-  const targetRows = 2;
-  const usedRows = sortedRowHeights.slice(0, targetRows);
-  const rowsHeight = usedRows.reduce((total, height) => total + height, 0);
-  const gridStyle = window.getComputedStyle(cardsGrid);
-  const rowGap = parseFloat(gridStyle.rowGap || gridStyle.gap || '0') || 0;
-  const totalGap = rowGap * Math.max(0, usedRows.length - 1);
-  const nextHeight = Math.round(rowsHeight + totalGap);
-
-  if (nextHeight < 220 || nextHeight > 520) return;
-
-  chartContainer.style.height = `${nextHeight}px`;
+  if (chartContainer) chartContainer.style.removeProperty('height');
 }
 
 function scheduleHomeChartHeightSync() {
   window.requestAnimationFrame(() => {
     syncHomeChartHeightToCardRows();
+    resizeHomeChartCanvas();
   });
+}
+
+function getHomeItemElement(itemId) {
+  return document.querySelector(`[data-home-item="${CSS.escape(itemId)}"]`);
+}
+
+function getHomeGridElement(section) {
+  return document.querySelector(`[data-home-grid="${CSS.escape(section)}"]`);
+}
+
+function applyHomeLayout(layout) {
+  const normalized = normalizeHomeLayout(layout);
+  homeLayoutState.layout = normalized;
+
+  normalized.forEach((item) => {
+    const element = getHomeItemElement(item.id);
+    const grid = getHomeGridElement(item.section);
+    if (!element || !grid) return;
+    if (element.parentElement !== grid) {
+      grid.appendChild(element);
+    }
+    element.dataset.homeSection = item.section;
+    element.dataset.homeColSpan = String(item.colSpan);
+    element.dataset.homeRowSpan = String(item.rowSpan);
+    element.style.setProperty('--home-col', item.col);
+    element.style.setProperty('--home-row', item.row);
+    element.style.setProperty('--home-col-span', item.colSpan);
+    element.style.setProperty('--home-row-span', item.rowSpan);
+  });
+
+  renderHomeResizeMarkers();
+  scheduleHomeChartHeightSync();
+}
+
+function renderHomeResizeMarkers() {
+  document.querySelectorAll('.home-resize-marker').forEach((marker) => marker.remove());
+  if (!HOME_LAYOUT_EDITING_ENABLED || !homeLayoutState.editMode) return;
+
+  document.querySelectorAll('.home-grid-item.action-card').forEach((item) => {
+    if (isHomeLayoutItemLocked(item.dataset.homeItem)) return;
+    ['nw', 'ne', 'sw', 'se'].forEach((corner) => {
+      const marker = document.createElement('span');
+      marker.className = 'home-resize-marker';
+      marker.dataset.homeResizeCorner = corner;
+      item.appendChild(marker);
+    });
+  });
+}
+
+async function initializeHomeLayoutEditor(options = {}) {
+  if (!homeLayoutState.initialized) {
+    homeLayoutState.initialized = true;
+    setupHomeLayoutEvents();
+  }
+  if (homeLayoutState.loaded && options.reload !== true) return;
+
+  try {
+    const result = await ipcRenderer.invoke('get-home-layout-settings');
+    const layout = normalizeHomeLayout(result?.layout || getDefaultHomeLayout());
+    homeLayoutState.savedLayout = layout;
+    homeLayoutState.loaded = true;
+    applyHomeLayout(layout);
+  } catch (error) {
+    console.error('Error initializing home layout:', error);
+    homeLayoutState.loaded = true;
+    applyHomeLayout(getDefaultHomeLayout());
+  }
+}
+
+function setupHomeLayoutEvents() {
+  const homeLayout = document.getElementById('home-layout');
+  const editMenuBtn = document.getElementById('home-context-edit-btn');
+  const saveBtn = document.getElementById('home-save-layout-btn');
+  const cancelBtn = document.getElementById('home-cancel-layout-btn');
+  if (!homeLayout) return;
+
+  if (HOME_LAYOUT_EDITING_ENABLED) {
+    homeLayout.addEventListener('contextmenu', handleHomeContextMenu);
+    homeLayout.addEventListener('click', handleHomeLayoutClick, true);
+    homeLayout.addEventListener('mousedown', handleHomeLayoutPointerStart);
+    if (editMenuBtn) editMenuBtn.addEventListener('click', enterHomeEditMode);
+    if (saveBtn) saveBtn.addEventListener('click', saveHomeLayout);
+    if (cancelBtn) cancelBtn.addEventListener('click', cancelHomeLayoutEdit);
+    document.addEventListener('click', hideHomeContextMenu);
+    document.addEventListener('mousemove', handleHomeLayoutPointerMove);
+    document.addEventListener('mouseup', handleHomeLayoutPointerEnd);
+  }
+}
+
+function handleHomeContextMenu(event) {
+  if (!HOME_LAYOUT_EDITING_ENABLED) return;
+  const card = event.target?.closest?.('.home-grid-item.action-card');
+  if (!card) return;
+  event.preventDefault();
+  const menu = document.getElementById('home-context-menu');
+  if (!menu) return;
+  menu.style.display = 'block';
+  menu.style.left = `${event.clientX}px`;
+  menu.style.top = `${event.clientY}px`;
+}
+
+function hideHomeContextMenu() {
+  const menu = document.getElementById('home-context-menu');
+  if (menu) menu.style.display = 'none';
+}
+
+function enterHomeEditMode(event) {
+  if (!HOME_LAYOUT_EDITING_ENABLED) return;
+  event?.stopPropagation?.();
+  hideHomeContextMenu();
+  homeLayoutState.editMode = true;
+  const homeLayout = document.getElementById('home-layout');
+  const toolbar = document.getElementById('home-edit-toolbar');
+  if (homeLayout) homeLayout.classList.add('home-editing');
+  if (toolbar) toolbar.style.display = '';
+  renderHomeResizeMarkers();
+}
+
+function leaveHomeEditMode() {
+  homeLayoutState.editMode = false;
+  homeLayoutState.drag = null;
+  homeLayoutState.resize = null;
+  document.querySelectorAll('.home-dragging, .home-resizing').forEach((item) => {
+    item.classList.remove('home-dragging', 'home-resizing');
+  });
+  const homeLayout = document.getElementById('home-layout');
+  const toolbar = document.getElementById('home-edit-toolbar');
+  if (homeLayout) homeLayout.classList.remove('home-editing');
+  if (toolbar) toolbar.style.display = 'none';
+  renderHomeResizeMarkers();
+}
+
+function handleHomeLayoutClick(event) {
+  if (!homeLayoutState.editMode) return;
+  if (event.target?.closest?.('.home-edit-toolbar, .home-context-menu, .home-chart-toggle')) return;
+  if (event.target?.closest?.('.home-grid-item.action-card')) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+
+function getHomeLayoutItem(itemId) {
+  return homeLayoutState.layout.find((item) => item.id === itemId);
+}
+
+function getHomeGridPoint(event, grid) {
+  const rect = grid.getBoundingClientRect();
+  const styles = getComputedStyle(grid);
+  const columnGap = parseFloat(styles.columnGap || styles.gap || '0') || 0;
+  const rowGap = parseFloat(styles.rowGap || styles.gap || '0') || 0;
+  const columnWidth = (rect.width - (columnGap * (HOME_LAYOUT_COLUMNS - 1))) / HOME_LAYOUT_COLUMNS;
+  const rowHeight = parseFloat(styles.gridAutoRows || '140') || 140;
+  const rtlX = Math.max(0, Math.min(rect.width, rect.right - event.clientX));
+  const y = Math.max(0, event.clientY - rect.top);
+
+  const getTrackIndex = (offset, trackSize, gapSize, maxTracks = Infinity) => {
+    const cycleSize = trackSize + gapSize;
+    if (cycleSize <= 0) return 1;
+    const cycle = Math.floor(offset / cycleSize);
+    const offsetInCycle = offset - (cycle * cycleSize);
+    const index = offsetInCycle <= trackSize + (gapSize / 2) ? cycle + 1 : cycle + 2;
+    return Math.max(1, Math.min(maxTracks, index));
+  };
+
+  const col = getTrackIndex(rtlX, columnWidth, columnGap, HOME_LAYOUT_COLUMNS);
+  const row = Math.max(1, getTrackIndex(y, rowHeight, rowGap));
+  return { col, row };
+}
+
+function getHomeGridFromPoint(event) {
+  const grids = Array.from(document.querySelectorAll('.home-layout-grid'));
+  const directHit = grids.find((grid) => {
+    const rect = grid.getBoundingClientRect();
+    return event.clientX >= rect.left
+      && event.clientX <= rect.right
+      && event.clientY >= rect.top
+      && event.clientY <= rect.bottom;
+  });
+  if (directHit) return directHit;
+
+  const nearest = grids
+    .map((grid) => {
+      const rect = grid.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right) return null;
+      return {
+        grid,
+        distance: Math.min(Math.abs(event.clientY - rect.top), Math.abs(event.clientY - rect.bottom))
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance)[0];
+
+  return nearest && nearest.distance <= 90 ? nearest.grid : null;
+}
+
+function handleHomeLayoutPointerStart(event) {
+  if (!homeLayoutState.editMode || event.button !== 0) return;
+  const marker = event.target?.closest?.('.home-resize-marker');
+  const itemElement = event.target?.closest?.('.home-grid-item.action-card');
+  if (!itemElement) return;
+  const itemId = itemElement.dataset.homeItem;
+  if (!itemId || isHomeLayoutItemLocked(itemId)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const item = getHomeLayoutItem(itemId);
+  if (!item) return;
+
+  if (marker) {
+    homeLayoutState.resize = {
+      itemId,
+      corner: marker.dataset.homeResizeCorner,
+      start: { ...item }
+    };
+    itemElement.classList.add('home-resizing');
+    return;
+  }
+
+  homeLayoutState.drag = {
+    itemId,
+    start: { ...item }
+  };
+  itemElement.classList.add('home-dragging');
+}
+
+function updateHomeLayoutItem(itemId, patch) {
+  homeLayoutState.lastEditedItemId = itemId;
+  const nextLayout = homeLayoutState.layout.map((item) => (
+    item.id === itemId ? { ...item, ...patch } : item
+  ));
+  applyHomeLayout(resolveHomeLayoutCollisions(nextLayout, { priorityItemId: itemId }));
+}
+
+function handleHomeLayoutPointerMove(event) {
+  if (!homeLayoutState.editMode) return;
+  if (homeLayoutState.drag) {
+    const grid = getHomeGridFromPoint(event);
+    if (!grid) return;
+    const item = getHomeLayoutItem(homeLayoutState.drag.itemId);
+    if (!item) return;
+    const point = getHomeGridPoint(event, grid);
+    const section = grid.dataset.homeGrid || HOME_LAYOUT_SECTIONS.INPUT;
+    const colSpan = Math.min(item.colSpan, HOME_LAYOUT_COLUMNS - point.col + 1);
+    updateHomeLayoutItem(item.id, {
+      section,
+      col: point.col,
+      row: point.row,
+      colSpan
+    });
+    getHomeItemElement(item.id)?.classList.add('home-dragging');
+    return;
+  }
+
+  if (homeLayoutState.resize) {
+    const item = getHomeLayoutItem(homeLayoutState.resize.itemId);
+    const grid = item ? getHomeGridElement(item.section) : null;
+    if (!item || !grid) return;
+    const point = getHomeGridPoint(event, grid);
+    const start = homeLayoutState.resize.start;
+    updateHomeLayoutItem(item.id, calculateHomeResizePatch(start, homeLayoutState.resize.corner, point));
+    getHomeItemElement(item.id)?.classList.add('home-resizing');
+  }
+}
+
+function handleHomeLayoutPointerEnd() {
+  if (!homeLayoutState.drag && !homeLayoutState.resize) return;
+  homeLayoutState.drag = null;
+  homeLayoutState.resize = null;
+  document.querySelectorAll('.home-dragging, .home-resizing').forEach((item) => {
+    item.classList.remove('home-dragging', 'home-resizing');
+  });
+}
+
+async function saveHomeLayout() {
+  try {
+    const priorityItemId = homeLayoutState.lastEditedItemId || '';
+    const layout = serializeHomeLayout(homeLayoutState.layout, { priorityItemId });
+    const result = await ipcRenderer.invoke('save-home-layout-settings', { layout, priorityItemId });
+    const savedLayout = normalizeHomeLayout(result?.layout || layout);
+    homeLayoutState.savedLayout = savedLayout;
+    applyHomeLayout(savedLayout);
+    leaveHomeEditMode();
+    showMessage('تم حفظ ترتيب الصفحة الرئيسية', 'success');
+  } catch (error) {
+    console.error('Error saving home layout:', error);
+    showMessage(error?.message || 'تعذر حفظ ترتيب الصفحة الرئيسية', 'error');
+  }
+}
+
+function cancelHomeLayoutEdit() {
+  applyHomeLayout(homeLayoutState.savedLayout);
+  leaveHomeEditMode();
 }
 
 function resizeHomeChartCanvas() {
@@ -3169,6 +3539,7 @@ function updateAnnualInventoryTitle(year) {
 
   const normalizedYear = String(year || new Date().getFullYear());
   titleEl.textContent = `جرد سنوي - عام ${convertToArabicNumerals(normalizedYear)}`;
+  updatePageBackButton(currentScreen);
 }
 
 function getAnnualInventoryRecord(year) {
@@ -3454,6 +3825,147 @@ async function loadHomeChart() {
     }
     console.error('Error loading home chart:', error);
     scheduleHomeChartHeightSync();
+  }
+}
+
+function formatHomeStatNumber(value, valueType = 'number', unit = '') {
+  const amount = parseFloat(value);
+  if (!Number.isFinite(amount)) return '-';
+
+  if (valueType === 'currency') {
+    return formatArabicCurrencyWhole(amount);
+  }
+
+  const formatted = valueType === 'count'
+    ? formatArabicNumberWhole(amount)
+    : formatArabicNumber(amount);
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function formatHomeStatValue(value, valueType = 'number', unit = '', valueText = '') {
+  const text = String(valueText || '').trim();
+  if (text) return text;
+  return formatHomeStatNumber(value, valueType, unit);
+}
+
+function formatHomeStatMeta(stat = {}) {
+  const parts = [];
+  if (stat.meta) parts.push(String(stat.meta));
+
+  const delta = parseFloat(stat.delta);
+  if (Number.isFinite(delta)) {
+    const formattedDelta = formatHomeStatNumber(Math.abs(delta), stat.value_type || 'number', stat.unit || '');
+    if (delta > 0) {
+      parts.push(`+${formattedDelta}`);
+    } else if (delta < 0) {
+      parts.push(`-${formattedDelta}`);
+    } else {
+      parts.push(formatHomeStatNumber(0, stat.value_type || 'number', stat.unit || ''));
+    }
+  }
+
+  return parts.join(' / ') || 'لا توجد بيانات';
+}
+
+function renderHomeStatCard(cardId, stat = null) {
+  const card = document.querySelector(`.home-stat-card[data-home-item="${cardId}"]`);
+  const body = card?.querySelector(`[data-home-stat-card="${cardId}"]`);
+  if (!card || !body) return;
+
+  const valueEl = body.querySelector('.home-stat-value');
+  const metaEl = body.querySelector('.home-stat-meta');
+  const rowsEl = body.querySelector('.home-stat-rows');
+  const normalizedStat = stat && typeof stat === 'object'
+    ? stat
+    : { value: null, value_type: 'number', meta: 'لا توجد بيانات', rows: [], empty: true };
+
+  card.classList.toggle('home-stat-empty', normalizedStat.empty === true);
+  card.classList.toggle('home-stat-rows-only', normalizedStat.layout === 'rows-only' || normalizedStat.hide_value === true);
+  card.classList.toggle('home-stat-message', normalizedStat.layout === 'message' || normalizedStat.value_type === 'text');
+  if (valueEl) {
+    if (normalizedStat.hide_value) {
+      valueEl.textContent = '';
+    } else if (normalizedStat.empty) {
+      valueEl.textContent = normalizedStat.value === null || normalizedStat.value === undefined
+        ? '-'
+        : formatHomeStatValue(normalizedStat.value, normalizedStat.value_type, normalizedStat.unit, normalizedStat.value_text);
+    } else {
+      valueEl.textContent = formatHomeStatValue(normalizedStat.value, normalizedStat.value_type, normalizedStat.unit, normalizedStat.value_text);
+    }
+  }
+  if (metaEl) {
+    metaEl.textContent = normalizedStat.empty ? 'لا توجد بيانات' : formatHomeStatMeta(normalizedStat);
+  }
+  if (rowsEl) {
+    rowsEl.innerHTML = (Array.isArray(normalizedStat.rows) ? normalizedStat.rows : [])
+      .map((row) => {
+        const statusClass = row.status ? ` home-stat-row-status-${escapeHtml(row.status)}` : '';
+        return `
+        <div class="home-stat-row${row.projected ? ' home-stat-row-projected' : ''}${statusClass}">
+          <span class="home-stat-row-label">${escapeHtml(row.label || '')}</span>
+          <span class="home-stat-row-value">
+            ${row.trend ? `<span class="home-stat-trend home-stat-trend-${escapeHtml(row.trend)}" aria-hidden="true">${row.trend === 'up' ? '▲' : row.trend === 'down' ? '▼' : '■'}</span>` : ''}
+            <span>${escapeHtml(formatHomeStatValue(row.value, row.value_type, row.unit, row.value_text))}</span>
+          </span>
+        </div>
+      `;
+      })
+      .join('');
+  }
+}
+
+function renderHomeAccountingStats(stats = {}) {
+  HOME_ACCOUNTING_STAT_CARD_IDS.forEach((cardId) => {
+    renderHomeStatCard(cardId, stats?.[cardId]);
+  });
+}
+
+function captureHomeScrollPosition() {
+  const mainContent = document.querySelector('.main-content');
+  return {
+    mainTop: mainContent ? mainContent.scrollTop : 0,
+    documentTop: document.documentElement.scrollTop || document.body.scrollTop || window.pageYOffset || 0
+  };
+}
+
+function restoreHomeScrollPosition(position) {
+  if (currentScreen !== 'home' || !position) return;
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent) {
+    mainContent.scrollTop = position.mainTop || 0;
+  }
+  document.documentElement.scrollTop = position.documentTop || 0;
+  document.body.scrollTop = position.documentTop || 0;
+  window.scrollTo(0, position.documentTop || 0);
+}
+
+function withHomeScrollPreserved(renderFn) {
+  const position = captureHomeScrollPosition();
+  renderFn();
+  restoreHomeScrollPosition(position);
+  requestAnimationFrame(() => restoreHomeScrollPosition(position));
+}
+
+function setHomeAccountingStatsLoading() {
+  HOME_ACCOUNTING_STAT_CARD_IDS.forEach((cardId) => {
+    renderHomeStatCard(cardId, {
+      value: null,
+      value_type: 'number',
+      meta: 'جاري التحميل...',
+      rows: [],
+      empty: false
+    });
+  });
+}
+
+async function loadHomeAccountingStats() {
+  withHomeScrollPreserved(setHomeAccountingStatsLoading);
+  try {
+    const result = await invokeCached('get-home-accounting-stats', {}, { ttlMs: 10_000 });
+    withHomeScrollPreserved(() => renderHomeAccountingStats(result?.stats || {}));
+  } catch (error) {
+    console.error('Error loading home accounting stats:', error);
+    withHomeScrollPreserved(() => renderHomeAccountingStats({}));
   }
 }
 
@@ -3827,6 +4339,7 @@ function setFuelInvoiceEditMode(invoice = null) {
 
   const isEditing = Boolean(fuelInvoiceEditState);
   if (title) title.textContent = isEditing ? 'تعديل فاتورة وقود' : 'فاتورة جديدة';
+  updatePageBackButton(currentScreen);
   if (saveBtn) saveBtn.textContent = isEditing ? 'حفظ التعديل' : 'حفظ فاتورة الوقود';
   if (resetBtn) resetBtn.textContent = isEditing ? 'استرجاع بيانات الفاتورة' : 'إعادة تعيين';
   if (cancelBtn) cancelBtn.style.display = isEditing ? '' : 'none';
@@ -3992,6 +4505,7 @@ async function saveFuelInvoice() {
       loadTodayStats();
       if (currentScreen === 'home') {
         loadHomeChart();
+        loadHomeAccountingStats();
       }
       return;
     } else {
@@ -4018,6 +4532,7 @@ async function saveFuelInvoice() {
     // Update home chart if currently on home screen
     if (currentScreen === 'home') {
       loadHomeChart();
+      loadHomeAccountingStats();
     }
   } catch (error) {
     showMessage(fuelInvoiceEditState ? 'حدث خطأ أثناء تعديل فاتورة الوقود' : 'حدث خطأ أثناء حفظ فاتورة الوقود', 'error');
@@ -4083,207 +4598,6 @@ async function updatePurchasePrice(fuelType) {
     showMessage('حدث خطأ أثناء تحديث سعر الشراء', 'error');
     console.error('Error updating purchase price:', error);
   }
-}
-
-async function loadCharts() {
-  if (!isOnline) {
-    showMessage('الرسوم البيانية غير متاحة دون اتصال بالإنترنت', 'warning');
-    return;
-  }
-  try {
-    const summary = await ipcRenderer.invoke('get-sales-summary');
-    const sales = await ipcRenderer.invoke('get-sales');
-
-    createFuelSalesChart(summary);
-    createMonthlyRevenueChart(sales);
-    createPaymentMethodsChart(sales);
-  } catch (error) {
-    console.error('Error loading charts:', error);
-  }
-}
-
-function createFuelSalesChart(summary) {
-  const ctx = document.getElementById('fuel-sales-chart').getContext('2d');
-  const ChartCtor = getChartConstructor();
-  if (!ChartCtor) {
-    clearChartCanvas('fuel-sales-chart');
-    return;
-  }
-
-  if (charts.fuelSales) {
-    charts.fuelSales.destroy();
-  }
-
-  charts.fuelSales = new ChartCtor(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: summary.map(item => item.fuel_type),
-      datasets: [{
-        data: summary.map(item => item.total_quantity),
-        backgroundColor: [
-          '#FF6384',
-          '#36A2EB',
-          '#FFCE56',
-          '#4BC0C0'
-        ]
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-function createMonthlyRevenueChart(sales) {
-  const ctx = document.getElementById('monthly-revenue-chart').getContext('2d');
-  const ChartCtor = getChartConstructor();
-  if (!ChartCtor) {
-    clearChartCanvas('monthly-revenue-chart');
-    return;
-  }
-
-  if (charts.monthlyRevenue) {
-    charts.monthlyRevenue.destroy();
-  }
-
-  // Group sales by month
-  const monthlyData = {};
-  sales.forEach(sale => {
-    const month = sale.date.substring(0, 7); // YYYY-MM
-    if (!monthlyData[month]) {
-      monthlyData[month] = 0;
-    }
-    monthlyData[month] += sale.total_amount;
-  });
-
-  const months = Object.keys(monthlyData).sort();
-  const revenues = months.map(month => monthlyData[month]);
-
-  charts.monthlyRevenue = new ChartCtor(ctx, {
-    type: 'line',
-    data: {
-      labels: months.map(month => {
-        const [year, monthNum] = month.split('-');
-        const monthNames = [
-          'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-          'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-        ];
-        return `${monthNames[parseInt(monthNum) - 1]} ${year}`;
-      }),
-      datasets: [{
-        label: 'المصروفات الشهرية',
-        data: revenues,
-        borderColor: '#667eea',
-        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-        tension: 0.4
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        },
-        x: {
-          ticks: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-function createPaymentMethodsChart(sales) {
-  const ctx = document.getElementById('payment-methods-chart').getContext('2d');
-  const ChartCtor = getChartConstructor();
-  if (!ChartCtor) {
-    clearChartCanvas('payment-methods-chart');
-    return;
-  }
-
-  if (charts.paymentMethods) {
-    charts.paymentMethods.destroy();
-  }
-
-  // Count payment methods
-  const paymentCounts = {};
-  sales.forEach(sale => {
-    paymentCounts[sale.payment_method] = (paymentCounts[sale.payment_method] || 0) + 1;
-  });
-
-  charts.paymentMethods = new ChartCtor(ctx, {
-    type: 'bar',
-    data: {
-      labels: Object.keys(paymentCounts),
-      datasets: [{
-        label: 'عدد فواتير الشراء',
-        data: Object.values(paymentCounts),
-        backgroundColor: [
-          '#FF6384',
-          '#36A2EB',
-          '#FFCE56'
-        ]
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        },
-        x: {
-          ticks: {
-            font: {
-              family: 'Noto Naskh Arabic'
-            }
-          }
-        }
-      }
-    }
-  });
 }
 
 function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) {
@@ -4446,148 +4760,6 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
       }
     }
   });
-}
-
-async function generateReport() {
-  if (!isOnline) {
-    showMessage('التقارير غير متاحة دون اتصال بالإنترنت', 'warning');
-    return;
-  }
-  const startDate = document.getElementById('start-date').value;
-  const endDate = document.getElementById('end-date').value;
-
-  if (!startDate || !endDate) {
-    showMessage('يرجى تحديد فترة تقرير المشتريات', 'error');
-    return;
-  }
-
-  try {
-    const sales = await ipcRenderer.invoke('get-sales-report', { startDate, endDate });
-    displayReport(sales);
-  } catch (error) {
-    showMessage('حدث خطأ أثناء إنشاء تقرير المشتريات', 'error');
-    console.error('Error generating report:', error);
-  }
-}
-
-function displayReport(sales) {
-  // Summary
-  const totalQuantity = sales.reduce((sum, sale) => sum + sale.quantity, 0);
-  const totalRevenue = sales.reduce((sum, sale) => sum + sale.total_amount, 0);
-  const totalTransactions = sales.length;
-
-  const summaryHTML = `
-        <div class="report-summary-grid">
-            <div class="summary-item">
-                <strong>إجمالي الكمية:</strong> ${formatArabicNumber(totalQuantity)} لتر
-            </div>
-            <div class="summary-item">
-                <strong>إجمالي المصروفات:</strong> ${formatArabicCurrency(totalRevenue)}
-            </div>
-            <div class="summary-item">
-                <strong>عدد فواتير الشراء:</strong> ${formatArabicNumber(totalTransactions)}
-            </div>
-        </div>
-    `;
-
-  document.getElementById('report-summary-data').innerHTML = summaryHTML;
-
-  // Details table
-  if (sales.length > 0) {
-    const tableHTML = `
-            <table>
-                <thead>
-                    <tr>
-                        <th>التاريخ</th>
-                        <th>نوع الوقود</th>
-                        <th>الكمية</th>
-                        <th>سعر اللتر</th>
-                        <th>إجمالي الفاتورة</th>
-                        <th>طريقة الدفع</th>
-                        <th>اسم العميل</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sales.map(sale => `
-                        <tr>
-                            <td>${formatArabicDate(sale.date)}</td>
-                            <td>${sale.fuel_type}</td>
-                            <td>${formatArabicNumber(sale.quantity)} لتر</td>
-                            <td>${formatArabicCurrency(sale.price_per_liter)}</td>
-                            <td>${formatArabicCurrency(sale.total_amount)}</td>
-                            <td>${sale.payment_method}</td>
-                            <td>${sale.customer_name || '-'}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
-    document.getElementById('report-details-table').innerHTML = tableHTML;
-  } else {
-    document.getElementById('report-details-table').innerHTML = '<p>لا توجد مشتريات في الفترة المحددة</p>';
-  }
-}
-
-async function exportToPDF() {
-  const startDate = document.getElementById('start-date').value;
-  const endDate = document.getElementById('end-date').value;
-
-  if (!startDate || !endDate) {
-    showMessage('يرجى تحديد فترة تقرير المشتريات أولاً', 'error');
-    return;
-  }
-
-  try {
-    const sales = await ipcRenderer.invoke('get-sales-report', { startDate, endDate });
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-
-    // Add title
-    doc.setFontSize(20);
-    doc.text('تقرير المشتريات', 105, 20, { align: 'center' });
-    doc.setFontSize(12);
-    doc.text(`من ${formatArabicDate(startDate)} إلى ${formatArabicDate(endDate)}`, 105, 30, { align: 'center' });
-
-    // Add summary
-    const totalQuantity = sales.reduce((sum, sale) => sum + sale.quantity, 0);
-    const totalRevenue = sales.reduce((sum, sale) => sum + sale.total_amount, 0);
-    const totalTransactions = sales.length;
-
-    doc.setFontSize(14);
-    doc.text('ملخص التقرير:', 20, 50);
-    doc.setFontSize(12);
-    doc.text(`إجمالي الكمية: ${formatArabicNumber(totalQuantity)} لتر`, 20, 60);
-    doc.text(`إجمالي المصروفات: ${formatArabicCurrency(totalRevenue)}`, 20, 70);
-    doc.text(`عدد فواتير الشراء: ${formatArabicNumber(totalTransactions)}`, 20, 80);
-
-    // Add sales table
-    if (sales.length > 0) {
-      doc.setFontSize(14);
-      doc.text('تفاصيل المشتريات:', 20, 100);
-
-      let y = 110;
-      sales.forEach((sale, index) => {
-        if (y > 250) {
-          doc.addPage();
-          y = 20;
-        }
-
-        doc.setFontSize(10);
-        doc.text(`${index + 1}. ${formatArabicDate(sale.date)} - ${sale.fuel_type} - ${formatArabicNumber(sale.quantity)} لتر - ${formatArabicCurrency(sale.total_amount)}`, 20, y);
-        y += 10;
-      });
-    }
-
-    // Save the PDF
-    const fileName = `تقرير_المشتريات_${formatArabicDate(startDate).replace(/\s+/g, '_')}_${formatArabicDate(endDate).replace(/\s+/g, '_')}.pdf`;
-    doc.save(fileName);
-
-    showMessage('تم تصدير تقرير المشتريات بنجاح', 'success');
-  } catch (error) {
-    showMessage('حدث خطأ أثناء تصدير تقرير المشتريات', 'error');
-    console.error('Error exporting PDF:', error);
-  }
 }
 
 // Format numbers in Arabic locale with Arabic numerals
@@ -4998,40 +5170,49 @@ function calculateOilInvoiceSummary() {
 function handleHeaderScroll() {
   const header = document.querySelector('.header');
   const appTitle = document.querySelector('.app-title');
-  const breadcrumbNav = document.querySelector('.breadcrumb-nav');
+  if (!header) {
+    return;
+  }
+
   const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  const scrollRange = 120;
+  const scrollProgress = Math.min(Math.max(scrollTop / scrollRange, 0), 1);
+  const isMobileHeader = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 768px)').matches
+    : false;
+  const metrics = isMobileHeader
+    ? {
+        topHeight: [89, 77],
+        brandMark: [36, 34],
+        brandMarkIcon: [23, 22],
+        titleFont: [1.34, 1.22],
+        subtitleFont: [0.9, 0.9],
+        contentPadding: [111, 101]
+      }
+    : {
+        topHeight: [98, 77],
+        brandMark: [46, 38],
+        brandMarkIcon: [29, 24],
+        titleFont: [1.7, 1.7],
+        subtitleFont: [1.08, 0.96],
+        contentPadding: [128, 101]
+      };
+  const interpolate = ([start, end]) => start + ((end - start) * scrollProgress);
+  const rootStyle = document.documentElement.style;
 
-  // Define scroll range for header resize (0 to 100px of scroll)
-  const maxScroll = 100;
-  const scrollProgress = Math.min(scrollTop / maxScroll, 1); // 0 to 1
+  rootStyle.setProperty('--header-top-height-current', `${interpolate(metrics.topHeight).toFixed(2)}px`);
+  rootStyle.setProperty('--header-brand-mark-size-current', `${interpolate(metrics.brandMark).toFixed(2)}px`);
+  rootStyle.setProperty('--header-brand-mark-icon-size-current', `${interpolate(metrics.brandMarkIcon).toFixed(2)}px`);
+  rootStyle.setProperty('--header-title-font-size-current', `${interpolate(metrics.titleFont).toFixed(3)}rem`);
+  rootStyle.setProperty('--header-subtitle-font-size-current', `${interpolate(metrics.subtitleFont).toFixed(3)}rem`);
+  rootStyle.setProperty('--header-content-padding-current', `${interpolate(metrics.contentPadding).toFixed(2)}px`);
 
-  // Calculate padding (from 2rem to 1rem)
-  const minPadding = 1; // rem
-  const maxPadding = 2; // rem
-  const currentPadding = maxPadding - (scrollProgress * (maxPadding - minPadding));
-
-  // Calculate font size (from 2.5rem to 1.8rem)
-  const minFontSize = 1.8; // rem
-  const maxFontSize = 2.5; // rem
-  const currentFontSize = maxFontSize - (scrollProgress * (maxFontSize - minFontSize));
-
-  // Calculate title margin bottom (from 1rem to 0.5rem)
-  const minMargin = 0.5; // rem
-  const maxMargin = 1; // rem
-  const currentMargin = maxMargin - (scrollProgress * (maxMargin - minMargin));
-
-  // Apply styles to header and title
-  header.style.padding = `${currentPadding}rem`;
-  header.style.paddingBottom = '0';
-  appTitle.style.fontSize = `${currentFontSize}rem`;
-  appTitle.style.marginBottom = `${currentMargin}rem`;
-
-  // Adjust breadcrumb margins to compensate for header padding
-  if (breadcrumbNav) {
-    const breadcrumbMargin = currentPadding * 16; // Convert rem to px (assuming 16px = 1rem)
-    breadcrumbNav.style.marginLeft = `-${breadcrumbMargin}px`;
-    breadcrumbNav.style.marginRight = `-${breadcrumbMargin}px`;
-    breadcrumbNav.style.width = `calc(100% + ${breadcrumbMargin * 2}px)`;
+  // Keep legacy scroll inline styles from overriding the CSS header layout.
+  header.style.padding = '';
+  header.style.paddingBottom = '';
+  if (appTitle) {
+    appTitle.style.fontSize = '';
+    appTitle.style.marginBottom = '';
   }
 
   // Update settings sidebar padding-top to match actual header height
@@ -5041,12 +5222,7 @@ function handleHeaderScroll() {
     settingsSidebar.style.paddingTop = `${headerHeight}px`;
   }
 
-  // Add/remove scrolled class for other CSS rules
-  if (scrollTop > 50) {
-    header.classList.add('scrolled');
-  } else {
-    header.classList.remove('scrolled');
-  }
+  header.classList.toggle('scrolled', scrollProgress >= 1);
 }
 
 function showMessage(message, type) {
@@ -5486,12 +5662,12 @@ function selectOilType(oilType) {
     }
   });
 
-  // Update breadcrumb with selected oil name
-  const breadcrumbProduct = document.getElementById('breadcrumb-product');
+  // Update selected oil name in the depot summary.
+  const selectedProductLabel = document.getElementById('depot-selected-product');
   if (oilType) {
-    if (breadcrumbProduct) breadcrumbProduct.textContent = oilType;
+    if (selectedProductLabel) selectedProductLabel.textContent = oilType;
   } else {
-    if (breadcrumbProduct) breadcrumbProduct.textContent = '';
+    if (selectedProductLabel) selectedProductLabel.textContent = '';
   }
 
   // Show results section (già visibile con CSS, ma manteniamo per compatibilità)
@@ -6551,6 +6727,11 @@ function switchShiftTab(tab) {
 }
 
 // Show settings section without adding to history
+function openSettingsSectionFromHome(sectionName) {
+  showScreen('settings', 'home');
+  showSettingsSectionWithoutHistory(sectionName);
+}
+
 function showSettingsSectionWithoutHistory(sectionName) {
   if (settingsSectionRequiresPermission(sectionName)) {
     showMessage('هذه الصفحة متاحة للمدير فقط', 'error');
@@ -6575,6 +6756,7 @@ function showSettingsSectionWithoutHistory(sectionName) {
   const targetSection = document.getElementById(`settings-section-${sectionName}`);
   if (targetSection) {
     targetSection.classList.add('active');
+    updatePageNavigation('settings', sectionName, currentParentScreen || 'home');
 
     // Load data relevant to the section
     if (sectionName === 'manage-products') {
@@ -6719,13 +6901,15 @@ function formatAppDeviceDate(value) {
   const datePart = date.toLocaleDateString('it-IT', {
     year: 'numeric',
     month: '2-digit',
-    day: '2-digit'
+    day: '2-digit',
+    timeZone: 'UTC'
   });
   const timePart = date.toLocaleTimeString('it-IT', {
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: 'UTC'
   });
-  return convertToArabicNumerals(`${datePart} ${timePart}`);
+  return `${convertToArabicNumerals(`${datePart} ${timePart}`)} UTC`;
 }
 
 function formatAppDevicePlatform(platform, arch) {
@@ -6748,7 +6932,7 @@ async function loadAppDevices() {
   const tbody = document.getElementById('app-devices-table-body');
   if (!tbody) return;
 
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جار التحميل...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جار التحميل...</td></tr>';
   setAppDevicesStatus('جار تحميل الأجهزة...');
 
   try {
@@ -6757,7 +6941,7 @@ async function loadAppDevices() {
     const canEdit = Boolean(result?.online && result?.source === 'central');
 
     if (devices.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#666;">لا توجد أجهزة مسجلة</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#666;">لا توجد أجهزة مسجلة</td></tr>';
       setAppDevicesStatus('لا توجد أجهزة مسجلة بعد.', 'warning');
       return;
     }
@@ -6787,7 +6971,6 @@ async function loadAppDevices() {
           </td>
           <td>${escapeHtml(device.system_name || '-')}</td>
           <td>${escapeHtml(device.app_version || '-')}</td>
-          <td>${formatAppDeviceDate(device.last_opened_at)}</td>
           <td>${formatAppDeviceDate(device.last_seen_at)}</td>
           <td>${escapeHtml(formatAppDevicePlatform(device.platform, device.arch))}</td>
         </tr>
@@ -6801,7 +6984,7 @@ async function loadAppDevices() {
     }
   } catch (error) {
     console.error('Error loading app devices:', error);
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#c4291d;">حدث خطأ أثناء تحميل الأجهزة</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#c4291d;">حدث خطأ أثناء تحميل الأجهزة</td></tr>';
     setAppDevicesStatus('حدث خطأ أثناء تحميل الأجهزة', 'error');
   }
 }
@@ -8045,6 +8228,16 @@ function findExcelProductMatch(name) {
   return excelSalesImportState.products.find((product) => product.key === key) || null;
 }
 
+function getExcelProductSelection(value) {
+  const selectedValue = String(value || '');
+  if (!selectedValue) return null;
+
+  const [type, name] = selectedValue.split('\u001f');
+  if (!type || !name) return null;
+
+  return { type, name, key: normalizeExcelProductKey(name) };
+}
+
 async function loadExcelSalesImportProducts() {
   try {
     const [fuelRows, oilRows] = await Promise.all([
@@ -8384,10 +8577,10 @@ function renderExcelSalesUnknownProducts() {
         </div>
         <div>
           <label>تصحيح الاسم</label>
-          <input type="text" data-action="corrected-name" value="${escapeHtml(item.name)}">
+          <input type="text" data-action="corrected-name" value="">
         </div>
         <button type="button" class="btn btn-secondary" data-action="match-corrected">تطبيق</button>
-        <div style="display: flex; gap: 0.5rem;">
+        <div class="excel-import-unknown-actions">
           <button type="button" class="btn btn-primary" data-action="add-fuel">إضافة كوقود</button>
           <button type="button" class="btn btn-primary" data-action="add-oil">إضافة كزيت</button>
         </div>
@@ -8395,29 +8588,26 @@ function renderExcelSalesUnknownProducts() {
     </div>
   `).join('');
 
-  list.querySelectorAll('select[data-action="existing-product"]').forEach((select) => {
-    select.addEventListener('change', async (event) => {
-      const row = event.target.closest('.excel-import-unknown-row');
-      const key = row?.dataset.key;
-      const value = event.target.value;
-      if (!key || !value) return;
-
-      const [type, name] = value.split('\u001f');
-      excelSalesImportState.resolutions[key] = { type, name, key: normalizeExcelProductKey(name) };
-      await refreshExcelSalesImportPreview();
-    });
-  });
-
   list.querySelectorAll('button[data-action]').forEach((button) => {
     button.addEventListener('click', async () => {
       const action = button.dataset.action;
       const row = button.closest('.excel-import-unknown-row');
       const key = row?.dataset.key;
       const correctedName = row?.querySelector('input[data-action="corrected-name"]')?.value?.trim() || '';
+      const selectedProduct = getExcelProductSelection(row?.querySelector('select[data-action="existing-product"]')?.value);
       if (!key) return;
 
       if (action === 'match-corrected') {
-        const match = findExcelProductMatch(correctedName);
+        if (selectedProduct && correctedName) {
+          showMessage('اختر منتجاً موجوداً أو اكتب تصحيح الاسم، وليس الاثنين معاً', 'error');
+          return;
+        }
+        if (!selectedProduct && !correctedName) {
+          showMessage('اختر منتجاً موجوداً أو اكتب اسم المنتج المصحح', 'error');
+          return;
+        }
+
+        const match = selectedProduct || findExcelProductMatch(correctedName);
         if (!match) {
           showMessage('لم يتم العثور على منتج بهذا الاسم المصحح', 'error');
           return;
@@ -8428,6 +8618,10 @@ function renderExcelSalesUnknownProducts() {
       }
 
       if (action === 'add-fuel' || action === 'add-oil') {
+        if (!correctedName) {
+          showMessage('يرجى إدخال اسم المنتج في تصحيح الاسم قبل الإضافة', 'error');
+          return;
+        }
         await addExcelImportProduct(key, correctedName, action === 'add-fuel' ? 'fuel' : 'oil', button);
       }
     });
@@ -8670,6 +8864,7 @@ async function buildExcelSalesShiftPayloads() {
 async function refreshViewsAfterExcelSalesImport() {
   await Promise.allSettled([
     loadHomeChart(),
+    loadHomeAccountingStats(),
     loadTodayStats(),
     loadSafeBookMovements()
   ]);
@@ -9015,6 +9210,7 @@ async function buildExcelExpenseShiftPayload(date, importedExpenseItems) {
 
 async function refreshViewsAfterExcelExpensesImport() {
   await Promise.allSettled([
+    loadHomeAccountingStats(),
     loadSafeBookMovements(),
     loadTodayStats()
   ]);
@@ -9069,26 +9265,6 @@ async function importExcelExpenses() {
     updateExcelExpensesImportButton();
   }
 }
-
-// Add CSS for report summary grid
-const style = document.createElement('style');
-style.textContent = `
-    .report-summary-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-
-    .summary-item {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #e9ecef;
-        text-align: center;
-    }
-`;
-document.head.appendChild(style);
 
 // Invoices List Functions
 let allInvoices = [];
@@ -9778,8 +9954,7 @@ let currentShiftData = {
   date: null,
   shiftNumber: null,
   isSaved: false,
-  hasUnsavedChanges: false,
-  draftCleanupQueue: []
+  hasUnsavedChanges: false
 };
 let shiftViewMode = 'edit'; // 'edit' | 'history' | 'correction'
 const SHIFT_DRAFT_AUTOSAVE_DELAY_MS = 900;
@@ -9815,8 +9990,11 @@ const ACCOUNTING_AUTOSAVE_DELAY_MS = SHIFT_DRAFT_AUTOSAVE_DELAY_MS;
 let accountingState = {
   monthKey: '',
   data: null,
+  labelDefaults: {},
   isFinal: false,
   editMode: false,
+  pageEditMode: false,
+  pageSettingsDirty: false,
   dirty: false,
   loading: false,
   fuelProducts: [],
@@ -9825,6 +10003,7 @@ let accountingState = {
   autoSaveTimer: null,
   autoSaveInFlight: false,
   autoSaveQueued: false,
+  pickerYear: null,
   initialized: false
 };
 let expenseEntriesCache = [];
@@ -9853,53 +10032,32 @@ function getShiftIdentifierKey(date, shiftNumber) {
   return `${date}#${shift}`;
 }
 
-function queueDraftIdentifierForCleanup(date, shiftNumber) {
-  const key = getShiftIdentifierKey(date, shiftNumber);
-  if (!key) return;
-  if (!Array.isArray(currentShiftData.draftCleanupQueue)) {
-    currentShiftData.draftCleanupQueue = [];
-  }
-  if (!currentShiftData.draftCleanupQueue.includes(key)) {
-    currentShiftData.draftCleanupQueue.push(key);
+async function deleteAllShiftDrafts() {
+  try {
+    const result = await ipcRenderer.invoke('delete-all-shift-drafts');
+    return result?.success === true;
+  } catch (error) {
+    console.warn('Failed deleting shift drafts:', error);
+    return false;
   }
 }
 
-async function cleanupQueuedDraftIdentifiers() {
-  const queue = Array.isArray(currentShiftData.draftCleanupQueue)
-    ? [...currentShiftData.draftCleanupQueue]
-    : [];
-  if (queue.length === 0) return;
-
-  const { date, shiftNumber } = getCurrentShiftIdentifier();
-  const activeKey = getShiftIdentifierKey(date, shiftNumber);
-  const remaining = [];
-
-  for (const key of queue) {
-    if (!key || key === activeKey) {
-      continue;
-    }
-
-    const [draftDate, draftShiftText] = key.split('#');
-    const draftShift = parseInt(draftShiftText, 10);
-    if (!draftDate || !Number.isFinite(draftShift)) {
-      continue;
-    }
-
-    try {
-      const result = await ipcRenderer.invoke('delete-shift-draft', {
-        date: draftDate,
-        shift_number: draftShift
-      });
-      if (!result?.success) {
-        remaining.push(key);
-      }
-    } catch (error) {
-      console.warn('Failed cleaning old draft identifier:', key, error);
-      remaining.push(key);
-    }
+async function discardCurrentShiftDrafts() {
+  if (shiftDraftAutoSaveTimer) {
+    clearTimeout(shiftDraftAutoSaveTimer);
+    shiftDraftAutoSaveTimer = null;
   }
 
-  currentShiftData.draftCleanupQueue = remaining;
+  shiftDraftAutoSaveQueued = false;
+  if (shiftDraftAutoSavePromise) {
+    await shiftDraftAutoSavePromise.catch((error) => {
+      console.warn('Failed waiting for shift draft autosave before discard:', error);
+    });
+  }
+
+  await deleteAllShiftDrafts();
+  currentShiftData.hasUnsavedChanges = false;
+  setShiftDraftStatus('idle');
 }
 
 function getShiftInputDisplayValue(value) {
@@ -9918,6 +10076,69 @@ function getShiftInputDisplayValue(value) {
   }
 
   return textValue;
+}
+
+function hasFilledShiftControl(selector) {
+  return Array.from(document.querySelectorAll(selector)).some((field) => {
+    if (field instanceof HTMLInputElement && (field.type === 'checkbox' || field.type === 'radio')) {
+      return field.checked;
+    }
+
+    const value = String(field?.value || '').trim();
+    return value !== '';
+  });
+}
+
+function hasUserEnteredFuelEndOrCalibrationData() {
+  const fuelFields = [
+    { id: 'diesel', counters: 4 },
+    { id: '95', counters: 2 },
+    { id: '92', counters: 2 },
+    { id: '80', counters: 2 },
+    { id: 'gas', counters: 2 }
+  ];
+  const isNightShift = getSelectedShiftNumberValue() === 2;
+
+  for (const fuel of fuelFields) {
+    const carsInput = document.getElementById(`fuel-${fuel.id}-cars`);
+    if (getShiftInputDisplayValue(carsInput?.value)) {
+      return true;
+    }
+
+    for (let i = 1; i <= fuel.counters; i += 1) {
+      const firstInput = document.getElementById(`fuel-${fuel.id}-first-${i}`);
+      const lastInput = document.getElementById(`fuel-${fuel.id}-last-${i}`);
+      const lastValue = getShiftInputDisplayValue(lastInput?.value);
+      if (!lastValue) continue;
+
+      const firstValue = getShiftInputDisplayValue(firstInput?.value);
+      if (fuel.id === 'gas' && isNightShift && lastValue === firstValue) {
+        continue;
+      }
+
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasUserEnteredShiftBodyData() {
+  if (collectCustomerRowsData().length > 0) return true;
+  if (collectRevenueItems().length > 0) return true;
+  if (collectCustomerPayments().length > 0) return true;
+  if (collectExpenseItems().length > 0) return true;
+  if (hasUserEnteredFuelEndOrCalibrationData()) return true;
+
+  return hasFilledShiftControl([
+    '#shift-entry-screen input[id^="oil-"][id$="-added"]',
+    '#shift-entry-screen input[id^="oil-"][id$="-remaining"]',
+    '#shift-entry-screen input[id^="oil-"][id$="-open"]',
+    '#shift-entry-screen input[id^="oil-"][id$="-customers"]',
+    '#shift-entry-screen select[id^="oil-"][id$="-customer-name"]',
+    '#shift-entry-screen input[id^="oil-"][id$="-voucher"]',
+    '#total-wash-lube-revenue'
+  ].join(','));
 }
 
 function setShiftDraftStatus(state = 'idle', customMessage = '') {
@@ -9992,7 +10213,6 @@ async function runShiftDraftAutoSave() {
 
   if (saveResult.success) {
     currentShiftData.hasUnsavedChanges = false;
-    await cleanupQueuedDraftIdentifiers();
     setShiftDraftStatus('saved');
   } else {
     if (saveResult.error === 'validation_failed') {
@@ -10196,10 +10416,8 @@ function ensureShiftFieldVisible(field) {
 
     requestAnimationFrame(() => {
       const header = document.querySelector('.header');
-      const bottomNavigation = document.querySelector('.bottom-navigation');
       const viewportMargin = 14;
       const headerRect = header?.getBoundingClientRect();
-      const bottomNavRect = bottomNavigation?.getBoundingClientRect();
       const topLimit = (
         headerRect
         && headerRect.bottom > 0
@@ -10207,13 +10425,7 @@ function ensureShiftFieldVisible(field) {
       )
         ? headerRect.bottom + viewportMargin
         : viewportMargin;
-      const bottomLimit = (
-        bottomNavRect
-        && bottomNavRect.top < window.innerHeight
-        && bottomNavRect.bottom > 0
-      )
-        ? bottomNavRect.top - viewportMargin
-        : window.innerHeight - viewportMargin;
+      const bottomLimit = window.innerHeight - viewportMargin;
       const rect = field.getBoundingClientRect();
 
       if (rect.top < topLimit) {
@@ -10641,6 +10853,177 @@ async function loadSalesSummary() {
   }
 }
 
+function initializeSalesReconciliationPage() {
+  const monthInput = document.getElementById('sales-reconciliation-month');
+  const refreshButton = document.getElementById('sales-reconciliation-refresh-btn');
+
+  if (monthInput && !monthInput.value) {
+    monthInput.value = getCurrentMonthKey();
+  }
+
+  if (refreshButton && !refreshButton.dataset.bound) {
+    refreshButton.addEventListener('click', () => {
+      loadSalesReconciliation();
+    });
+    refreshButton.dataset.bound = 'true';
+  }
+
+  loadSalesReconciliation();
+}
+
+function formatSalesReconciliationNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '-';
+  }
+  return formatArabicNumber(Number(value));
+}
+
+function formatSalesReconciliationDifference(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '-';
+  }
+  const numeric = Number(value);
+  if (numeric === 0) return formatArabicNumber(0);
+  return `${numeric > 0 ? '+' : ''}${formatArabicNumber(numeric)}`;
+}
+
+function formatSalesReconciliationShift(shift) {
+  if (!shift || !shift.date) return 'غير متاح';
+  const shiftNumber = shift.shift_number === null || shift.shift_number === undefined ? '' : ` - وردية ${shift.shift_number}`;
+  return `${shift.date}${shiftNumber}`;
+}
+
+function getSalesReconciliationStatusClass(status) {
+  if (status === 'ok') return 'ok';
+  if (status === 'mismatch') return 'mismatch';
+  return 'missing';
+}
+
+function renderSalesReconciliationStatus(row) {
+  const className = getSalesReconciliationStatusClass(row?.status);
+  return `<span class="reconciliation-status ${className}">${escapeHtml(row?.status_label || 'بيانات ناقصة')}</span>`;
+}
+
+function renderSalesReconciliationFuelRows(rows = []) {
+  if (!rows.length) {
+    return '<tr><td class="reconciliation-empty-row" colspan="9">لا توجد بيانات وقود لهذا الشهر</td></tr>';
+  }
+
+  return rows.map((row) => {
+    const diffClass = Number(row.difference) === 0 || row.difference === null ? '' : (Number(row.difference) > 0 ? 'positive' : 'negative');
+    return `
+      <tr class="reconciliation-row reconciliation-${escapeHtml(getSalesReconciliationStatusClass(row.status))}">
+        <td class="reconciliation-product-cell">
+          <strong>${escapeHtml(row.product)}</strong>
+          <small>السابق: ${escapeHtml(formatSalesReconciliationShift(row.previous_shift))} | الحالي: ${escapeHtml(formatSalesReconciliationShift(row.current_shift))}</small>
+        </td>
+        <td>${formatSalesReconciliationNumber(row.previous_counter)}</td>
+        <td>${formatSalesReconciliationNumber(row.current_counter)}</td>
+        <td>${formatSalesReconciliationNumber(row.gross_quantity)}</td>
+        <td>${formatSalesReconciliationNumber(row.calibrations)}</td>
+        <td>${formatSalesReconciliationNumber(row.expected_quantity)}</td>
+        <td>${formatSalesReconciliationNumber(row.summary_quantity)}</td>
+        <td class="reconciliation-difference ${diffClass}">${formatSalesReconciliationDifference(row.difference)}</td>
+        <td>${renderSalesReconciliationStatus(row)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderSalesReconciliationOilRows(rows = []) {
+  if (!rows.length) {
+    return '<tr><td class="reconciliation-empty-row" colspan="8">لا توجد بيانات زيوت لهذا الشهر</td></tr>';
+  }
+
+  return rows.map((row) => {
+    const diffClass = Number(row.difference) === 0 || row.difference === null ? '' : (Number(row.difference) > 0 ? 'positive' : 'negative');
+    return `
+      <tr class="reconciliation-row reconciliation-${escapeHtml(getSalesReconciliationStatusClass(row.status))}">
+        <td class="reconciliation-product-cell">
+          <strong>${escapeHtml(row.product)}</strong>
+          <small>السابق: ${escapeHtml(formatSalesReconciliationShift(row.previous_shift))} | الحالي: ${escapeHtml(formatSalesReconciliationShift(row.current_shift))}</small>
+        </td>
+        <td>${formatSalesReconciliationNumber(row.previous_remaining)}</td>
+        <td>${formatSalesReconciliationNumber(row.added)}</td>
+        <td>${formatSalesReconciliationNumber(row.current_remaining)}</td>
+        <td>${formatSalesReconciliationNumber(row.expected_quantity)}</td>
+        <td>${formatSalesReconciliationNumber(row.summary_quantity)}</td>
+        <td class="reconciliation-difference ${diffClass}">${formatSalesReconciliationDifference(row.difference)}</td>
+        <td>${renderSalesReconciliationStatus(row)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function setSalesReconciliationLoading() {
+  const fuelBody = document.getElementById('sales-reconciliation-fuel-body');
+  const oilBody = document.getElementById('sales-reconciliation-oil-body');
+  if (fuelBody) {
+    fuelBody.innerHTML = '<tr><td class="reconciliation-empty-row" colspan="9">جاري التحميل...</td></tr>';
+  }
+  if (oilBody) {
+    oilBody.innerHTML = '<tr><td class="reconciliation-empty-row" colspan="8">جاري التحميل...</td></tr>';
+  }
+}
+
+async function loadSalesReconciliation() {
+  const monthInput = document.getElementById('sales-reconciliation-month');
+  const fuelBody = document.getElementById('sales-reconciliation-fuel-body');
+  const oilBody = document.getElementById('sales-reconciliation-oil-body');
+  const emptyState = document.getElementById('sales-reconciliation-empty');
+  const okEl = document.getElementById('sales-reconciliation-ok');
+  const mismatchEl = document.getElementById('sales-reconciliation-mismatch');
+  const missingEl = document.getElementById('sales-reconciliation-missing');
+  const fuelNote = document.getElementById('sales-reconciliation-fuel-note');
+  const oilNote = document.getElementById('sales-reconciliation-oil-note');
+
+  if (!monthInput || !fuelBody || !oilBody) return;
+
+  const month = normalizeMonthKey(monthInput.value);
+  if (!month) {
+    fuelBody.innerHTML = '';
+    oilBody.innerHTML = '';
+    if (emptyState) {
+      emptyState.hidden = false;
+      emptyState.textContent = 'صيغة الشهر غير صحيحة';
+    }
+    return;
+  }
+
+  setSalesReconciliationLoading();
+  if (emptyState) emptyState.hidden = true;
+
+  try {
+    const result = await invokeCached('get-sales-reconciliation-view', { month });
+    const fuelRows = Array.isArray(result?.fuel_rows) ? result.fuel_rows : [];
+    const oilRows = Array.isArray(result?.oil_rows) ? result.oil_rows : [];
+    const totals = result?.totals || {};
+
+    fuelBody.innerHTML = renderSalesReconciliationFuelRows(fuelRows);
+    oilBody.innerHTML = renderSalesReconciliationOilRows(oilRows);
+
+    if (okEl) okEl.textContent = formatArabicNumber(Number(totals.ok) || 0);
+    if (mismatchEl) mismatchEl.textContent = formatArabicNumber(Number(totals.mismatch) || 0);
+    if (missingEl) missingEl.textContent = formatArabicNumber(Number(totals.missing) || 0);
+    if (fuelNote) fuelNote.textContent = `الشهر السابق: ${formatMonthLabel(result?.previous_month)} | السماحية: ${formatSalesReconciliationNumber(result?.tolerance)}`;
+    if (oilNote) oilNote.textContent = 'وارد الزيوت محسوب من الورديات فقط';
+
+    if (emptyState) {
+      emptyState.hidden = fuelRows.length > 0 || oilRows.length > 0;
+      emptyState.textContent = 'لا توجد بيانات للمراجعة في هذا الشهر';
+    }
+  } catch (error) {
+    console.error('Error loading sales reconciliation:', error);
+    fuelBody.innerHTML = '';
+    oilBody.innerHTML = '';
+    if (emptyState) {
+      emptyState.hidden = false;
+      emptyState.textContent = 'حدث خطأ أثناء تحميل مراجعة المبيعات';
+    }
+    showMessage(error.message || 'حدث خطأ أثناء تحميل مراجعة المبيعات', 'error');
+  }
+}
+
 // Load sales summary order from localStorage and apply it
 function applySavedSalesSummaryOrder(products) {
   if (!Array.isArray(products) || products.length === 0) return products;
@@ -10795,6 +11178,90 @@ function getCurrentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function formatAccountingMonthLabel(monthKey) {
+  const normalized = normalizeMonthKey(monthKey);
+  if (!normalized) return '';
+  const [yearText, monthText] = normalized.split('-');
+  const monthIndex = Math.max(0, Math.min(11, parseInt(monthText, 10) - 1));
+  return `${SAFE_BOOK_MONTH_NAMES[monthIndex]} ${convertToArabicNumerals(yearText)}`;
+}
+
+function syncAccountingMonthControls(monthKey) {
+  const normalized = normalizeMonthKey(monthKey);
+  const display = document.getElementById('accounting-month-display');
+  if (!normalized) return;
+  const [yearText] = normalized.split('-');
+  accountingState.pickerYear = parseInt(yearText, 10);
+  if (display) {
+    display.textContent = formatAccountingMonthLabel(normalized);
+    display.setAttribute('aria-expanded', document.getElementById('accounting-month-picker')?.classList.contains('show') ? 'true' : 'false');
+  }
+  renderAccountingMonthPicker();
+}
+
+function renderAccountingMonthPicker() {
+  const picker = document.getElementById('accounting-month-picker');
+  const yearLabel = document.getElementById('accounting-picker-year');
+  const grid = document.getElementById('accounting-month-picker-grid');
+  if (!picker || !yearLabel || !grid) return;
+
+  const current = normalizeMonthKey(accountingState.monthKey) || getCurrentMonthKey();
+  const [currentYearText, currentMonthText] = current.split('-');
+  const year = Number.isFinite(accountingState.pickerYear) ? accountingState.pickerYear : parseInt(currentYearText, 10);
+  accountingState.pickerYear = year;
+  yearLabel.textContent = convertToArabicNumerals(year);
+  grid.innerHTML = SAFE_BOOK_MONTH_NAMES.map((label, index) => {
+    const monthText = String(index + 1).padStart(2, '0');
+    const active = String(year) === currentYearText && monthText === currentMonthText;
+    return `<button type="button" class="accounting-month-option${active ? ' active' : ''}" data-accounting-month="${monthText}">${escapeHtml(label)}</button>`;
+  }).join('');
+}
+
+function closeAccountingMonthPicker() {
+  const picker = document.getElementById('accounting-month-picker');
+  const display = document.getElementById('accounting-month-display');
+  if (picker) picker.classList.remove('show');
+  if (display) display.setAttribute('aria-expanded', 'false');
+}
+
+function toggleAccountingMonthPicker(event) {
+  event?.stopPropagation?.();
+  if (accountingState.loading) return;
+  const picker = document.getElementById('accounting-month-picker');
+  const display = document.getElementById('accounting-month-display');
+  if (!picker) return;
+  const isShown = picker.classList.contains('show');
+  document.querySelectorAll('.shift-menu').forEach((menu) => menu.classList.remove('show'));
+  document.querySelectorAll('.accounting-month-picker').forEach((menu) => menu.classList.remove('show'));
+  if (!isShown) {
+    renderAccountingMonthPicker();
+    picker.classList.add('show');
+    if (display) display.setAttribute('aria-expanded', 'true');
+  } else if (display) {
+    display.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function shiftAccountingPickerYear(offset) {
+  const current = normalizeMonthKey(accountingState.monthKey) || getCurrentMonthKey();
+  const [yearText] = current.split('-');
+  const year = Number.isFinite(accountingState.pickerYear) ? accountingState.pickerYear : parseInt(yearText, 10);
+  accountingState.pickerYear = year + offset;
+  renderAccountingMonthPicker();
+}
+
+async function selectAccountingPickerMonth(monthText) {
+  const year = Number.isFinite(accountingState.pickerYear)
+    ? accountingState.pickerYear
+    : parseInt((normalizeMonthKey(accountingState.monthKey) || getCurrentMonthKey()).slice(0, 4), 10);
+  const monthKey = normalizeMonthKey(`${year}-${String(monthText || '').padStart(2, '0')}`);
+  if (!monthKey) return;
+  closeAccountingMonthPicker();
+  await flushAccountingDraftAutoSave();
+  accountingState.monthKey = monthKey;
+  await loadAccountingMonth(monthKey);
+}
+
 function getDefaultProfitRange(availableMonths) {
   const normalizedMonths = Array.isArray(availableMonths)
     ? availableMonths
@@ -10853,18 +11320,39 @@ function isAccountingRowFilled(row) {
   return Boolean(String(row?.label || '').trim()) || Math.abs(parseAnnualInventoryValue(row?.amount)) > 0.0001;
 }
 
-function normalizeAccountingRowsForRender(rows = [], editable = true) {
+function normalizeAccountingRowsForRender(rows = [], options = {}) {
+  const addBlankRow = options.addBlankRow === true;
   const renderedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+    row_key: String(row?.row_key || '').trim(),
     label: String(row?.label || '').trim(),
     amount: row?.amount === '' ? '' : parseAnnualInventoryValue(row?.amount),
     fixed: row?.fixed === true,
-    auto: row?.auto === true
+    auto: row?.auto === true,
+    locked: row?.locked === true,
+    can_save_default: row?.can_save_default === true,
+    default_label: String(row?.default_label || '').trim(),
+    is_visible_default: row?.is_visible_default === true,
+    is_default_label: row?.is_default_label === true,
+    save_as_default: row?.save_as_default === true
   }));
 
-  if (editable) {
+  if (addBlankRow) {
     const lastRow = renderedRows[renderedRows.length - 1];
     if (!lastRow || lastRow.fixed || isAccountingRowFilled(lastRow)) {
-      renderedRows.push({ label: '', amount: '', fixed: false, auto: false, blank: true });
+      renderedRows.push({
+        row_key: '',
+        label: '',
+        amount: '',
+        fixed: false,
+        auto: false,
+        locked: false,
+        can_save_default: false,
+        default_label: '',
+        is_visible_default: false,
+        is_default_label: false,
+        save_as_default: false,
+        blank: true
+      });
     }
   }
 
@@ -10876,33 +11364,66 @@ function renderAccountingSide(side, rows) {
   if (!tbody) return;
 
   const readOnly = getAccountingReadOnly();
-  const renderedRows = normalizeAccountingRowsForRender(rows, !readOnly);
+  const pageEditActive = accountingState.pageEditMode === true;
+  const renderedRows = normalizeAccountingRowsForRender(rows, {
+    addBlankRow: !pageEditActive && !readOnly
+  });
 
   tbody.innerHTML = renderedRows.map((row, index) => {
     const rowId = `${side}-${index}`;
-    const labelReadonly = row.fixed || readOnly ? 'readonly' : '';
-    const isPreviousIncreaseRow = row.auto === true && String(row.label || '').trim().startsWith('زيادة محاسبة شهر');
-    const amountReadonly = (row.auto && !isPreviousIncreaseRow) || readOnly ? 'readonly' : '';
-    const disabled = readOnly ? 'disabled' : '';
+    const labelEditableInPageMode = pageEditActive && row.can_save_default && !row.locked && String(row.label || '').trim();
+    const labelReadonly = row.locked || (pageEditActive ? !labelEditableInPageMode : (row.fixed || readOnly)) ? 'readonly' : '';
+    const amountReadonly = pageEditActive || row.auto || readOnly ? 'readonly' : '';
+    const disabled = readOnly && !pageEditActive ? 'disabled' : '';
     const numericAmount = parseAnnualInventoryValue(row.amount);
     const amountValue = row.amount === '' || Math.abs(numericAmount) < 0.0001
       ? ''
       : formatArabicNumberFixed(numericAmount);
+    const savedSetting = accountingState.labelDefaults?.[row.row_key];
+    const savedLabel = savedSetting && typeof savedSetting === 'object' ? savedSetting.label : savedSetting;
+    const defaultLabel = String(row.default_label || savedLabel || '').trim();
+    const isDefaultActive = row.is_visible_default === true;
+    const defaultAction = row.can_save_default && !row.locked && pageEditActive && String(row.label || '').trim()
+      ? `
+        <button
+          type="button"
+          class="accounting-default-label-btn${isDefaultActive ? ' active' : ''}"
+          title="تثبيت هذا الحقل كافتراضي"
+          aria-label="تثبيت هذا الحقل كافتراضي"
+          aria-pressed="${isDefaultActive ? 'true' : 'false'}"
+          data-accounting-default-action="toggle"
+          data-accounting-visible-default="${isDefaultActive ? '1' : '0'}"
+        >★</button>
+      `
+      : '';
 
     return `
-      <tr data-accounting-side="${escapeHtml(side)}" data-accounting-index="${index}">
+      <tr
+        data-accounting-side="${escapeHtml(side)}"
+        data-accounting-index="${index}"
+        data-accounting-row-key="${escapeHtml(row.row_key)}"
+        data-accounting-fixed="${row.fixed ? '1' : '0'}"
+        data-accounting-locked="${row.locked ? '1' : '0'}"
+        data-accounting-auto="${row.auto ? '1' : '0'}"
+        data-accounting-can-save-default="${row.can_save_default ? '1' : '0'}"
+        data-accounting-default-label="${escapeHtml(defaultLabel)}"
+        data-accounting-visible-default="${row.is_visible_default ? '1' : '0'}"
+      >
         <td>
-          <input
-            type="text"
-            class="accounting-row-label"
-            data-accounting-field="label"
-            data-accounting-side="${escapeHtml(side)}"
-            data-accounting-row="${escapeHtml(rowId)}"
-            value="${escapeHtml(row.label)}"
-            placeholder="بيان"
-            ${labelReadonly}
-            ${disabled}
-          >
+          <div class="accounting-row-label-wrap">
+            <input
+              type="text"
+              class="accounting-row-label"
+              data-accounting-field="label"
+              data-accounting-side="${escapeHtml(side)}"
+              data-accounting-row="${escapeHtml(rowId)}"
+              value="${escapeHtml(row.label)}"
+              placeholder="بيان"
+              ${labelReadonly}
+              ${disabled}
+            >
+            ${defaultAction}
+          </div>
         </td>
         <td>
           <input
@@ -10930,17 +11451,29 @@ function appendAccountingBlankRow(side) {
   const index = tbody.querySelectorAll('tr').length;
   const rowId = `${side}-${index}`;
   tbody.insertAdjacentHTML('beforeend', `
-    <tr data-accounting-side="${escapeHtml(side)}" data-accounting-index="${index}">
+    <tr
+      data-accounting-side="${escapeHtml(side)}"
+      data-accounting-index="${index}"
+      data-accounting-row-key=""
+      data-accounting-fixed="0"
+      data-accounting-locked="0"
+      data-accounting-auto="0"
+      data-accounting-can-save-default="0"
+      data-accounting-visible-default="0"
+      data-accounting-default-label=""
+    >
       <td>
-        <input
-          type="text"
-          class="accounting-row-label"
-          data-accounting-field="label"
-          data-accounting-side="${escapeHtml(side)}"
-          data-accounting-row="${escapeHtml(rowId)}"
-          value=""
-          placeholder="بيان"
-        >
+        <div class="accounting-row-label-wrap">
+          <input
+            type="text"
+            class="accounting-row-label"
+            data-accounting-field="label"
+            data-accounting-side="${escapeHtml(side)}"
+            data-accounting-row="${escapeHtml(rowId)}"
+            value=""
+            placeholder="بيان"
+          >
+        </div>
       </td>
       <td>
         <input
@@ -10967,10 +11500,15 @@ function collectAccountingSideRows(side) {
     const amountInput = row.querySelector('[data-accounting-field="amount"]');
     const label = String(labelInput?.value || '').trim();
     return {
+      row_key: String(row.dataset.accountingRowKey || '').trim(),
       label,
       amount: parseAnnualInventoryValue(amountInput?.value),
-      fixed: labelInput?.readOnly === true,
-      auto: amountInput?.readOnly === true && label.includes('زيادة محاسبة شهر')
+      fixed: row.dataset.accountingFixed === '1',
+      auto: row.dataset.accountingAuto === '1',
+      locked: row.dataset.accountingLocked === '1',
+      can_save_default: row.dataset.accountingCanSaveDefault === '1',
+      is_visible_default: row.dataset.accountingVisibleDefault === '1',
+      save_as_default: false
     };
   }).filter((row) => isAccountingRowFilled(row));
 }
@@ -11137,7 +11675,7 @@ function renderAccountingFuelRows(rows = []) {
 
   calculateAccountingFuelTotals();
   updateAccountingModeControls();
-  if (!readOnly) {
+  if (!readOnly && !accountingState.pageEditMode) {
     prefillAccountingFuelPricesForBaseRows();
   }
 }
@@ -11234,12 +11772,21 @@ async function prefillAccountingFuelPricesForBaseRows() {
 }
 
 function markAccountingChanged() {
+  if (accountingState.pageEditMode) {
+    markAccountingPageSettingsChanged();
+    return;
+  }
   if (accountingState.editMode) {
     accountingState.dirty = true;
     setAccountingSaveStatus('dirty');
   } else {
     scheduleAccountingDraftAutosave();
   }
+}
+
+function markAccountingPageSettingsChanged() {
+  accountingState.pageSettingsDirty = true;
+  setAccountingSaveStatus('dirty', 'تغييرات الصفحة غير محفوظة');
 }
 
 function collectAccountingDocumentFromPage() {
@@ -11277,12 +11824,14 @@ function renderAccountingDocument(documentRecord) {
 
   accountingState.monthKey = normalizeMonthKey(record.month_key || data.month_key) || accountingState.monthKey;
   accountingState.data = data;
+  accountingState.labelDefaults = record.label_defaults || accountingState.labelDefaults || {};
   accountingState.isFinal = record.is_final === true || record.is_final === 1;
   accountingState.editMode = false;
+  accountingState.pageEditMode = false;
+  accountingState.pageSettingsDirty = false;
   accountingState.dirty = false;
 
-  const monthInput = document.getElementById('accounting-month-input');
-  if (monthInput) monthInput.value = accountingState.monthKey;
+  syncAccountingMonthControls(accountingState.monthKey);
 
   renderAccountingSide('debit', data.debit_rows);
   renderAccountingSide('credit', data.credit_rows);
@@ -11295,26 +11844,35 @@ function renderAccountingDocument(documentRecord) {
 function updateAccountingModeControls() {
   const editBtn = document.getElementById('accounting-edit-btn');
   const saveBtn = document.getElementById('accounting-save-btn');
-  const monthInput = document.getElementById('accounting-month-input');
+  const pageSaveBtn = document.getElementById('accounting-page-save-btn');
+  const monthDisplay = document.getElementById('accounting-month-display');
   const prevBtn = document.getElementById('accounting-prev-month');
   const nextBtn = document.getElementById('accounting-next-month');
   const readOnly = getAccountingReadOnly();
+  const pageEditMode = accountingState.pageEditMode === true;
 
-  if (editBtn) editBtn.style.display = accountingState.isFinal && !accountingState.editMode ? '' : 'none';
-  if (saveBtn) saveBtn.style.display = accountingState.isFinal && !accountingState.editMode ? 'none' : '';
-  if (monthInput) monthInput.disabled = accountingState.loading;
-  if (prevBtn) prevBtn.disabled = accountingState.loading;
-  if (nextBtn) nextBtn.disabled = accountingState.loading;
+  if (editBtn) editBtn.style.display = accountingState.isFinal && !accountingState.editMode && !pageEditMode ? '' : 'none';
+  if (saveBtn) saveBtn.style.display = pageEditMode || (accountingState.isFinal && !accountingState.editMode) ? 'none' : '';
+  if (pageSaveBtn) {
+    pageSaveBtn.style.display = pageEditMode ? '' : 'none';
+    pageSaveBtn.disabled = accountingState.loading;
+  }
+  if (monthDisplay) monthDisplay.disabled = accountingState.loading || pageEditMode;
+  if (prevBtn) prevBtn.disabled = accountingState.loading || pageEditMode;
+  if (nextBtn) nextBtn.disabled = accountingState.loading || pageEditMode;
 
-  document.querySelectorAll('.accounting-row-label, .accounting-row-amount, .accounting-fuel-input, .accounting-fuel-select').forEach((input) => {
-    input.disabled = readOnly || accountingState.loading;
+  document.querySelectorAll('.accounting-row-label').forEach((input) => {
+    input.disabled = accountingState.loading || (readOnly && !pageEditMode);
+  });
+  document.querySelectorAll('.accounting-row-amount, .accounting-fuel-input, .accounting-fuel-select').forEach((input) => {
+    input.disabled = accountingState.loading || readOnly || pageEditMode;
   });
   document.querySelectorAll('.accounting-fuel-remove, #accounting-add-fuel-row').forEach((button) => {
-    button.disabled = readOnly || accountingState.loading;
+    button.disabled = readOnly || accountingState.loading || pageEditMode;
   });
 }
 
-async function loadAccountingMonth(monthKey) {
+async function loadAccountingMonth(monthKey, options = {}) {
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) return;
 
@@ -11329,7 +11887,8 @@ async function loadAccountingMonth(monthKey) {
   try {
     await ensureAccountingFuelProducts();
     const record = await ipcRenderer.invoke('get-monthly-accounting-document', {
-      month_key: normalizedMonth
+      month_key: normalizedMonth,
+      include_inactive_defaults: options.includeInactiveDefaults === true
     });
     renderAccountingDocument(record);
   } catch (error) {
@@ -11498,6 +12057,119 @@ async function changeAccountingMonth(offset) {
   await loadAccountingMonth(targetMonth);
 }
 
+function closeAccountingMenu() {
+  const menu = document.getElementById('accounting-menu');
+  if (menu) menu.classList.remove('show');
+}
+
+function toggleAccountingMenu(event) {
+  event?.stopPropagation?.();
+  const menu = document.getElementById('accounting-menu');
+  if (!menu) return;
+  const isShown = menu.classList.contains('show');
+  document.querySelectorAll('.shift-menu').forEach((item) => item.classList.remove('show'));
+  closeAccountingMonthPicker();
+  if (!isShown) menu.classList.add('show');
+}
+
+async function toggleAccountingPageEditMode() {
+  closeAccountingMenu();
+  const nextMode = !accountingState.pageEditMode;
+  if (nextMode) {
+    await flushAccountingDraftAutoSave();
+    accountingState.loading = true;
+    setAccountingSaveStatus('loading');
+    updateAccountingModeControls();
+    try {
+      const record = await ipcRenderer.invoke('get-monthly-accounting-document', {
+        month_key: accountingState.monthKey,
+        include_inactive_defaults: true
+      });
+      const data = record?.data || record?.active_data || accountingState.data || {};
+      accountingState.data = data;
+      accountingState.labelDefaults = record?.label_defaults || accountingState.labelDefaults || {};
+      accountingState.isFinal = record?.is_final === true || record?.is_final === 1;
+      accountingState.editMode = false;
+      accountingState.pageEditMode = true;
+      accountingState.pageSettingsDirty = false;
+      renderAccountingSide('debit', data.debit_rows || []);
+      renderAccountingSide('credit', data.credit_rows || []);
+      renderAccountingFuelRows(data.fuel_purchase_rows || []);
+      calculateAccountingPageTotals();
+      setAccountingSaveStatus('edit', 'وضع تعديل الصفحة');
+    } catch (error) {
+      console.error('Error entering accounting page edit mode:', error);
+      showMessage(error?.message || 'تعذر فتح تعديل الصفحة', 'error');
+      setAccountingSaveStatus('error');
+    } finally {
+      accountingState.loading = false;
+      updateAccountingModeControls();
+    }
+    return;
+  }
+
+  accountingState.pageEditMode = false;
+  accountingState.pageSettingsDirty = false;
+  await loadAccountingMonth(accountingState.monthKey);
+}
+
+function toggleAccountingDefaultLabel(button) {
+  if (!accountingState.pageEditMode || accountingState.loading) return;
+  const active = !button.classList.contains('active');
+  button.classList.toggle('active', active);
+  button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  button.dataset.accountingVisibleDefault = active ? '1' : '0';
+  const row = button.closest('tr');
+  if (row) row.dataset.accountingVisibleDefault = active ? '1' : '0';
+  markAccountingPageSettingsChanged();
+}
+
+function collectAccountingPageSettings() {
+  const rows = [
+    ...document.querySelectorAll('#accounting-debit-body tr'),
+    ...document.querySelectorAll('#accounting-credit-body tr')
+  ];
+  const defaults = {};
+  rows.forEach((row) => {
+    if (row.dataset.accountingCanSaveDefault !== '1') return;
+    const rowKey = String(row.dataset.accountingRowKey || '').trim();
+    const label = String(row.querySelector('[data-accounting-field="label"]')?.value || '').trim();
+    if (!rowKey || !label) return;
+    const button = row.querySelector('.accounting-default-label-btn');
+    defaults[rowKey] = {
+      label,
+      is_default: button?.classList?.contains('active') === true
+    };
+  });
+  return defaults;
+}
+
+async function saveAccountingPageSettings() {
+  if (!accountingState.pageEditMode || accountingState.loading) return;
+  const pageSaveBtn = document.getElementById('accounting-page-save-btn');
+  if (pageSaveBtn) pageSaveBtn.disabled = true;
+  accountingState.loading = true;
+  setAccountingSaveStatus('saving', 'جاري حفظ الصفحة...');
+  try {
+    const result = await ipcRenderer.invoke('save-accounting-page-settings', {
+      defaults: collectAccountingPageSettings()
+    });
+    accountingState.labelDefaults = result?.label_defaults || accountingState.labelDefaults || {};
+    accountingState.pageEditMode = false;
+    accountingState.pageSettingsDirty = false;
+    await loadAccountingMonth(accountingState.monthKey);
+    showMessage('تم حفظ إعدادات الصفحة', 'success');
+  } catch (error) {
+    console.error('Error saving accounting page settings:', error);
+    showMessage(error?.message || 'تعذر حفظ إعدادات الصفحة', 'error');
+    setAccountingSaveStatus('error');
+  } finally {
+    accountingState.loading = false;
+    if (pageSaveBtn) pageSaveBtn.disabled = false;
+    updateAccountingModeControls();
+  }
+}
+
 function handleAccountingInput(event) {
   const target = event.target;
   if (
@@ -11510,10 +12182,20 @@ function handleAccountingInput(event) {
     return;
   }
 
-  if (!target?.classList?.contains('accounting-row-label') && !target?.classList?.contains('accounting-row-amount')) {
+  if (
+    !target?.classList?.contains('accounting-row-label')
+    && !target?.classList?.contains('accounting-row-amount')
+  ) {
     return;
   }
-  if (getAccountingReadOnly() || accountingState.loading) return;
+  if (accountingState.loading) return;
+  if (accountingState.pageEditMode) {
+    if (target?.classList?.contains('accounting-row-label')) {
+      markAccountingPageSettingsChanged();
+    }
+    return;
+  }
+  if (getAccountingReadOnly()) return;
 
   calculateAccountingPageTotals();
   const side = target.dataset.accountingSide;
@@ -11543,7 +12225,7 @@ async function handleAccountingChange(event) {
   ) {
     return;
   }
-  if (getAccountingReadOnly() || accountingState.loading) return;
+  if (getAccountingReadOnly() || accountingState.loading || accountingState.pageEditMode) return;
 
   const row = target.closest('.accounting-fuel-row');
   await prefillAccountingFuelPrice(row);
@@ -11552,7 +12234,7 @@ async function handleAccountingChange(event) {
 }
 
 function addAccountingFuelRow() {
-  if (getAccountingReadOnly() || accountingState.loading) return;
+  if (getAccountingReadOnly() || accountingState.loading || accountingState.pageEditMode) return;
   const rows = collectAccountingFuelRows({ includeEmpty: true });
   rows.push({
     date: getAccountingFuelDefaultDate(),
@@ -11566,7 +12248,7 @@ function addAccountingFuelRow() {
 }
 
 function removeAccountingFuelRow(rowElement) {
-  if (!rowElement || getAccountingReadOnly() || accountingState.loading) return;
+  if (!rowElement || getAccountingReadOnly() || accountingState.loading || accountingState.pageEditMode) return;
   rowElement.remove();
   if (collectAccountingFuelRows().length === 0) {
     renderAccountingFuelRows([]);
@@ -11577,6 +12259,10 @@ function removeAccountingFuelRow(rowElement) {
 
 function handleAccountingClick(event) {
   const target = event.target;
+  if (target?.classList?.contains('accounting-default-label-btn')) {
+    toggleAccountingDefaultLabel(target);
+    return;
+  }
   if (target?.id === 'accounting-add-fuel-row') {
     addAccountingFuelRow();
     return;
@@ -11600,24 +12286,35 @@ function bindAccountingEvents() {
 
   const prevBtn = document.getElementById('accounting-prev-month');
   const nextBtn = document.getElementById('accounting-next-month');
-  const monthInput = document.getElementById('accounting-month-input');
+  const picker = document.getElementById('accounting-month-picker');
+  const pickerPrevYear = document.getElementById('accounting-picker-prev-year');
+  const pickerNextYear = document.getElementById('accounting-picker-next-year');
+  const pickerGrid = document.getElementById('accounting-month-picker-grid');
   const editBtn = document.getElementById('accounting-edit-btn');
   const saveBtn = document.getElementById('accounting-save-btn');
+  const pageSaveBtn = document.getElementById('accounting-page-save-btn');
   const page = document.getElementById('accounting-screen');
 
   if (prevBtn) prevBtn.addEventListener('click', () => changeAccountingMonth(-1));
   if (nextBtn) nextBtn.addEventListener('click', () => changeAccountingMonth(1));
-  if (monthInput) {
-    monthInput.addEventListener('change', async () => {
-      const monthKey = normalizeMonthKey(monthInput.value);
-      if (!monthKey) return;
-      await flushAccountingDraftAutoSave();
-      accountingState.monthKey = monthKey;
-      await loadAccountingMonth(monthKey);
-    });
-  }
+  if (picker) picker.addEventListener('click', (event) => event.stopPropagation());
+  if (pickerPrevYear) pickerPrevYear.addEventListener('click', (event) => {
+    event.stopPropagation();
+    shiftAccountingPickerYear(-1);
+  });
+  if (pickerNextYear) pickerNextYear.addEventListener('click', (event) => {
+    event.stopPropagation();
+    shiftAccountingPickerYear(1);
+  });
+  if (pickerGrid) pickerGrid.addEventListener('click', (event) => {
+    const monthButton = event.target?.closest?.('.accounting-month-option');
+    if (!monthButton) return;
+    event.stopPropagation();
+    selectAccountingPickerMonth(monthButton.dataset.accountingMonth);
+  });
   if (editBtn) editBtn.addEventListener('click', enableAccountingFinalEdit);
   if (saveBtn) saveBtn.addEventListener('click', saveAccountingDocument);
+  if (pageSaveBtn) pageSaveBtn.addEventListener('click', saveAccountingPageSettings);
   if (page) {
     page.addEventListener('input', handleAccountingInput);
     page.addEventListener('change', handleAccountingChange);
@@ -16129,7 +16826,6 @@ async function loadShiftData(date, shiftNumber) {
       currentShiftData.shiftNumber = shiftNumber;
       currentShiftData.isSaved = false;
       currentShiftData.hasUnsavedChanges = false;
-      currentShiftData.draftCleanupQueue = [];
 
       // Load the immediately previous saved shift to populate "first shift" fields.
       const previousShift = await getPreviousSavedShiftFor(date, shiftNumber);
@@ -16301,7 +16997,6 @@ async function loadShiftData(date, shiftNumber) {
 	    currentShiftData.shiftNumber = shiftNumber;
 	    currentShiftData.isSaved = shift.is_saved === 1;
 	    currentShiftData.hasUnsavedChanges = false;
-	    currentShiftData.draftCleanupQueue = [];
 	    if (shift.is_saved !== 1) {
 	      await applyAutomaticStartValuesForDraft(date, shiftNumber);
 	      currentShiftData.hasUnsavedChanges = false;
@@ -16429,8 +17124,22 @@ function clearShiftForm() {
   currentShiftData.hasUnsavedChanges = false;
 }
 
+async function loadSelectedShiftIdentifier(date, shiftNumber, { reloadPrices = false } = {}) {
+  await loadShiftData(date, shiftNumber);
+
+  if (reloadPrices && shiftViewMode === 'edit' && !currentShiftData.isSaved) {
+    await loadFuelPricesForDate(date);
+    await loadAllOilPrices();
+  }
+}
+
+function restoreShiftIdentifierFields(dateInput, shiftNumberSelect, date, shiftNumber) {
+  if (dateInput) dateInput.value = date || '';
+  if (shiftNumberSelect) shiftNumberSelect.value = String(shiftNumber || '1');
+}
+
 // Handle date/shift number change
-async function handleShiftIdentifierChange() {
+async function handleShiftIdentifierChange(options = {}) {
   const dateInput = document.getElementById('shift-date');
   const shiftNumberSelect = document.getElementById('shift-number');
 
@@ -16438,6 +17147,7 @@ async function handleShiftIdentifierChange() {
 
   const date = dateInput.value;
   const shiftNumber = parseInt(shiftNumberSelect.value);
+  const reloadPrices = options?.reloadPrices === true;
   const isDraftMode = shiftViewMode === 'edit' && !currentShiftData.isSaved;
 
   if (shiftViewMode === 'correction') {
@@ -16466,31 +17176,31 @@ async function handleShiftIdentifierChange() {
     return;
   }
 
-  // In draft mode, changing date/shift should only re-associate the current form data,
-  // not reload another shift and wipe current inputs.
+  // In draft mode, changing date/shift is a navigation to another shift.
+  // If the user has entered real body data, ask before discarding it; automatic
+  // start counters alone do not count as user-entered data.
   if (isDraftMode) {
     const previousDate = currentShiftData.date;
     const previousShift = currentShiftData.shiftNumber;
+    const previousKey = getShiftIdentifierKey(previousDate, previousShift);
+    const nextKey = getShiftIdentifierKey(date, shiftNumber);
 
-    if (previousDate && Number.isFinite(parseInt(previousShift, 10))) {
-      const previousKey = getShiftIdentifierKey(previousDate, previousShift);
-      const nextKey = getShiftIdentifierKey(date, shiftNumber);
-      if (previousKey && nextKey && previousKey !== nextKey) {
-        queueDraftIdentifierForCleanup(previousDate, previousShift);
+    if (previousKey && nextKey && previousKey === nextKey) {
+      return;
+    }
+
+    if (hasUserEnteredShiftBodyData()) {
+      const confirmed = confirm(
+        'لديك بيانات مدخلة في هذه الوردية. تغيير التاريخ أو رقم الوردية سيحذف هذه البيانات ويحمّل الوردية المحددة. هل تريد المتابعة؟'
+      );
+      if (!confirmed) {
+        restoreShiftIdentifierFields(dateInput, shiftNumberSelect, previousDate, previousShift);
+        return;
       }
     }
 
-    currentShiftData.date = date;
-    currentShiftData.shiftNumber = shiftNumber;
-    currentShiftData.hasUnsavedChanges = true;
-    const previousShiftNumber = parseInt(previousShift, 10);
-    if (previousShiftNumber === 2 && shiftNumber === 1) {
-      clearGasLastShiftCounters();
-    } else {
-      applyNightShiftGasAutoClose();
-    }
-    setShiftDraftStatus('dirty');
-    scheduleShiftDraftAutoSave();
+    await discardCurrentShiftDrafts();
+    await loadSelectedShiftIdentifier(date, shiftNumber, { reloadPrices });
     return;
   }
 
@@ -16499,14 +17209,13 @@ async function handleShiftIdentifierChange() {
     const confirmed = confirm('لديك تغييرات غير محفوظة. هل تريد المتابعة؟');
     if (!confirmed) {
       // Restore previous values
-      dateInput.value = currentShiftData.date || '';
-      shiftNumberSelect.value = currentShiftData.shiftNumber || '1';
+      restoreShiftIdentifierFields(dateInput, shiftNumberSelect, currentShiftData.date, currentShiftData.shiftNumber);
       return;
     }
   }
 
   // Load shift data for selected date and shift number
-  await loadShiftData(date, shiftNumber);
+  await loadSelectedShiftIdentifier(date, shiftNumber, { reloadPrices });
 }
 
 // Show shift history (placeholder for now)
@@ -16709,6 +17418,7 @@ async function saveShiftCorrection() {
     showToast(successMessage, 'success');
     await Promise.allSettled([
       loadHomeChart(),
+      loadHomeAccountingStats(),
       loadTodayStats(),
       loadSafeBookMovements()
     ]);
@@ -16735,6 +17445,7 @@ function updateShiftTitle() {
   } else {
     title.textContent = 'إدخال وردية جديدة';
   }
+  updatePageBackButton(currentScreen);
 }
 
 function toggleHistoryBar(show) {
@@ -16878,6 +17589,8 @@ function toggleShiftMenu(event) {
 
 document.addEventListener('click', () => {
   document.querySelectorAll('.shift-menu').forEach(m => m.classList.remove('show'));
+  document.querySelectorAll('.accounting-month-picker').forEach(m => m.classList.remove('show'));
+  document.querySelectorAll('#accounting-month-display').forEach((button) => button.setAttribute('aria-expanded', 'false'));
 });
 
 const INLINE_RESET_ACTIVE_CLASS = 'inline-reset-active';
@@ -17485,9 +18198,7 @@ function bindShiftIdentifierListeners() {
         await handleShiftIdentifierChange();
         return;
       }
-      await loadFuelPricesForDate(dateInput.value);
-      await loadAllOilPrices();
-      await handleShiftIdentifierChange();
+      await handleShiftIdentifierChange({ reloadPrices: true });
     });
   }
 
@@ -17854,19 +18565,7 @@ async function updateConnectionStatus() {
 }
 
 function applyOfflineLocks() {
-  const blockedScreens = (offlineRestricted && offlineRestricted.screens) || [];
   const blockedSections = (offlineRestricted && offlineRestricted.settingsSections) || [];
-
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    const target = btn.dataset.screen;
-    if (!isOnline && blockedScreens.includes(target)) {
-      btn.classList.add('nav-disabled');
-      btn.setAttribute('title', 'يتطلب اتصالاً بالإنترنت');
-    } else {
-      btn.classList.remove('nav-disabled');
-      btn.removeAttribute('title');
-    }
-  });
 
   document.querySelectorAll('.settings-menu-item').forEach(item => {
     const section = item.dataset.settingsSection;

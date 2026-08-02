@@ -167,6 +167,24 @@ class SchemaMigrator {
     return typeMap[normalizedType] || 'TEXT';
   }
 
+  mapPostgreSQLDefaultToSQLite(defaultValue) {
+    if (!defaultValue) return '';
+
+    let value = String(defaultValue).trim();
+    if (!value || value.includes('nextval')) return '';
+
+    if (/CURRENT_TIMESTAMP/i.test(value)) {
+      return "(strftime('%s', 'now'))";
+    }
+
+    value = value
+      .replace(/::[\w\s]+/g, '')
+      .replace(/\btrue\b/i, '1')
+      .replace(/\bfalse\b/i, '0');
+
+    return value;
+  }
+
   /**
    * Confronta due schemi e identifica le differenze
    */
@@ -282,14 +300,9 @@ class SchemaMigrator {
         def += ' NOT NULL';
       }
 
-      // Gestisci DEFAULT (escludi quelli di PostgreSQL come nextval)
-      if (col.defaultValue && !col.defaultValue.includes('nextval')) {
-        // Converti CURRENT_TIMESTAMP per SQLite
-        if (col.defaultValue.includes('CURRENT_TIMESTAMP')) {
-          def += ` DEFAULT (strftime('%s', 'now'))`;
-        } else {
-          def += ` DEFAULT ${col.defaultValue}`;
-        }
+      const sqliteDefault = this.mapPostgreSQLDefaultToSQLite(col.defaultValue);
+      if (sqliteDefault) {
+        def += ` DEFAULT ${sqliteDefault}`;
       }
 
       return def;
@@ -311,13 +324,9 @@ class SchemaMigrator {
       sql += ' NOT NULL';
     }
 
-    // Gestisci DEFAULT
-    if (column.defaultValue && !column.defaultValue.includes('nextval')) {
-      if (column.defaultValue.includes('CURRENT_TIMESTAMP')) {
-        sql += ` DEFAULT (strftime('%s', 'now'))`;
-      } else {
-        sql += ` DEFAULT ${column.defaultValue}`;
-      }
+    const sqliteDefault = this.mapPostgreSQLDefaultToSQLite(column.defaultValue);
+    if (sqliteDefault) {
+      sql += ` DEFAULT ${sqliteDefault}`;
     } else if (!column.nullable) {
       // Se NOT NULL ma nessun default da PG, aggiungi un default ragionevole
       if (column.type === 'INTEGER') {
@@ -349,12 +358,9 @@ class SchemaMigrator {
         def += ' NOT NULL';
       }
 
-      if (col.defaultValue && !col.defaultValue.includes('nextval')) {
-        if (col.defaultValue.includes('CURRENT_TIMESTAMP')) {
-          def += ` DEFAULT (strftime('%s', 'now'))`;
-        } else {
-          def += ` DEFAULT ${col.defaultValue}`;
-        }
+      const sqliteDefault = this.mapPostgreSQLDefaultToSQLite(col.defaultValue);
+      if (sqliteDefault) {
+        def += ` DEFAULT ${sqliteDefault}`;
       }
 
       return def;

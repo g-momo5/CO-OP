@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  ACCOUNTING_ROW_KEYS,
   buildAccountingDocumentData,
   buildAccountingFuelPurchaseMaps,
   buildAccountingProfitRows,
@@ -123,6 +124,144 @@ test('fuel withdrawal amount stays manual and cash insurance is derived from it'
   assert.equal(calculateAccountingCashInsurance(data), 402);
 });
 
+test('fuel withdrawal calculation uses stable row key when label is customized', () => {
+  const data = buildAccountingDocumentData({
+    month_key: '2026-06',
+    debit_rows: [{
+      row_key: ACCOUNTING_ROW_KEYS.DEBIT_FUEL_WITHDRAWALS,
+      label: 'مسحوبات وقود مخصصة',
+      amount: 2000
+    }],
+    fuel_purchase_rows: [
+      { date: '2026-06-03', fuel_type: 'سولار', quantity: 100, purchase_price: 12 }
+    ]
+  });
+
+  const fuelWithdrawalRow = data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_FUEL_WITHDRAWALS);
+  assert.equal(fuelWithdrawalRow.label, 'جملة مسحوبات المواد البترولية');
+  assert.equal(data.cash_insurance, 800);
+});
+
+test('custom default labels are applied to new accounting documents', () => {
+  const data = createDefaultAccountingData('2026-06', 0, {
+    [ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS]: 'مسحوبات زيوت الشركة',
+    [ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS]: 'حوافظ تسليم الشركة'
+  });
+
+  assert.equal(
+    data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS).label,
+    'مسحوبات زيوت الشركة'
+  );
+  assert.equal(
+    data.credit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS).label,
+    'حوافظ تسليم الشركة'
+  );
+  assert.equal(
+    data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS).is_default_label,
+    true
+  );
+  assert.equal(
+    data.credit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS).is_default_label,
+    true
+  );
+});
+
+test('factory accounting labels are marked as default before any saved defaults exist', () => {
+  const data = createDefaultAccountingData('2026-06');
+
+  assert.equal(
+    data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS).is_default_label,
+    true
+  );
+  assert.equal(
+    data.credit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.CREDIT_FUEL_CASH).is_default_label,
+    true
+  );
+});
+
+test('non-default empty accounting rows are hidden from new documents', () => {
+  const data = createDefaultAccountingData('2026-06', 0, {
+    [ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS]: {
+      label: 'مسحوبات زيوت الشركة',
+      is_default: false
+    }
+  });
+
+  assert.equal(
+    data.debit_rows.some((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS),
+    false
+  );
+});
+
+test('non-default accounting rows remain visible when existing month has saved content', () => {
+  const record = splitDraftAndFinal({
+    month_key: '2026-06',
+    is_final: 0,
+    draft_data: {
+      month_key: '2026-06',
+      debit_rows: [{
+        row_key: ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS,
+        label: 'مسحوبات زيوت محفوظة',
+        amount: 15
+      }]
+    }
+  }, 0, {
+    [ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS]: {
+      label: 'مسحوبات زيوت الشركة',
+      is_default: false
+    }
+  });
+
+  const row = record.active_data.debit_rows.find((entry) => entry.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS);
+  assert.equal(row.label, 'مسحوبات زيوت محفوظة');
+  assert.equal(row.is_visible_default, false);
+});
+
+test('inactive accounting rows can be included for page edit mode', () => {
+  const record = splitDraftAndFinal({
+    month_key: '2026-06',
+    is_final: 0,
+    draft_data: {}
+  }, 0, {
+    [ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS]: {
+      label: 'حوافظ غير مثبتة',
+      is_default: false
+    }
+  }, {
+    includeInactiveDefaults: true
+  });
+
+  const row = record.active_data.credit_rows.find((entry) => entry.row_key === ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS);
+  assert.equal(row.label, 'حوافظ غير مثبتة');
+  assert.equal(row.is_visible_default, false);
+});
+
+test('saved document labels override future defaults for existing documents', () => {
+  const record = splitDraftAndFinal({
+    month_key: '2026-06',
+    is_final: 0,
+    draft_data: {
+      month_key: '2026-06',
+      debit_rows: [{
+        row_key: ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS,
+        label: 'اسم محفوظ في الشهر',
+        amount: 15
+      }]
+    }
+  }, 0, {
+    [ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS]: 'اسم افتراضي جديد'
+  });
+
+  assert.equal(
+    record.active_data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS).label,
+    'اسم محفوظ في الشهر'
+  );
+  assert.equal(
+    record.active_data.debit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS).is_default_label,
+    false
+  );
+});
+
 test('createDefaultAccountingData falls back to zero when previous month is absent', () => {
   const data = createDefaultAccountingData('2026-06');
   const autoRow = data.credit_rows.find((row) => row.auto);
@@ -226,6 +365,27 @@ test('extractAccountingProfitRows maps included accounting rows to revenue and d
     ['خصم إضافي', 'deduction', 8],
     ['إيراد إضافي', 'revenue', 30],
     ['تأمين نقدى', 'deduction', 100]
+  ]);
+});
+
+test('profit extraction excludes system rows by key after label changes', () => {
+  const rows = extractAccountingProfitRows({
+    month_key: '2026-06',
+    debit_rows: [
+      { row_key: ACCOUNTING_ROW_KEYS.DEBIT_OIL_WITHDRAWALS, label: 'زيوت باسم مخصص', amount: 500 },
+      { row_key: ACCOUNTING_ROW_KEYS.DEBIT_WITHHOLDING_TAX, label: 'ضريبة باسم مخصص', amount: 12 }
+    ],
+    credit_rows: [
+      { row_key: ACCOUNTING_ROW_KEYS.CREDIT_FUEL_CASH, label: 'نقدية باسم مخصص', amount: 1000 },
+      { row_key: ACCOUNTING_ROW_KEYS.CREDIT_DELIVERY_DEPOSITS, label: 'حوافظ باسم مخصص', amount: 500 },
+      { row_key: ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE, label: 'زيادة محاسبة شهر ٢٠٢٦ / ٥', amount: 50, auto: true },
+      { row_key: 'custom_revenue', label: 'إيراد باسم مخصص', amount: 30 }
+    ]
+  });
+
+  assert.deepEqual(rows.map((row) => [row.row_label, row.row_type, row.amount]), [
+    ['ضريبة باسم مخصص', 'deduction', 12],
+    ['إيراد باسم مخصص', 'revenue', 30]
   ]);
 });
 

@@ -14,8 +14,21 @@ const {
   shiftKey
 } = require('./shift-cascade');
 const { buildHomeChartData, HOME_CHART_MODES } = require('./accounting/home-chart-view');
-const { buildSafeBookView } = require('./accounting/safe-book-view');
+const {
+  HOME_LAYOUT_SETTING_KEY,
+  HOME_LAYOUT_SCHEMA_VERSION,
+  getDefaultHomeLayout,
+  normalizeHomeLayout,
+  serializeHomeLayout
+} = require('./home-layout');
+const { buildSafeBookMovements, buildSafeBookView } = require('./accounting/safe-book-view');
 const { buildSalesSummaryView } = require('./accounting/sales-summary-view');
+const { buildSalesReconciliationView, previousMonth } = require('./accounting/sales-reconciliation');
+const {
+  buildHomeAccountingStats,
+  getPreviousWeekRange,
+  getSaturdayWeekRange
+} = require('./accounting/home-accounting-stats');
 const { TimedViewCache } = require('./accounting/view-cache');
 const {
   buildAccountingFuelPurchaseMaps,
@@ -23,6 +36,7 @@ const {
   buildAccountingProfitRows,
   calculateAccountingTotals,
   getPreviousMonthKey,
+  normalizeAccountingLabelDefaults,
   selectDefaultAccountingMonth,
   shiftMonth,
   splitDraftAndFinal
@@ -46,7 +60,7 @@ let currentAppUser = null;
 const viewCache = new TimedViewCache({ ttlMs: 30_000, maxEntries: 80 });
 // Screens and sections that are limited when offline
 const OFFLINE_RESTRICTED = {
-  screens: ['report', 'charts'],
+  screens: [],
   settingsSections: ['backup'],
   reads: [
     'get-sales',
@@ -956,10 +970,9 @@ function timestampToMs(value) {
 }
 
 function normalizeAppDeviceRow(row = {}) {
-  const lastSeenMs = timestampToMs(row.last_seen_at);
-  const lastOpenedMs = timestampToMs(row.last_opened_at);
-  const firstSeenMs = timestampToMs(row.first_seen_at);
-  const updatedMs = timestampToMs(row.updated_at);
+  const lastSeenMs = timestampToMs(row.last_seen_at_ms ?? row.last_seen_at);
+  const firstSeenMs = timestampToMs(row.first_seen_at_ms ?? row.first_seen_at);
+  const updatedMs = timestampToMs(row.updated_at_ms ?? row.updated_at);
   const now = Date.now();
 
   return {
@@ -970,7 +983,6 @@ function normalizeAppDeviceRow(row = {}) {
     platform: String(row.platform || ''),
     arch: String(row.arch || ''),
     first_seen_at: firstSeenMs ? new Date(firstSeenMs).toISOString() : null,
-    last_opened_at: lastOpenedMs ? new Date(lastOpenedMs).toISOString() : null,
     last_seen_at: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
     updated_at: updatedMs ? new Date(updatedMs).toISOString() : null,
     is_current: String(row.device_id || '') === getCurrentDeviceId(),
@@ -1015,6 +1027,7 @@ function upsertCurrentAppDeviceLocal(payload, opened = false) {
 
 async function upsertCurrentAppDevice(opened = false) {
   const payload = getCurrentAppDevicePayload();
+  const nowUtc = new Date();
 
   try {
     upsertCurrentAppDeviceLocal(payload, opened);
@@ -1032,14 +1045,14 @@ async function upsertCurrentAppDevice(opened = false) {
         device_id, system_name, app_version, platform, arch,
         first_seen_at, last_opened_at, last_seen_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $7, $7, $7, $7)
       ON CONFLICT (device_id) DO UPDATE SET
         system_name = EXCLUDED.system_name,
         app_version = EXCLUDED.app_version,
         platform = EXCLUDED.platform,
         arch = EXCLUDED.arch,
         last_opened_at = CASE
-          WHEN $6::boolean THEN EXCLUDED.last_opened_at
+          WHEN $6 THEN EXCLUDED.last_opened_at
           ELSE app_devices.last_opened_at
         END,
         last_seen_at = EXCLUDED.last_seen_at,
@@ -1050,7 +1063,8 @@ async function upsertCurrentAppDevice(opened = false) {
       payload.app_version,
       payload.platform,
       payload.arch,
-      opened
+      opened,
+      nowUtc
     ]);
     return { success: true, device: payload };
   } catch (error) {
@@ -1068,7 +1082,10 @@ async function getAppDevices() {
     try {
       const result = await dbManager.pgPool.query(`
         SELECT device_id, system_name, display_name, app_version, platform, arch,
-               first_seen_at, last_opened_at, last_seen_at, updated_at
+               first_seen_at, last_seen_at, updated_at,
+               EXTRACT(EPOCH FROM first_seen_at) * 1000 AS first_seen_at_ms,
+               EXTRACT(EPOCH FROM last_seen_at) * 1000 AS last_seen_at_ms,
+               EXTRACT(EPOCH FROM updated_at) * 1000 AS updated_at_ms
         FROM app_devices
       `);
       rows = result.rows;
@@ -1081,7 +1098,7 @@ async function getAppDevices() {
   if (rows.length === 0 && dbManager?.sqlite) {
     rows = dbManager.sqlite.prepare(`
       SELECT device_id, system_name, display_name, app_version, platform, arch,
-             first_seen_at, last_opened_at, last_seen_at, updated_at
+             first_seen_at, last_seen_at, updated_at
       FROM app_devices
     `).all();
     source = 'local';
@@ -2152,13 +2169,49 @@ function setupIPCHandlers() {
     };
   };
 
-  const readMonthlyAccountingDocument = async (monthKey) => {
+  const getAccountingLabelDefaults = async () => {
+    try {
+      const rows = await executeQuery(
+        'SELECT row_key, label, COALESCE(is_default, 1) AS is_default FROM accounting_label_defaults ORDER BY row_key ASC',
+        []
+      );
+      return normalizeAccountingLabelDefaults(Object.fromEntries(
+        rows.map((row) => [String(row.row_key || '').trim(), {
+          label: String(row.label || '').trim(),
+          is_default: row.is_default !== 0 && row.is_default !== false
+        }])
+      ));
+    } catch (error) {
+      console.warn('Unable to read accounting label defaults:', error.message);
+      return {};
+    }
+  };
+
+  const upsertAccountingLabelDefaults = async (defaults = {}) => {
+    const normalized = normalizeAccountingLabelDefaults(defaults);
+    const entries = Object.entries(normalized);
+    for (const [rowKey, setting] of entries) {
+      await executeInsert(`
+        INSERT INTO accounting_label_defaults (row_key, label, is_default, updated_at)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+        ON CONFLICT (row_key)
+        DO UPDATE SET
+          label = EXCLUDED.label,
+          is_default = EXCLUDED.is_default,
+          updated_at = CURRENT_TIMESTAMP
+      `, [rowKey, setting.label, setting.is_default ? 1 : 0], 'accounting_label_defaults');
+    }
+    return normalized;
+  };
+
+  const readMonthlyAccountingDocument = async (monthKey, options = {}) => {
     const normalizedMonth = normalizeMonthKey(monthKey);
     if (!normalizedMonth) {
       throw new Error('صيغة الشهر غير صحيحة');
     }
 
     const previous = await getPreviousAccountingIncreaseValue(normalizedMonth);
+    const labelDefaults = await getAccountingLabelDefaults();
     const rows = await executeQuery(
       'SELECT * FROM monthly_accounting_documents WHERE month_key = $1 LIMIT 1',
       [normalizedMonth]
@@ -2173,11 +2226,14 @@ function setupIPCHandlers() {
       ...rawRecord,
       draft_data: parseStoredObject(rawRecord.draft_data, {}),
       final_data: parseStoredObject(rawRecord.final_data, {})
-    }, previous.accounting_increase);
+    }, previous.accounting_increase, labelDefaults, {
+      includeInactiveDefaults: options.includeInactiveDefaults === true
+    });
 
     return {
       ...record,
       data: record.active_data,
+      label_defaults: labelDefaults,
       totals: record.active_data?.totals || { debit_total: 0, credit_total: 0, accounting_increase: 0 },
       previous_month_key: previous.previous_month_key,
       previous_increase: previous.accounting_increase,
@@ -3923,7 +3979,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-sales-report', async (event, { startDate, endDate }) => {
     try {
-      requireOnline('التقارير');
+      requireOnline('بيانات المبيعات');
       const reportQuery = 'SELECT * FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date DESC';
       return await executeQuery(reportQuery, [startDate, endDate]);
     } catch (error) {
@@ -4002,6 +4058,801 @@ ipcMain.handle('get-sales-summary', async () => {
         throw error;
       }
     });
+  });
+
+  ipcMain.handle('get-home-accounting-stats', async () => {
+    const currentMonth = getCurrentMonthKey();
+    const currentRange = monthToRange(currentMonth);
+    const previousMonthKey = previousMonth(currentMonth);
+    const twoMonthsAgoKey = previousMonth(previousMonthKey);
+    const previousRange = monthToRange(previousMonthKey);
+    const twoMonthsAgoRange = monthToRange(twoMonthsAgoKey);
+    const weekRange = getSaturdayWeekRange(new Date());
+    const cacheKey = `home-accounting-stats:${currentMonth}:${weekRange.startDate}:${weekRange.endDate}`;
+
+    const runMetric = async (name, task, fallback) => {
+      try {
+        return await task();
+      } catch (error) {
+        console.warn(`Unable to build home accounting ${name} metric:`, error.message);
+        return fallback;
+      }
+    };
+    const hasSalesSummaryActivity = (summary, monthKey) => (
+      (
+        Array.isArray(summary?.view?.rows)
+        && summary.view.rows.some((row) => row?.type === 'fuel' && toNumber(row?.byMonth?.[monthKey] ?? row?.total) > 0)
+      )
+      || Math.abs(toNumber(summary?.wash_lube_amount)) > 0.004
+    );
+    const hasSafeBookMovementActivity = (movements = []) => (
+      Array.isArray(movements) && movements.some((movement) => Math.abs(toNumber(movement?.amount)) > 0.004)
+    );
+    const getMonthProjectionFactor = (monthKey) => {
+      if (monthKey !== currentMonth) return 1;
+      const range = monthToRange(monthKey);
+      if (!range) return 1;
+      const today = new Date();
+      const elapsedDay = Math.max(1, Math.min(
+        today.getDate(),
+        parseInt(String(range.endDate).slice(8, 10), 10) || 1
+      ));
+      const daysInMonth = parseInt(String(range.endDate).slice(8, 10), 10) || elapsedDay;
+      return daysInMonth / elapsedDay;
+    };
+
+    return viewCache.getOrSet(cacheKey, async () => {
+      const loadSalesSummary = () => runMetric('sales-summary', async () => {
+        const buildSalesSummaryForMonth = async (monthKey) => {
+          const range = monthToRange(monthKey);
+          if (!range) return null;
+          const comparisonMonth = previousMonth(monthKey);
+          const comparisonRange = monthToRange(comparisonMonth);
+          const queryStartDate = comparisonRange?.startDate || range.startDate;
+          const [fuelProducts, oilProducts, shiftRows, manualSales, washRows] = await Promise.all([
+          executeQuery(
+            "SELECT product_name AS fuel_type FROM products WHERE product_type = 'fuel' ORDER BY product_name ASC"
+          ).catch((error) => {
+            console.warn('Unable to read fuel products for home sales stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT product_name AS oil_type
+             FROM products
+             WHERE product_type = 'oil'
+             ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC,
+                      COALESCE(display_order, 0) ASC,
+                      product_name ASC`
+          ).catch((error) => {
+            console.warn('Unable to read oil products for home sales stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT date, fuel_data, oil_data, data
+             FROM shifts
+             WHERE date BETWEEN $1 AND $2 AND is_saved = 1
+             ORDER BY date ASC, shift_number ASC, id ASC`,
+            [queryStartDate, range.endDate]
+          ).catch((error) => {
+            console.warn('Unable to read shifts for home sales stats:', error.message);
+            return [];
+          }),
+          dbManager?.isOnline
+            ? executeQuery(
+              'SELECT date, fuel_type, quantity, total_amount FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+              [queryStartDate, range.endDate]
+            ).catch((error) => {
+              console.warn('Unable to read manual sales for home sales stats:', error.message);
+              return [];
+            })
+            : Promise.resolve([]),
+            executeQuery(
+              `SELECT date, wash_lube_revenue
+               FROM shifts
+               WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)`,
+              [queryStartDate, range.endDate]
+            ).catch((error) => {
+              console.warn('Unable to read wash and lube rows for home sales stats:', error.message);
+              return [];
+            })
+        ]);
+
+          const normalizedShifts = normalizeShiftRowsForAccounting(shiftRows);
+          const currentShifts = normalizedShifts.filter((shift) => shift.date >= range.startDate && shift.date <= range.endDate);
+          const comparisonShifts = comparisonRange
+            ? normalizedShifts.filter((shift) => shift.date >= comparisonRange.startDate && shift.date <= comparisonRange.endDate)
+            : [];
+          const currentManualSales = manualSales.filter((sale) => sale.date >= range.startDate && sale.date <= range.endDate);
+          const comparisonManualSales = comparisonRange
+            ? manualSales.filter((sale) => sale.date >= comparisonRange.startDate && sale.date <= comparisonRange.endDate)
+            : [];
+          const view = buildSalesSummaryView({
+          fromMonth: monthKey,
+          toMonth: monthKey,
+          fuelProducts,
+          oilProducts,
+            shifts: currentShifts,
+            manualSales: currentManualSales
+        });
+          const comparisonView = comparisonMonth
+            ? buildSalesSummaryView({
+              fromMonth: comparisonMonth,
+              toMonth: comparisonMonth,
+              fuelProducts,
+              oilProducts,
+              shifts: comparisonShifts,
+              manualSales: comparisonManualSales
+            })
+            : null;
+          const wash_lube_amount = washRows.reduce((sum, row) => {
+            const date = normalizeIsoDate(row?.date);
+            return date >= range.startDate && date <= range.endDate
+              ? sum + toNumber(row?.wash_lube_revenue)
+              : sum;
+          }, 0);
+          const wash_lube_comparison_amount = comparisonRange
+            ? washRows.reduce((sum, row) => {
+              const date = normalizeIsoDate(row?.date);
+              return date >= comparisonRange.startDate && date <= comparisonRange.endDate
+                ? sum + toNumber(row?.wash_lube_revenue)
+                : sum;
+            }, 0)
+            : 0;
+          return {
+            view,
+            stat_month: monthKey,
+            period_label: monthKey,
+            comparison_view: comparisonView,
+            comparison_month: comparisonMonth,
+            projection_factor: getMonthProjectionFactor(monthKey),
+            wash_lube_amount,
+            wash_lube_comparison_amount
+          };
+        };
+
+        const currentSummary = await buildSalesSummaryForMonth(currentMonth);
+        if (hasSalesSummaryActivity(currentSummary, currentMonth)) {
+          return currentSummary;
+        }
+
+        const previousSummary = await buildSalesSummaryForMonth(previousMonthKey);
+        return previousSummary || currentSummary;
+      }, null);
+
+      const loadSalesReconciliation = () => runMetric('sales-reconciliation', async () => {
+        const monthSet = new Set();
+        const shiftMonths = await executeQuery(
+          `SELECT DISTINCT SUBSTR(date, 1, 7) AS month_key
+           FROM shifts
+           WHERE is_saved = 1 AND date IS NOT NULL
+           ORDER BY month_key DESC
+           LIMIT 12`
+        ).catch((error) => {
+          console.warn('Unable to read shift months for home reconciliation stats:', error.message);
+          return [];
+        });
+        shiftMonths.forEach((row) => {
+          const monthKey = normalizeMonthKey(row?.month_key);
+          if (monthKey) monthSet.add(monthKey);
+        });
+
+        if (dbManager?.isOnline) {
+          const saleMonths = await executeQuery(
+            `SELECT DISTINCT SUBSTR(date, 1, 7) AS month_key
+             FROM sales
+             WHERE date IS NOT NULL
+             ORDER BY month_key DESC
+             LIMIT 12`
+          ).catch((error) => {
+            console.warn('Unable to read sale months for home reconciliation stats:', error.message);
+            return [];
+          });
+          saleMonths.forEach((row) => {
+            const monthKey = normalizeMonthKey(row?.month_key);
+            if (monthKey) monthSet.add(monthKey);
+          });
+        }
+
+        const months = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+        if (!months.includes(currentMonth)) months.push(currentMonth);
+
+        const [fuelProducts, oilProducts] = await Promise.all([
+          executeQuery(
+            "SELECT product_name AS fuel_type, product_code, product_type FROM products WHERE product_type = 'fuel' ORDER BY product_name ASC"
+          ).catch((error) => {
+            console.warn('Unable to read fuel products for home reconciliation stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT product_name AS oil_type, product_code, product_type
+             FROM products
+             WHERE product_type = 'oil'
+             ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC,
+                      COALESCE(display_order, 0) ASC,
+                      product_name ASC`
+          ).catch((error) => {
+            console.warn('Unable to read oil products for home reconciliation stats:', error.message);
+            return [];
+          })
+        ]);
+
+        for (const monthKey of months.slice(0, 12)) {
+          const range = monthToRange(monthKey);
+          const previousRangeForMonth = monthToRange(previousMonth(monthKey));
+          if (!range || !previousRangeForMonth) continue;
+
+          const [shiftRows, manualSales] = await Promise.all([
+            executeQuery(
+              `SELECT id, date, shift_number, fuel_data, oil_data, data
+               FROM shifts
+               WHERE date BETWEEN $1 AND $2 AND is_saved = 1
+               ORDER BY date ASC, shift_number ASC, id ASC`,
+              [previousRangeForMonth.startDate, range.endDate]
+            ).catch((error) => {
+              console.warn('Unable to read shifts for home reconciliation stats:', error.message);
+              return [];
+            }),
+            dbManager?.isOnline
+              ? executeQuery(
+                'SELECT date, fuel_type, quantity, total_amount FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+                [range.startDate, range.endDate]
+              ).catch((error) => {
+                console.warn('Unable to read manual sales for home reconciliation stats:', error.message);
+                return [];
+              })
+              : Promise.resolve([])
+          ]);
+
+          const view = buildSalesReconciliationView({
+            month: monthKey,
+            fuelProducts,
+            oilProducts,
+            shifts: normalizeShiftRowsForAccounting(shiftRows),
+            manualSales
+          });
+          if (toNumber(view?.totals?.total) > 0) return view;
+        }
+
+        return null;
+      }, null);
+
+      const loadSafeBook = () => runMetric('safe-book', async () => {
+        if (!currentRange) return { view: null, movements: { items: [], period_label: currentMonth } };
+        const [manualRows, shiftRows] = await Promise.all([
+          executeQuery(
+            'SELECT id, date, movement_type, amount, direction, created_at FROM safe_book_movements ORDER BY date DESC, created_at DESC, id DESC'
+          ).catch((error) => {
+            console.warn('Unable to read manual safe book rows for home stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            'SELECT id, date, shift_number, grand_total, created_at, updated_at FROM shifts WHERE is_saved = 1 ORDER BY date DESC, shift_number DESC, id DESC'
+          ).catch((error) => {
+            console.warn('Unable to read shift safe book rows for home stats:', error.message);
+            return [];
+          })
+        ]);
+        const allMovements = buildSafeBookMovements({ manualRows, shiftRows });
+        const currentMovements = allMovements
+          .filter((movement) => movement.date >= currentRange.startDate && movement.date <= currentRange.endDate);
+        const previousMovements = previousRange
+          ? allMovements.filter((movement) => movement.date >= previousRange.startDate && movement.date <= previousRange.endDate)
+          : [];
+        const selectedMovements = hasSafeBookMovementActivity(currentMovements)
+          ? { items: currentMovements, period_label: currentMonth }
+          : { items: previousMovements, period_label: previousMonthKey };
+        return {
+          view: buildSafeBookView({ manualRows, shiftRows }),
+          movements: selectedMovements
+        };
+      }, { view: null, movements: { items: [], period_label: currentMonth } });
+
+      const loadProfitRows = () => runMetric('profit', async () => {
+        const availableMonths = await collectAvailableProfitMonths();
+        const months = availableMonths.length ? availableMonths : [currentMonth];
+        const selectedMonths = months.slice(-13);
+        const fromMonth = selectedMonths[0] || currentMonth;
+        const toMonth = selectedMonths[selectedMonths.length - 1] || currentMonth;
+        const monthRange = buildMonthRange(fromMonth, toMonth);
+        const fromDateRange = monthToRange(fromMonth);
+        const toDateRange = monthToRange(toMonth);
+        if (!monthRange.length || !fromDateRange || !toDateRange) return [];
+
+        const [manualRows, shiftRows, oilInvoiceRows, accountingDocumentRows] = await Promise.all([
+          executeQuery(
+            'SELECT * FROM monthly_profit_inputs WHERE month_key BETWEEN $1 AND $2 ORDER BY month_key ASC',
+            [fromMonth, toMonth]
+          ).catch((error) => {
+            console.warn('Unable to read monthly profit rows for home stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            'SELECT date, fuel_data, oil_data, data, wash_lube_revenue, total_expenses FROM shifts WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)',
+            [fromDateRange.startDate, toDateRange.endDate]
+          ).catch((error) => {
+            console.warn('Unable to read shifts for home profit stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
+            [fromDateRange.startDate, toDateRange.endDate]
+          ).catch((error) => {
+            console.warn('Unable to read oil invoices for home profit stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE month_key BETWEEN $1 AND $2 AND is_final = 1 ORDER BY month_key ASC',
+            [fromMonth, toMonth]
+          ).catch((error) => {
+            console.warn('Unable to read monthly accounting documents for home profit stats:', error.message);
+            return [];
+          })
+        ]);
+
+        const manualByMonth = new Map();
+        manualRows.forEach((row) => {
+          const monthKey = normalizeMonthKey(row.month_key);
+          if (!monthKey) return;
+          manualByMonth.set(monthKey, {
+            fuel_diesel: toNumber(row.fuel_diesel),
+            fuel_80: toNumber(row.fuel_80),
+            fuel_92: toNumber(row.fuel_92),
+            fuel_95: toNumber(row.fuel_95),
+            oil_total: toNumber(row.oil_total)
+          });
+        });
+
+        const dieselByMonth = new Map();
+        const fuel80ByMonth = new Map();
+        const fuel92ByMonth = new Map();
+        const fuel95ByMonth = new Map();
+        const oilByMonth = new Map();
+        const washByMonth = new Map();
+        const expensesByMonth = new Map();
+        shiftRows.forEach((row) => {
+          const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
+          if (!monthKey) return;
+          dieselByMonth.set(monthKey, (dieselByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'سولار'));
+          fuel80ByMonth.set(monthKey, (fuel80ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٨٠'));
+          fuel92ByMonth.set(monthKey, (fuel92ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٩٢'));
+          fuel95ByMonth.set(monthKey, (fuel95ByMonth.get(monthKey) || 0) + getShiftFuelProfitValue(row, 'بنزين ٩٥'));
+          oilByMonth.set(monthKey, (oilByMonth.get(monthKey) || 0) + getShiftOilProfitValue(row));
+          washByMonth.set(monthKey, (washByMonth.get(monthKey) || 0) + toNumber(row.wash_lube_revenue));
+          expensesByMonth.set(monthKey, (expensesByMonth.get(monthKey) || 0) + toNumber(row.total_expenses));
+        });
+
+        const normalizedAccountingDocuments = accountingDocumentRows.map((row) => ({
+          month_key: normalizeMonthKey(row.month_key),
+          final_data: parseStoredObject(row.final_data, {}),
+          is_final: row.is_final
+        }));
+        const { purchases: fuelPurchasesByMonth, insuranceByMonth } = buildAccountingFuelPurchaseMaps(
+          normalizedAccountingDocuments,
+          normalizeFuelProfitKey
+        );
+
+        const groupedOilInvoices = new Map();
+        oilInvoiceRows.forEach((row) => {
+          const monthKey = normalizeMonthKey(String(row?.date || '').slice(0, 7));
+          if (!monthKey) return;
+          const invoiceNumber = String(row?.invoice_number || '').trim() || '__unknown__';
+          const groupKey = `${monthKey}__${invoiceNumber}`;
+          if (!groupedOilInvoices.has(groupKey)) {
+            groupedOilInvoices.set(groupKey, {
+              monthKey,
+              subtotal: 0,
+              immediateDiscount: null,
+              martyrsTax: null
+            });
+          }
+          const entry = groupedOilInvoices.get(groupKey);
+          entry.subtotal += toNumber(row?.total_purchase);
+          const discountValue = parseFloat(row?.immediate_discount);
+          if (Number.isFinite(discountValue)) {
+            entry.immediateDiscount = entry.immediateDiscount === null ? discountValue : Math.max(entry.immediateDiscount, discountValue);
+          }
+          const taxValue = parseFloat(row?.martyrs_tax);
+          if (Number.isFinite(taxValue)) {
+            entry.martyrsTax = entry.martyrsTax === null ? taxValue : Math.max(entry.martyrsTax, taxValue);
+          }
+        });
+
+        const oilPurchasesByMonth = new Map();
+        groupedOilInvoices.forEach((entry) => {
+          const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
+          oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
+        });
+
+        return monthRange.map((monthKey) => {
+          const manual = manualByMonth.get(monthKey) || {};
+          const grossFuelDiesel = dieselByMonth.has(monthKey) ? toNumber(dieselByMonth.get(monthKey)) : toNumber(manual.fuel_diesel);
+          const grossFuel80 = fuel80ByMonth.has(monthKey) ? toNumber(fuel80ByMonth.get(monthKey)) : toNumber(manual.fuel_80);
+          const grossFuel92 = fuel92ByMonth.has(monthKey) ? toNumber(fuel92ByMonth.get(monthKey)) : toNumber(manual.fuel_92);
+          const grossFuel95 = fuel95ByMonth.has(monthKey) ? toNumber(fuel95ByMonth.get(monthKey)) : toNumber(manual.fuel_95);
+          const fuel_total_month = (grossFuelDiesel - toNumber(fuelPurchasesByMonth.fuel_diesel.get(monthKey)))
+            + (grossFuel80 - toNumber(fuelPurchasesByMonth.fuel_80.get(monthKey)))
+            + (grossFuel92 - toNumber(fuelPurchasesByMonth.fuel_92.get(monthKey)))
+            + (grossFuel95 - toNumber(fuelPurchasesByMonth.fuel_95.get(monthKey)));
+          const grossOilTotal = oilByMonth.has(monthKey) ? toNumber(oilByMonth.get(monthKey)) : toNumber(manual.oil_total);
+          const oil_total = grossOilTotal - toNumber(oilPurchasesByMonth.get(monthKey));
+          const wash_lube_month = toNumber(washByMonth.get(monthKey));
+          const expenses_month = toNumber(expensesByMonth.get(monthKey));
+          const total_positive = fuel_total_month + oil_total + wash_lube_month;
+          const total_deductions = expenses_month;
+          return {
+            month_key: monthKey,
+            fuel_total_month,
+            oil_total,
+            wash_lube_month,
+            cash_insurance_month: toNumber(insuranceByMonth.get(monthKey)),
+            expenses_month,
+            total_positive,
+            total_deductions,
+            net_profit: total_positive - total_deductions
+          };
+        }).sort((a, b) => b.month_key.localeCompare(a.month_key));
+      }, []);
+
+      const loadExpenses = () => runMetric('expenses', async () => {
+        if (!currentRange || !previousRange) return { currentTotal: 0, previousTotal: 0, period_label: currentMonth, comparison_month: previousMonthKey };
+        const queryStartDate = twoMonthsAgoRange?.startDate || previousRange.startDate;
+        const rows = await executeQuery(
+          `SELECT date, total_expenses
+           FROM shifts
+           WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)`,
+          [queryStartDate, currentRange.endDate]
+        ).catch((error) => {
+          console.warn('Unable to read expenses for home stats:', error.message);
+          return [];
+        });
+        const totals = rows.reduce((acc, row) => {
+          const date = normalizeIsoDate(row?.date);
+          const amount = toNumber(row?.total_expenses);
+          if (date >= currentRange.startDate && date <= currentRange.endDate) {
+            acc.currentTotal += amount;
+          } else if (date >= previousRange.startDate && date <= previousRange.endDate) {
+            acc.previousTotal += amount;
+          } else if (twoMonthsAgoRange && date >= twoMonthsAgoRange.startDate && date <= twoMonthsAgoRange.endDate) {
+            acc.twoMonthsAgoTotal += amount;
+          }
+          return acc;
+        }, { currentTotal: 0, previousTotal: 0, twoMonthsAgoTotal: 0 });
+
+        if (Math.abs(totals.currentTotal) > 0.004) {
+          return {
+            currentTotal: totals.currentTotal,
+            previousTotal: totals.previousTotal,
+            period_label: currentMonth,
+            comparison_month: previousMonthKey
+          };
+        }
+
+        if (Math.abs(totals.previousTotal) <= 0.004) {
+          return {
+            currentTotal: 0,
+            previousTotal: 0,
+            period_label: previousMonthKey,
+            comparison_month: twoMonthsAgoKey
+          };
+        }
+
+        return {
+          currentTotal: totals.previousTotal,
+          previousTotal: totals.twoMonthsAgoTotal,
+          period_label: previousMonthKey,
+          comparison_month: twoMonthsAgoKey
+        };
+      }, { currentTotal: 0, previousTotal: 0, period_label: currentMonth, comparison_month: previousMonthKey });
+
+      const loadCompanyVouchers = () => runMetric('company-vouchers', async () => {
+        const shifts = await executeQuery(
+          `SELECT id, date, shift_number, data, fuel_data, oil_data
+           FROM shifts
+           WHERE is_saved = 1
+           ORDER BY date ASC, shift_number ASC, id ASC`,
+          []
+        ).catch((error) => {
+          console.warn('Unable to read shifts for home company voucher stats:', error.message);
+          return [];
+        });
+        return buildCompanyVouchersSummaryFromShifts(shifts).months;
+      }, []);
+
+      const loadCustomerInvoices = () => runMetric('customer-invoices', async () => {
+        const buildCustomerInvoiceDataForRange = async (range, periodLabel) => {
+          const startDate = range.startDate;
+          const endDate = range.endDate;
+        if (!startDate || !endDate || startDate > endDate) {
+          return { invoicesByCustomer: {}, period_label: periodLabel, period_start: startDate, period_end: endDate, has_period_activity: false };
+        }
+
+        const [shifts, customerRows, balanceRows] = await Promise.all([
+          executeQuery(
+            `SELECT id, date, shift_number, data, fuel_data, oil_data
+             FROM shifts
+             WHERE is_saved = 1 AND date <= $1
+             ORDER BY date ASC, shift_number ASC, id ASC`,
+            [endDate]
+          ).catch((error) => {
+            console.warn('Unable to read shifts for home customer invoice stats:', error.message);
+            return [];
+          }),
+          executeQuery('SELECT id, name FROM customers ORDER BY name ASC', []).catch((error) => {
+            console.warn('Unable to read customers for home invoice stats:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT id, customer_id, customer_name, effective_date, balance, updated_at
+             FROM customer_balance_adjustments
+             WHERE effective_date <= $1
+             ORDER BY effective_date ASC, updated_at ASC, id ASC`,
+            [startDate]
+          ).catch((error) => {
+            console.warn('Unable to read customer balances for home invoice stats:', error.message);
+            return [];
+          })
+        ]);
+
+        const fuelDefinitions = [
+          { field: 'diesel', name: 'سولار' },
+          { field: '80', name: 'بنزين ٨٠' },
+          { field: '92', name: 'بنزين ٩٢' },
+          { field: '95', name: 'بنزين ٩٥' }
+        ];
+        const voucherCustomerName = 'بونات الشركة';
+        const customersById = new Map();
+        const customersByName = new Map();
+        const invoicesByCustomer = {};
+        const ledgerByCustomer = {};
+        const latestAdjustmentByCustomer = {};
+        let hasPeriodActivity = false;
+
+        customerRows.forEach((customer) => {
+          const id = getPositiveInteger(customer?.id);
+          const name = normalizeCustomerName(customer?.name);
+          if (!id || !name) return;
+          const normalizedCustomer = { id, name };
+          customersById.set(id, normalizedCustomer);
+          if (!customersByName.has(name)) customersByName.set(name, normalizedCustomer);
+        });
+
+        const getInvoiceKey = (customer) => String(customer.id);
+        const ensureInvoice = (customer) => {
+          const key = getInvoiceKey(customer);
+          if (!invoicesByCustomer[key]) {
+            invoicesByCustomer[key] = {
+              customer_id: customer.id,
+              customer: customer.name,
+              previous_balance: 0,
+              purchases_total: 0,
+              payments_total: 0,
+              current_balance: 0
+            };
+          }
+          if (!ledgerByCustomer[key]) {
+            ledgerByCustomer[key] = { purchaseEvents: [], paymentEvents: [] };
+          }
+          return invoicesByCustomer[key];
+        };
+        const resolveCustomer = (item = {}, fallbackName = '') => {
+          const id = getPositiveInteger(item.customer_id);
+          if (id && customersById.has(id)) return customersById.get(id);
+          const name = normalizeCustomerName(item.customer_name || item.name || fallbackName);
+          if (name && customersByName.has(name)) return customersByName.get(name);
+          return null;
+        };
+        const isCurrentWeekDate = (date) => date >= startDate && date <= endDate;
+        const toVoucherBoolean = (value) => {
+          if (value === true || value === 1) return true;
+          if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+          }
+          return false;
+        };
+
+        customersById.forEach(ensureInvoice);
+        balanceRows.forEach((row) => {
+          const customer = resolveCustomer(row);
+          const effectiveDate = normalizeIsoDate(row?.effective_date);
+          if (!customer || !effectiveDate) return;
+          ensureInvoice(customer);
+          latestAdjustmentByCustomer[getInvoiceKey(customer)] = {
+            effective_date: effectiveDate,
+            balance: toNumber(row?.balance)
+          };
+        });
+
+        shifts.forEach((shift) => {
+          const date = normalizeIsoDate(shift?.date);
+          if (!date) return;
+          const legacyData = parseStoredObject(shift?.data, {});
+          const fuelData = parseStoredObject(shift?.fuel_data || legacyData.fuel_data, {});
+          const oilData = parseStoredObject(shift?.oil_data || legacyData.oil_data, {});
+          const shiftCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+          const customerPayments = normalizeCustomerPayments(legacyData.customer_payments);
+
+          shiftCustomerRows.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const voucherType = normalizeCompanyVoucherType(row);
+            if (voucherType && voucherType !== 'company') return;
+            const customer = (voucherType === 'company' || toVoucherBoolean(row.voucher))
+              ? customersByName.get(voucherCustomerName)
+              : resolveCustomer(row);
+            if (!customer) return;
+            const invoice = ensureInvoice(customer);
+            const ledger = ledgerByCustomer[getInvoiceKey(customer)];
+
+            fuelDefinitions.forEach((fuel) => {
+              const quantity = toNumber(row[fuel.field]);
+              if (quantity <= 0) return;
+              const fuelEntry = findShiftDataEntryByName(fuelData, fuel.name);
+              const price = fuelEntry ? Math.max(toNumber(fuelEntry.price), 0) : 0;
+              const total = quantity * price;
+              ledger.purchaseEvents.push({ date, total });
+              if (isCurrentWeekDate(date)) {
+                invoice.purchases_total += total;
+                hasPeriodActivity = true;
+              }
+            });
+          });
+
+          Object.entries(oilData).forEach(([oilKey, data]) => {
+            if (!data || typeof data !== 'object') return;
+            const quantity = toNumber(data.customers);
+            if (quantity <= 0) return;
+            const customer = toVoucherBoolean(data.voucher)
+              ? customersByName.get(voucherCustomerName)
+              : resolveCustomer(data);
+            if (!customer || !getShiftProductDisplayName(oilKey, data)) return;
+            const invoice = ensureInvoice(customer);
+            const ledger = ledgerByCustomer[getInvoiceKey(customer)];
+            const total = quantity * Math.max(toNumber(data.price), 0);
+            ledger.purchaseEvents.push({ date, total });
+            if (isCurrentWeekDate(date)) {
+              invoice.purchases_total += total;
+              hasPeriodActivity = true;
+            }
+          });
+
+          customerPayments.forEach((payment) => {
+            const customer = resolveCustomer(payment);
+            const amount = toNumber(payment.amount);
+            if (!customer || amount <= 0) return;
+            const invoice = ensureInvoice(customer);
+            const ledger = ledgerByCustomer[getInvoiceKey(customer)];
+            ledger.paymentEvents.push({ date, amount });
+            if (isCurrentWeekDate(date)) {
+              invoice.payments_total += amount;
+              hasPeriodActivity = true;
+            }
+          });
+        });
+
+        Object.values(invoicesByCustomer).forEach((invoice) => {
+          const key = String(invoice.customer_id);
+          const adjustment = latestAdjustmentByCustomer[key] || null;
+          const ledger = ledgerByCustomer[key] || { purchaseEvents: [], paymentEvents: [] };
+          const baselineDate = adjustment?.effective_date || '';
+          const previousPurchases = ledger.purchaseEvents.reduce((sum, event) => {
+            if (event.date >= startDate) return sum;
+            if (baselineDate && event.date < baselineDate) return sum;
+            return sum + toNumber(event.total);
+          }, 0);
+          const previousPayments = ledger.paymentEvents.reduce((sum, event) => {
+            if (event.date >= startDate) return sum;
+            if (baselineDate && event.date < baselineDate) return sum;
+            return sum + toNumber(event.amount);
+          }, 0);
+          invoice.previous_balance = toNumber(adjustment?.balance) + previousPurchases - previousPayments;
+          invoice.purchases_total = toNumber(invoice.purchases_total);
+          invoice.payments_total = toNumber(invoice.payments_total);
+          invoice.current_balance = invoice.previous_balance + invoice.purchases_total - invoice.payments_total;
+        });
+
+          return {
+            invoicesByCustomer,
+            period_label: periodLabel,
+            period_start: startDate,
+            period_end: endDate,
+            has_period_activity: hasPeriodActivity
+          };
+        };
+
+        const currentWeekData = await buildCustomerInvoiceDataForRange(weekRange, 'الأسبوع الحالي');
+        if (currentWeekData.has_period_activity) {
+          return currentWeekData;
+        }
+
+        const previousWeekRange = getPreviousWeekRange(weekRange);
+        if (!previousWeekRange.startDate || !previousWeekRange.endDate) {
+          return currentWeekData;
+        }
+        return buildCustomerInvoiceDataForRange(previousWeekRange, 'الأسبوع السابق');
+      }, { invoicesByCustomer: {} });
+
+      const [
+        salesSummary,
+        salesReconciliation,
+        safeBook,
+        profitRows,
+        expenses,
+        companyVoucherMonths,
+        customerInvoices
+      ] = await Promise.all([
+        loadSalesSummary(),
+        loadSalesReconciliation(),
+        loadSafeBook(),
+        loadProfitRows(),
+        loadExpenses(),
+        loadCompanyVouchers(),
+        loadCustomerInvoices()
+      ]);
+
+      return {
+        generated_at: new Date().toISOString(),
+        current_month: currentMonth,
+        current_week: weekRange,
+        stats: buildHomeAccountingStats({
+          currentMonth,
+          salesSummary,
+          salesReconciliation,
+          safeBookView: safeBook.view,
+          safeBookMonthMovements: safeBook.movements,
+          profitRows,
+          expenses,
+          companyVoucherMonths,
+          customerInvoices
+        })
+      };
+    });
+  });
+
+  ipcMain.handle('get-home-layout-settings', async () => {
+    try {
+      const rows = await executeQuery(
+        'SELECT layout_data FROM home_layout_settings WHERE key = $1 LIMIT 1',
+        [HOME_LAYOUT_SETTING_KEY]
+      );
+      const storedLayout = rows[0]?.layout_data
+        ? parseStoredObject(rows[0].layout_data, null)
+        : null;
+      const savedLayout = storedLayout?.version === HOME_LAYOUT_SCHEMA_VERSION && Array.isArray(storedLayout.layout)
+        ? storedLayout.layout
+        : getDefaultHomeLayout();
+      return {
+        layout: normalizeHomeLayout(savedLayout)
+      };
+    } catch (error) {
+      console.error('Error loading home layout settings:', error);
+      return {
+        layout: getDefaultHomeLayout()
+      };
+    }
+  });
+
+  ipcMain.handle('save-home-layout-settings', async (_event, payload = {}) => {
+    try {
+      const layout = serializeHomeLayout(payload?.layout || [], {
+        priorityItemId: String(payload?.priorityItemId || '').trim()
+      });
+      const layoutData = {
+        version: HOME_LAYOUT_SCHEMA_VERSION,
+        layout
+      };
+      await executeInsert(`
+        INSERT INTO home_layout_settings (key, layout_data, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (key)
+        DO UPDATE SET
+          layout_data = EXCLUDED.layout_data,
+          updated_at = CURRENT_TIMESTAMP
+      `, [HOME_LAYOUT_SETTING_KEY, JSON.stringify(layoutData)]);
+      return { layout };
+    } catch (error) {
+      console.error('Error saving home layout settings:', error);
+      throw error;
+    }
   });
 
   ipcMain.handle('get-shift-fuel-sales', async () => {
@@ -4368,6 +5219,92 @@ ipcMain.handle('get-sales-summary', async () => {
     });
   });
 
+  ipcMain.handle('get-sales-reconciliation-view', async (_event, payload = {}) => {
+    const monthKey = normalizeMonthKey(payload?.month);
+    if (!monthKey) {
+      return {
+        month: '',
+        previous_month: '',
+        start_date: '',
+        end_date: '',
+        tolerance: 0.01,
+        fuel_rows: [],
+        oil_rows: [],
+        totals: { total: 0, ok: 0, mismatch: 0, missing: 0 }
+      };
+    }
+
+    const currentRange = monthToRange(monthKey);
+    const previousRange = monthToRange(previousMonth(monthKey));
+    if (!currentRange || !previousRange) {
+      return {
+        month: '',
+        previous_month: '',
+        start_date: '',
+        end_date: '',
+        tolerance: 0.01,
+        fuel_rows: [],
+        oil_rows: [],
+        totals: { total: 0, ok: 0, mismatch: 0, missing: 0 }
+      };
+    }
+
+    const cacheKey = `sales-reconciliation:${monthKey}`;
+    return viewCache.getOrSet(cacheKey, async () => {
+      try {
+        const [fuelProducts, oilProducts, shiftRows, manualSales] = await Promise.all([
+          executeQuery(
+            "SELECT product_name AS fuel_type, product_code, product_type FROM products WHERE product_type = 'fuel' ORDER BY product_name ASC"
+          ).catch((error) => {
+            console.warn('Unable to read fuel products for sales reconciliation:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT product_name AS oil_type, product_code, product_type
+             FROM products
+             WHERE product_type = 'oil'
+             ORDER BY CASE WHEN COALESCE(display_order, 0) = 0 THEN 1 ELSE 0 END ASC,
+                      COALESCE(display_order, 0) ASC,
+                      product_name ASC`
+          ).catch((error) => {
+            console.warn('Unable to read oil products for sales reconciliation:', error.message);
+            return [];
+          }),
+          executeQuery(
+            `SELECT id, date, shift_number, fuel_data, oil_data, data
+             FROM shifts
+             WHERE date BETWEEN $1 AND $2 AND is_saved = 1
+             ORDER BY date ASC, shift_number ASC, id ASC`,
+            [previousRange.startDate, currentRange.endDate]
+          ).catch((error) => {
+            console.warn('Unable to read shifts for sales reconciliation:', error.message);
+            return [];
+          }),
+          dbManager?.isOnline
+            ? executeQuery(
+              'SELECT date, fuel_type, quantity, total_amount FROM sales WHERE date BETWEEN $1 AND $2 ORDER BY date ASC, id ASC',
+              [currentRange.startDate, currentRange.endDate]
+            ).catch((error) => {
+              console.warn('Unable to read manual sales for sales reconciliation:', error.message);
+              return [];
+            })
+            : Promise.resolve([])
+        ]);
+
+        return buildSalesReconciliationView({
+          month: monthKey,
+          fuelProducts,
+          oilProducts,
+          shifts: normalizeShiftRowsForAccounting(shiftRows),
+          manualSales
+        });
+      } catch (error) {
+        console.error('Error getting sales reconciliation view:', error);
+        throw error;
+      }
+    });
+  });
+
   ipcMain.handle('get-accounting-default-month', async () => {
     try {
       const finalizedMonths = await getFinalizedAccountingMonths();
@@ -4397,9 +5334,41 @@ ipcMain.handle('get-sales-summary', async () => {
       if (!monthKey) {
         throw new Error('صيغة الشهر غير صحيحة');
       }
-      return await readMonthlyAccountingDocument(monthKey);
+      return await readMonthlyAccountingDocument(monthKey, {
+        includeInactiveDefaults: payload?.include_inactive_defaults === true
+      });
     } catch (error) {
       console.error('Error getting monthly accounting document:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-accounting-label-defaults', async () => {
+    try {
+      return await getAccountingLabelDefaults();
+    } catch (error) {
+      console.error('Error getting accounting label defaults:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('upsert-accounting-label-defaults', async (_event, payload = {}) => {
+    try {
+      return await upsertAccountingLabelDefaults(payload?.defaults || payload);
+    } catch (error) {
+      console.error('Error saving accounting label defaults:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('save-accounting-page-settings', async (_event, payload = {}) => {
+    try {
+      const defaults = await upsertAccountingLabelDefaults(payload?.defaults || payload);
+      return {
+        label_defaults: defaults
+      };
+    } catch (error) {
+      console.error('Error saving accounting page settings:', error);
       throw error;
     }
   });
@@ -4420,9 +5389,11 @@ ipcMain.handle('get-sales-summary', async () => {
       }
 
       const previous = await getPreviousAccountingIncreaseValue(monthKey);
+      const labelDefaults = await getAccountingLabelDefaults();
       const documentData = buildAccountingDocumentData(payload?.data || payload, {
         month_key: monthKey,
-        previousIncrease: previous.accounting_increase
+        previousIncrease: previous.accounting_increase,
+        labelDefaults
       });
       const query = `
         INSERT INTO monthly_accounting_documents (
@@ -4450,9 +5421,11 @@ ipcMain.handle('get-sales-summary', async () => {
       }
 
       const previous = await getPreviousAccountingIncreaseValue(monthKey);
+      const labelDefaults = await getAccountingLabelDefaults();
       const documentData = buildAccountingDocumentData(payload?.data || payload, {
         month_key: monthKey,
-        previousIncrease: previous.accounting_increase
+        previousIncrease: previous.accounting_increase,
+        labelDefaults
       });
       const query = `
         INSERT INTO monthly_accounting_documents (
@@ -5354,7 +6327,7 @@ ipcMain.handle('get-sales-summary', async () => {
         `SELECT id, product_code, product_name
          FROM products
          WHERE product_type = 'fuel'
-           AND (($1::text IS NOT NULL AND product_code = $1) OR product_name = $2)
+           AND (($1 IS NOT NULL AND product_code = $1) OR product_name = $2)
          ORDER BY CASE WHEN product_code = $1 THEN 0 ELSE 1 END, id ASC
          LIMIT 1`,
         [rawProductCode || null, rawFuelType]
@@ -6277,6 +7250,8 @@ ipcMain.handle('get-sales-summary', async () => {
       const monthlyProfitCustomRows = await executeQuery('SELECT * FROM monthly_profit_custom_rows ORDER BY row_type ASC, display_order ASC');
       const monthlyProfitCustomValues = await executeQuery('SELECT * FROM monthly_profit_custom_values ORDER BY month_key DESC');
       const monthlyAccountingDocuments = await executeQuery('SELECT * FROM monthly_accounting_documents ORDER BY month_key DESC');
+      const accountingLabelDefaults = await executeQuery('SELECT * FROM accounting_label_defaults ORDER BY row_key ASC');
+      const homeLayoutSettings = await executeQuery('SELECT * FROM home_layout_settings ORDER BY key ASC');
       const appUsers = await executeQuery('SELECT * FROM app_users ORDER BY id ASC');
       const landData = {};
       for (const tableName of LAND_TABLES) {
@@ -6306,6 +7281,8 @@ ipcMain.handle('get-sales-summary', async () => {
         monthlyProfitCustomRows,
         monthlyProfitCustomValues,
         monthlyAccountingDocuments,
+        accountingLabelDefaults,
+        homeLayoutSettings,
         appUsers,
         landData,
         generalSettings
@@ -6652,6 +7629,34 @@ ipcMain.handle('get-sales-summary', async () => {
             entry.updated_at || null,
             entry.finalized_at || null
           ], 'monthly_accounting_documents');
+        }
+      }
+
+      if (backupData.accountingLabelDefaults) {
+        await upsertAccountingLabelDefaults(Object.fromEntries(
+          backupData.accountingLabelDefaults.map((entry) => [
+            String(entry.row_key || '').trim(),
+            {
+              label: String(entry.label || '').trim(),
+              is_default: entry.is_default !== 0 && entry.is_default !== false
+            }
+          ])
+        ));
+      }
+
+      if (backupData.homeLayoutSettings) {
+        for (const entry of backupData.homeLayoutSettings) {
+          const key = String(entry.key || '').trim();
+          if (!key) continue;
+          const layout = serializeHomeLayout(parseStoredObject(entry.layout_data, []));
+          await executeInsert(`
+            INSERT INTO home_layout_settings (key, layout_data, updated_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (key)
+            DO UPDATE SET
+              layout_data = EXCLUDED.layout_data,
+              updated_at = CURRENT_TIMESTAMP
+          `, [key, JSON.stringify(layout)]);
         }
       }
 
@@ -7258,10 +8263,6 @@ function ensureCompanyVoucherMonth(summaryByMonth, month) {
       difference_total: 0,
       direct_total: 0,
       company_total: 0,
-      company_paid: 0,
-      company_remaining: 0,
-      paid_at: '',
-      notes: '',
       items: []
     };
   }
@@ -7295,18 +8296,82 @@ function addCompanyVoucherSummaryLine(summaryByMonth, { date, shiftNumber, sourc
   });
 }
 
-async function getCompanyVoucherSettlementRows() {
-  try {
-    return await executeQuery(
-      'SELECT voucher_month, paid_amount, paid_at, notes FROM company_voucher_settlements ORDER BY voucher_month ASC',
-      []
-    );
-  } catch (error) {
-    if (/company_voucher_settlements/i.test(error.message || '')) {
-      return [];
-    }
-    throw error;
-  }
+function buildCompanyVouchersSummaryFromShifts(shifts = []) {
+  const summaryByMonth = {};
+  const fuelDefinitions = [
+    { field: 'diesel', name: 'سولار', order: 0 },
+    { field: '80', name: 'بنزين ٨٠', order: 1 },
+    { field: '92', name: 'بنزين ٩٢', order: 2 },
+    { field: '95', name: 'بنزين ٩٥', order: 3 }
+  ];
+
+  (Array.isArray(shifts) ? shifts : []).forEach((shift) => {
+    const date = normalizeIsoDate(shift?.date);
+    const shiftNumber = parseInt(shift?.shift_number, 10) || 0;
+    if (!date) return;
+
+    const legacyData = parseStoredObject(shift?.data, {});
+    const fuelData = parseStoredObject(shift?.fuel_data || legacyData.fuel_data, {});
+    const oilData = parseStoredObject(shift?.oil_data || legacyData.oil_data, {});
+    const shiftCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
+
+    shiftCustomerRows.forEach((row) => {
+      if (!row || typeof row !== 'object') return;
+      const voucherType = normalizeCompanyVoucherType(row);
+      if (!voucherType) return;
+
+      fuelDefinitions.forEach((fuel) => {
+        const quantity = toFiniteNumber(row[fuel.field]);
+        if (quantity <= 0) return;
+        const fuelEntry = findShiftDataEntryByName(fuelData, fuel.name);
+        const price = fuelEntry ? toFiniteNumber(fuelEntry.price) : 0;
+        const total = quantity * price;
+        addCompanyVoucherSummaryLine(summaryByMonth, {
+          date,
+          shiftNumber,
+          source: 'fuel',
+          voucherType,
+          label: fuel.name,
+          quantity,
+          price,
+          total
+        });
+      });
+    });
+
+    Object.entries(oilData).forEach(([oilKey, data]) => {
+      if (!data || typeof data !== 'object') return;
+      const voucherType = normalizeCompanyVoucherType(data);
+      if (voucherType !== 'company') return;
+      const quantity = toFiniteNumber(data.customers);
+      if (quantity <= 0) return;
+      const price = toFiniteNumber(data.price);
+      const total = quantity * price;
+      addCompanyVoucherSummaryLine(summaryByMonth, {
+        date,
+        shiftNumber,
+        source: 'oil',
+        voucherType,
+        label: getShiftProductDisplayName(oilKey, data),
+        quantity,
+        price,
+        total
+      });
+    });
+  });
+
+  const months = Object.values(summaryByMonth)
+    .map((summary) => ({
+      ...summary,
+      items: summary.items.sort((a, b) => (
+        String(a.date).localeCompare(String(b.date))
+        || (a.shift_number || 0) - (b.shift_number || 0)
+        || String(a.label || '').localeCompare(String(b.label || ''))
+      ))
+    }))
+    .sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
+  return { months };
 }
 
 ipcMain.handle('get-company-vouchers-summary', async () => {
@@ -7318,137 +8383,9 @@ ipcMain.handle('get-company-vouchers-summary', async () => {
        ORDER BY date ASC, shift_number ASC, id ASC`,
       []
     );
-    const settlements = await getCompanyVoucherSettlementRows();
-    const settlementsByMonth = new Map(
-      settlements.map((row) => [String(row.voucher_month || ''), row])
-    );
-    const summaryByMonth = {};
-    const fuelDefinitions = [
-      { field: 'diesel', name: 'سولار', order: 0 },
-      { field: '80', name: 'بنزين ٨٠', order: 1 },
-      { field: '92', name: 'بنزين ٩٢', order: 2 },
-      { field: '95', name: 'بنزين ٩٥', order: 3 }
-    ];
-
-    shifts.forEach((shift) => {
-      const date = normalizeIsoDate(shift?.date);
-      const shiftNumber = parseInt(shift?.shift_number, 10) || 0;
-      if (!date) return;
-
-      const legacyData = parseStoredObject(shift?.data, {});
-      const fuelData = parseStoredObject(shift?.fuel_data || legacyData.fuel_data, {});
-      const oilData = parseStoredObject(shift?.oil_data || legacyData.oil_data, {});
-      const shiftCustomerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
-
-      shiftCustomerRows.forEach((row) => {
-        if (!row || typeof row !== 'object') return;
-        const voucherType = normalizeCompanyVoucherType(row);
-        if (!voucherType) return;
-
-        fuelDefinitions.forEach((fuel) => {
-          const quantity = toFiniteNumber(row[fuel.field]);
-          if (quantity <= 0) return;
-          const fuelEntry = findShiftDataEntryByName(fuelData, fuel.name);
-          const price = fuelEntry ? toFiniteNumber(fuelEntry.price) : 0;
-          const total = quantity * price;
-          addCompanyVoucherSummaryLine(summaryByMonth, {
-            date,
-            shiftNumber,
-            source: 'fuel',
-            voucherType,
-            label: fuel.name,
-            quantity,
-            price,
-            total
-          });
-        });
-      });
-
-      Object.entries(oilData).forEach(([oilKey, data]) => {
-        if (!data || typeof data !== 'object') return;
-        const voucherType = normalizeCompanyVoucherType(data);
-        if (voucherType !== 'company') return;
-        const quantity = toFiniteNumber(data.customers);
-        if (quantity <= 0) return;
-        const price = toFiniteNumber(data.price);
-        const total = quantity * price;
-        addCompanyVoucherSummaryLine(summaryByMonth, {
-          date,
-          shiftNumber,
-          source: 'oil',
-          voucherType,
-          label: getShiftProductDisplayName(oilKey, data),
-          quantity,
-          price,
-          total
-        });
-      });
-    });
-
-    settlementsByMonth.forEach((settlement, month) => {
-      ensureCompanyVoucherMonth(summaryByMonth, month);
-    });
-
-    const months = Object.values(summaryByMonth)
-      .map((summary) => {
-        const settlement = settlementsByMonth.get(summary.month) || {};
-        const paidAmount = toFiniteNumber(settlement.paid_amount);
-        return {
-          ...summary,
-          company_paid: paidAmount,
-          company_remaining: summary.company_total - paidAmount,
-          paid_at: String(settlement.paid_at || ''),
-          notes: String(settlement.notes || ''),
-          items: summary.items.sort((a, b) => (
-            String(a.date).localeCompare(String(b.date))
-            || (a.shift_number || 0) - (b.shift_number || 0)
-            || String(a.label || '').localeCompare(String(b.label || ''))
-          ))
-        };
-      })
-      .sort((a, b) => String(b.month).localeCompare(String(a.month)));
-
-    return { months };
+    return buildCompanyVouchersSummaryFromShifts(shifts);
   } catch (error) {
     console.error('Error building company vouchers summary:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('save-company-voucher-settlement', async (_event, payload = {}) => {
-  try {
-    const voucherMonth = String(payload.voucher_month || '').trim();
-    if (!/^\d{4}-\d{2}$/.test(voucherMonth)) {
-      throw new Error('شهر البونات غير صالح');
-    }
-
-    const paidAmount = toFiniteNumber(payload.paid_amount);
-    const paidAt = normalizeIsoDate(payload.paid_at) || null;
-    const notes = String(payload.notes || '').trim();
-    const existingRows = await executeQuery(
-      'SELECT id FROM company_voucher_settlements WHERE voucher_month = $1 LIMIT 1',
-      [voucherMonth]
-    );
-
-    if (existingRows.length > 0) {
-      await executeUpdate(
-        `UPDATE company_voucher_settlements
-         SET paid_amount = $1, paid_at = $2, notes = $3, updated_at = CURRENT_TIMESTAMP
-         WHERE voucher_month = $4`,
-        [paidAmount, paidAt, notes, voucherMonth]
-      );
-    } else {
-      await executeInsert(
-        `INSERT INTO company_voucher_settlements (voucher_month, paid_amount, paid_at, notes)
-         VALUES ($1, $2, $3, $4)`,
-        [voucherMonth, paidAmount, paidAt, notes],
-        'company_voucher_settlements'
-      );
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.error('Error saving company voucher settlement:', error);
     throw error;
   }
 });
@@ -7952,6 +8889,22 @@ function buildShiftCorrectionDiff(beforeSnapshot, afterSnapshot) {
   };
 }
 
+async function cleanupShiftDrafts({ keepDate = '', keepShiftNumber = null } = {}) {
+  const normalizedKeepDate = normalizeIsoDate(keepDate);
+  const normalizedKeepShiftNumber = parseInt(keepShiftNumber, 10);
+
+  if (normalizedKeepDate && Number.isFinite(normalizedKeepShiftNumber)) {
+    return executeUpdate(
+      `DELETE FROM shifts
+       WHERE is_saved = 0
+         AND NOT (date = $1 AND shift_number = $2)`,
+      [normalizedKeepDate, normalizedKeepShiftNumber]
+    );
+  }
+
+  return executeUpdate('DELETE FROM shifts WHERE is_saved = 0');
+}
+
 async function buildShiftCascadePlan(correctedShift) {
   const date = normalizeIsoDate(correctedShift?.date);
   const shiftNumber = parseInt(correctedShift?.shift_number, 10);
@@ -8117,6 +9070,12 @@ async function persistShiftRecord(shiftData) {
       safeGrandTotal,
       isSavedShift
     ]);
+
+    if (isSavedShift) {
+      await cleanupShiftDrafts();
+    } else {
+      await cleanupShiftDrafts({ keepDate: date, keepShiftNumber: shift_number });
+    }
 
     if (isSavedShift) {
       await syncShiftOilStockMovements({
@@ -8285,6 +9244,16 @@ ipcMain.handle('delete-shift-draft', async (_event, { date, shift_number }) => {
   }
 });
 
+ipcMain.handle('delete-all-shift-drafts', async () => {
+  try {
+    const deleted = await cleanupShiftDrafts();
+    return { success: true, deleted };
+  } catch (error) {
+    console.error('Error deleting all shift drafts:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-saved-shift', async (_event, { date, shift_number }) => {
   try {
     const query = 'SELECT * FROM shifts WHERE date = $1 AND shift_number = $2 AND is_saved = 1';
@@ -8360,6 +9329,10 @@ ipcMain.handle('get-last-draft-shift', async () => {
     const query = 'SELECT * FROM shifts WHERE is_saved = 0 ORDER BY updated_at DESC, id DESC LIMIT 1';
     const result = await executeQuery(query, []);
     if (result.length > 0) {
+      await cleanupShiftDrafts({
+        keepDate: result[0].date,
+        keepShiftNumber: result[0].shift_number
+      });
       return {
         ...result[0],
         data: typeof result[0].data === 'string' ? JSON.parse(result[0].data) : result[0].data

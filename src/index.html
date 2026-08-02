@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Language" content="ar">
   <meta name="format-detection" content="telephone=no">
   <title>محطة بنزين سمنود - الجمعية التعاونية للبترول</title>
-  <link rel="stylesheet" href="styles.css?v=20260713-user-login-layout">
+  <link rel="stylesheet" href="styles.css?v=20260801-header-user-arrow-black">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <script src="../node_modules/chart.js/dist/chart.umd.min.js"></script>
@@ -19,6 +19,137 @@
 <body class="auth-locked">
   <!-- Toast Notifications Container -->
   <div id="toast-container" class="toast-container"></div>
+
+  <svg class="home-icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="home-icon-shift-entry" viewBox="0 0 24 24">
+      <path d="M20.984 12.535a9 9 0 1 0 -8.468 8.45" />
+      <path d="M16 19h6" />
+      <path d="M19 16v6" />
+      <path d="M12 7v5l3 3" />
+    </symbol>
+    <symbol id="home-icon-invoice" viewBox="0 0 24 24">
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+      <path d="M9 7l1 0" />
+      <path d="M9 13l6 0" />
+      <path d="M13 17l2 0" />
+    </symbol>
+    <symbol id="home-icon-safe-book-entry" viewBox="0 0 24 24">
+      <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+      <path d="M3 8a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -8" />
+      <path d="M18 12h.01" />
+      <path d="M6 12h.01" />
+    </symbol>
+    <symbol id="home-icon-customer-balance" viewBox="0 0 24 24">
+      <path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
+      <path d="M6 21v-2a4 4 0 0 1 4 -4h3" />
+      <path d="M21 15h-2.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3h-2.5" />
+      <path d="M19 21v1m0 -8v1" />
+    </symbol>
+    <symbol id="home-icon-accounting" viewBox="0 0 24 24">
+      <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
+      <path d="M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2" />
+      <path d="M14 11h-2.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3h-2.5" />
+      <path d="M12 17v1m0 -8v1" />
+    </symbol>
+    <symbol id="home-icon-annual-inventory" viewBox="0 0 24 24">
+      <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
+      <path d="M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2" />
+      <path d="M9 17v-4" />
+      <path d="M12 17v-1" />
+      <path d="M15 17v-2" />
+      <path d="M12 17v-1" />
+    </symbol>
+    <symbol id="home-icon-sales-summary" viewBox="0 0 24 24">
+      <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
+      <path d="M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2" />
+      <path d="M9 17v-5" />
+      <path d="M12 17v-1" />
+      <path d="M15 17v-3" />
+    </symbol>
+    <symbol id="home-icon-sales-reconciliation" viewBox="0 0 24 24">
+      <path d="M9.615 20h-2.615a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8" />
+      <path d="M14 19l2 2l4 -4" />
+      <path d="M9 8h4" />
+      <path d="M9 12h2" />
+    </symbol>
+    <symbol id="home-icon-safe-book" viewBox="0 0 24 24">
+      <path d="M17 8v-3a1 1 0 0 0 -1 -1h-10a2 2 0 0 0 0 4h12a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1 -1 1h-12a2 2 0 0 1 -2 -2v-12" />
+      <path d="M20 12v4h-4a2 2 0 0 1 0 -4h4" />
+    </symbol>
+    <symbol id="home-icon-profit" viewBox="0 0 24 24">
+      <path d="M3 17l6 -6l4 4l8 -8" />
+      <path d="M14 7l7 0l0 7" />
+    </symbol>
+    <symbol id="home-icon-expenses" viewBox="0 0 24 24">
+      <path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2m4 -14h6m-6 4h6m-2 4h2" />
+    </symbol>
+    <symbol id="home-icon-company-vouchers" viewBox="0 0 24 24">
+      <path d="M15 5l0 2" />
+      <path d="M15 11l0 2" />
+      <path d="M15 17l0 2" />
+      <path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-3a2 2 0 0 0 0 -4v-3a2 2 0 0 1 2 -2" />
+    </symbol>
+    <symbol id="home-icon-customers" viewBox="0 0 24 24">
+      <path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+      <path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      <path d="M21 21v-2a4 4 0 0 0 -3 -3.85" />
+    </symbol>
+    <symbol id="home-icon-tank-management" viewBox="0 0 24 24">
+      <path d="M6 21v-15.5a2.5 2.5 0 0 1 2.5 -2.5h5a2.5 2.5 0 0 1 2.5 2.5v15.5" />
+      <path d="M5 21h12" />
+      <path d="M9 7h4v4h-4z" />
+      <path d="M9 15h4" />
+      <path d="M16 6.5h1.5l2.5 2.5v7.5a2 2 0 0 1 -4 0v-3.5h2" />
+      <path d="M18 7l2 2" />
+      <path d="M20 9l-2 2" />
+    </symbol>
+    <symbol id="home-icon-shift-history" viewBox="0 0 24 24">
+      <path d="M12 8l0 4l2 2" />
+      <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
+    </symbol>
+    <symbol id="home-icon-depot" viewBox="0 0 24 24">
+      <path d="M7 16.5l-5 -3l5 -3l5 3v5.5l-5 3l0 -5.5" />
+      <path d="M2 13.5v5.5l5 3" />
+      <path d="M7 16.545l5 -3.03" />
+      <path d="M17 16.5l-5 -3l5 -3l5 3v5.5l-5 3l0 -5.5" />
+      <path d="M12 19l5 3" />
+      <path d="M17 16.5l5 -3" />
+      <path d="M12 13.5v-5.5l-5 -3l5 -3l5 3v5.5" />
+      <path d="M7 5.03v5.455" />
+      <path d="M12 8l5 -3" />
+    </symbol>
+    <symbol id="home-icon-products" viewBox="0 0 24 24">
+      <path d="M7.5 7.5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M3 6v5.172a2 2 0 0 0 .586 1.414l7.71 7.71a2.41 2.41 0 0 0 3.408 0l5.592 -5.592a2.41 2.41 0 0 0 0 -3.408l-7.71 -7.71a2 2 0 0 0 -1.414 -.586h-5.172a3 3 0 0 0 -3 3z" />
+    </symbol>
+    <symbol id="home-icon-users" viewBox="0 0 24 24">
+      <path d="M6 21v-2a4 4 0 0 1 4 -4h2" />
+      <path d="M22 16c0 4 -2.5 6 -3.5 6s-3.5 -2 -3.5 -6c1 0 2.5 -.5 3.5 -1.5c1 1 2.5 1.5 3.5 1.5" />
+      <path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
+    </symbol>
+    <symbol id="home-icon-import-sales" viewBox="0 0 24 24">
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M5 13v-8a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2h-5.5" />
+      <path d="M2 19h7" />
+      <path d="M6 16l3 3l-3 3" />
+    </symbol>
+    <symbol id="home-icon-import-expenses" viewBox="0 0 24 24">
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M11.5 21h-4.5a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v5m0 8v-6" />
+      <path d="M16 18h6" />
+      <path d="M19 15l3 3l-3 3" />
+    </symbol>
+    <symbol id="home-icon-backup" viewBox="0 0 24 24">
+      <path d="M4 6c0 1.657 3.582 3 8 3s8 -1.343 8 -3s-3.582 -3 -8 -3s-8 1.343 -8 3" />
+      <path d="M4 6v6c0 1.657 3.582 3 8 3c.856 0 1.681 -.05 2.456 -.142" />
+      <path d="M20 12v-6" />
+      <path d="M4 12v6c0 1.657 3.582 3 8 3c.856 0 1.681 -.05 2.456 -.142" />
+      <path d="M19 16v6" />
+      <path d="M22 19l-3 3l-3 -3" />
+    </symbol>
+  </svg>
 
   <section id="login-screen" class="login-screen">
     <div class="login-panel">
@@ -40,7 +171,9 @@
       </div>
       <div class="app-module-grid">
         <button type="button" class="app-module-card" onclick="selectAppModule('fuel')">
-          <span class="app-module-icon">⛽</span>
+          <span class="app-module-icon app-module-icon-svg">
+            <svg aria-hidden="true" focusable="false"><use href="#home-icon-tank-management"></use></svg>
+          </span>
           <strong>إدارة محطة البنزين</strong>
           <span>الفواتير، الورديات، المخزن، التقارير</span>
         </button>
@@ -58,143 +191,283 @@
     <!-- Header with Breadcrumb -->
     <header class="header">
       <div class="header-top">
-        <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
+        <div class="nav-user-status header-user-status" id="nav-user-status" style="display: none;">
+          <div class="nav-user-avatar" id="nav-user-avatar"></div>
+          <div class="nav-connection-status">
+            <div id="connection-indicator" class="connection-indicator connection-online" title="حالة الاتصال">
+              <svg class="status-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M15.384 6.115a.485.485 0 0 0-.047-.736A12.444 12.444 0 0 0 8 3C5.259 3 2.723 3.882.663 5.379a.485.485 0 0 0-.048.736.518.518 0 0 0 .668.05A11.448 11.448 0 0 1 8 4c2.507 0 4.827.802 6.716 2.164.205.148.49.13.668-.049z"/>
+                <path d="M13.229 8.271a.482.482 0 0 0-.063-.745A9.455 9.455 0 0 0 8 6c-1.905 0-3.68.56-5.166 1.526a.48.48 0 0 0-.063.745.525.525 0 0 0 .652.065A8.46 8.46 0 0 1 8 7a8.46 8.46 0 0 1 4.577 1.336c.206.132.48.108.652-.065zm-2.183 2.183c.226-.226.185-.605-.1-.75A6.473 6.473 0 0 0 8 9c-1.06 0-2.062.254-2.946.704-.285.145-.326.524-.1.75l.015.015c.16.16.407.19.611.09A5.478 5.478 0 0 1 8 10c.868 0 1.69.201 2.42.56.203.1.45.07.61-.091l.016-.015zM9.06 12.44c.196-.196.198-.52-.04-.66A1.99 1.99 0 0 0 8 11.5a1.99 1.99 0 0 0-1.02.28c-.238.14-.236.464-.04.66l.706.706a.5.5 0 0 0 .707 0l.707-.707z"/>
+              </svg>
+              <span id="connection-text" class="connection-text-short">متصل</span>
+            </div>
+
+            <div class="connection-tooltip" id="connection-tooltip">
+              <div id="sync-status" class="sync-status" style="display: none;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                  <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                </svg>
+                <span id="pending-count">0</span> في انتظار المزامنة
+              </div>
+
+              <div id="last-sync" class="last-sync">
+                آخر مزامنة: <span id="last-sync-time">-</span>
+              </div>
+
+              <button id="manual-sync-btn" class="btn-mini" style="display: none;">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                  <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                </svg>
+                مزامنة
+              </button>
+            </div>
+          </div>
+          <button type="button" class="nav-user-menu-btn" onclick="toggleNavUserMenu(event)" title="قائمة المستخدم" aria-label="قائمة المستخدم" aria-expanded="false">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M4.2 6.1a.75.75 0 0 1 1.06 0L8 8.84l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.16a.75.75 0 0 1 0-1.06z"/>
+            </svg>
+          </button>
+          <div class="nav-user-menu" id="nav-user-menu">
+            <button type="button" class="nav-user-menu-item" onclick="openSettingsFromUserMenu()">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c.996 .608 2.296 .07 2.572 -1.065z"/>
+                <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/>
+              </svg>
+              <span>الإعدادات</span>
+            </button>
+            <button type="button" class="nav-user-menu-item" onclick="logoutAppUser()">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2"/>
+                <path d="M9 12h12l-3 -3"/>
+                <path d="M18 15l3 -3"/>
+              </svg>
+              <span>تسجيل الخروج</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="header-brand">
+          <div class="header-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M14 11h1a2 2 0 0 1 2 2v3a1.5 1.5 0 0 0 3 0v-7l-3 -3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 20v-14a2 2 0 0 1 2 -2h6a2 2 0 0 1 2 2v14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 20l12 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18 7v1a1 1 0 0 0 1 1h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 11l10 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="header-brand-text">
+            <h1 class="app-title">محطة بنزين سمنود - الجمعية التعاونية للبترول</h1>
+            <p class="app-subtitle">نظام المحاسبة وإدارة المبيعات</p>
+          </div>
+        </div>
       </div>
 
-      <!-- Breadcrumb Navigation -->
-      <nav class="breadcrumb-nav" id="breadcrumb-nav" style="display: none;">
-        <button class="breadcrumb-back-btn" id="breadcrumb-back-btn" onclick="navigateBack()">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-          </svg>
-          رجوع
-        </button>
-        <div class="breadcrumb-trail" id="breadcrumb-trail"></div>
-      </nav>
     </header>
 
     <!-- Main Content -->
     <main class="main-content">
       <!-- Home Screen -->
       <div id="home-screen" class="screen active">
-        <div class="home-layout">
-          <!-- Left Column: Chart -->
-          <div class="home-chart-column">
-            <div class="home-chart-container">
-              <div class="home-chart-header">
-                <h2 id="home-chart-title">كميات المبيعات الشهرية حسب نوع الوقود</h2>
-                <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
-                  <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="purchases">المشتراة</button>
-                  <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="sales">المباعة</button>
-                </div>
-              </div>
-              <div class="chart-wrapper">
-                <canvas id="monthly-fuel-sales-chart"></canvas>
-              </div>
-            </div>
-            <div class="action-card home-annual-card" onclick="showScreen('annual-inventory', 'home')">
-              <div class="card-icon">📒</div>
-              <h3>جرد سنوي</h3>
-              <p>حساب العجز أو الزيادة في نهاية العام</p>
-            </div>
-            <div class="action-card home-company-vouchers-card" onclick="showScreen('company-vouchers', 'home')">
-              <div class="card-icon">🎟️</div>
-              <h3>بونات الشركة</h3>
-              <p>متابعة البونات الشهرية والتحصيل</p>
-            </div>
+        <div class="home-layout" id="home-layout">
+          <div class="home-edit-toolbar" id="home-edit-toolbar" style="display:none;">
+            <button type="button" class="btn btn-primary btn-compact" id="home-save-layout-btn">حفظ الصفحة الرئيسية</button>
+            <button type="button" class="btn btn-secondary btn-compact" id="home-cancel-layout-btn">إلغاء</button>
           </div>
 
-          <!-- Right Column: Action Cards Groups -->
-          <div class="home-cards-column">
-            <div class="home-card-groups">
-              <section class="home-card-group">
-                <h3 class="home-card-group-title">إدارة المكتب</h3>
-                <div class="action-cards-grid">
-                  <!-- Card 1 - New Invoice -->
-                  <div class="action-card" onclick="showScreen('invoice', 'home')">
-                    <div class="card-icon">📝</div>
-                    <h3>فاتورة جديدة</h3>
-                    <p>إنشاء فاتورة وقود أو زيوت</p>
-                  </div>
+          <section class="home-grid-section" data-home-section="input">
+            <h3 class="home-card-group-title">إدخال البيانات</h3>
+            <div class="home-layout-grid" data-home-grid="input">
+              <div class="home-grid-item action-card" data-home-item="shift-entry" onclick="openNewShiftEntry()">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-shift-entry"></use></svg></div>
+                <h3>إدخال وردية جديدة</h3>
+                <p>تسجيل مبيعات الوردية</p>
+              </div>
 
-                  <!-- Card 2 - Depot Management -->
-                  <div class="action-card" onclick="showDepotScreen()">
-                    <div class="card-icon">📦</div>
-                    <h3>إدارة المخزن</h3>
-                    <p>تتبع مخزون الوقود والزيوت</p>
-                  </div>
+              <div class="home-grid-item action-card" data-home-item="invoice" onclick="showScreen('invoice', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-invoice"></use></svg></div>
+                <h3>فاتورة جديدة</h3>
+                <p>إنشاء فاتورة وقود أو زيوت</p>
+              </div>
 
-                  <!-- Card 2b - Tank Management -->
-                  <div class="action-card" onclick="showScreen('tank-management', 'home')">
-                    <div class="card-icon">⛽</div>
-                    <h3>ادارة التنكات</h3>
-                    <p>متابعة دخول وخروج الوقود من التنكات</p>
-                  </div>
+              <div class="home-grid-item action-card" data-home-item="safe-book-entry" onclick="openSafeBookEntry('movement')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-safe-book-entry"></use></svg></div>
+                <h3>حركة خزينة</h3>
+                <p>إضافة دخول أو خروج من الخزينة</p>
+              </div>
 
-                  <!-- Card 5 - Sales Summary -->
-                  <div class="action-card" onclick="showScreen('sales-summary', 'home')">
-                    <div class="card-icon">📊</div>
-                    <h3>ملخص المبيعات</h3>
-                    <p>مبيعات المنتجات حسب الأشهر</p>
-                  </div>
+              <div class="home-grid-item action-card" data-home-item="customer-balance" onclick="openCustomerBalanceEntry()">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-customer-balance"></use></svg></div>
+                <h3>أرصدة العملاء</h3>
+                <p>تعديل الرصيد السابق للعميل</p>
+              </div>
 
-                  <!-- Card 6 - Safe Book -->
-                  <div class="action-card" onclick="showScreen('safe-book', 'home')">
-                    <div class="card-icon">💰</div>
-                    <h3>دفتر الخزينة</h3>
-                    <p>متابعة حركات الدخول والخروج</p>
-                  </div>
+              <div class="home-grid-item action-card" data-home-item="accounting" onclick="showScreen('accounting', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-accounting"></use></svg></div>
+                <h3>المحاسبة</h3>
+                <p>تجهيز كشف المحاسبة الشهري</p>
+              </div>
 
-                  <!-- Card 8 - Monthly Accounting -->
-                  <div class="action-card" onclick="showScreen('accounting', 'home')">
-                    <div class="card-icon">🧾</div>
-                    <h3>المحاسبة</h3>
-                    <p>تجهيز كشف المحاسبة الشهري</p>
-                  </div>
-
-                  <!-- Card 8b - Profit -->
-                  <div class="action-card" onclick="showScreen('profit', 'home')">
-                    <div class="card-icon">📈</div>
-                    <h3>المكسب</h3>
-                    <p>متابعة أرباح المحطة</p>
-                  </div>
-
-                  <!-- Card 9 - Expenses -->
-                  <div class="action-card" onclick="showScreen('expenses', 'home')">
-                    <div class="card-icon">📉</div>
-                    <h3>المصاريف</h3>
-                    <p>عرض وتتبع المصروفات</p>
-                  </div>
-
-                  <!-- Card 10 - Customer Management -->
-                  <div class="action-card" onclick="openCustomerInvoices()">
-                    <div class="card-icon">👥</div>
-                    <h3>فواتير العملاء</h3>
-                    <p>عرض فواتير العملاء الأسبوعية</p>
-                  </div>
-
-                </div>
-              </section>
-
-              <section class="home-card-group">
-                <h3 class="home-card-group-title">إدارة المبيعات</h3>
-                <div class="action-cards-grid">
-                  <!-- Card 3 - Shift Entry -->
-                  <div class="action-card" onclick="openNewShiftEntry()">
-                    <div class="card-icon">🔄</div>
-                    <h3>إدخال وردية جديدة</h3>
-                    <p>تسجيل مبيعات الوردية</p>
-                  </div>
-
-                  <!-- Card 4 - Shift History -->
-                  <div class="action-card" onclick="showShiftHistory()">
-                    <div class="card-icon">📋</div>
-                    <h3>سجل الورديات</h3>
-                    <p>عرض سجل الورديات المسجلة</p>
-                  </div>
-                </div>
-              </section>
+              <div class="home-grid-item action-card" data-home-item="annual-inventory" onclick="showScreen('annual-inventory', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-annual-inventory"></use></svg></div>
+                <h3>جرد سنوي</h3>
+                <p>حساب العجز أو الزيادة في نهاية العام</p>
+              </div>
             </div>
+          </section>
+
+          <section class="home-grid-section" data-home-section="accounting">
+            <h3 class="home-card-group-title">المحاسبة والتقارير</h3>
+            <div class="home-layout-grid" data-home-grid="accounting">
+              <div class="home-grid-item home-chart-container" data-home-item="chart" data-home-locked-size="1">
+                <div class="home-chart-header">
+                  <h2 id="home-chart-title">كميات المبيعات الشهرية حسب نوع الوقود</h2>
+                  <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
+                    <button type="button" class="home-chart-toggle-btn" data-home-chart-mode="purchases">المشتراة</button>
+                    <button type="button" class="home-chart-toggle-btn active" data-home-chart-mode="sales">المباعة</button>
+                  </div>
+                </div>
+                <div class="chart-wrapper">
+                  <canvas id="monthly-fuel-sales-chart"></canvas>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="sales-summary" onclick="showScreen('sales-summary', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-sales-summary"></use></svg></div>
+                <h3>ملخص المبيعات</h3>
+                <div class="home-stat-body" data-home-stat-card="sales-summary">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="sales-reconciliation" onclick="showScreen('sales-reconciliation', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-sales-reconciliation"></use></svg></div>
+                <h3>مراجعة المبيعات</h3>
+                <div class="home-stat-body" data-home-stat-card="sales-reconciliation">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="safe-book" onclick="showScreen('safe-book', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-safe-book"></use></svg></div>
+                <h3>دفتر الخزينة</h3>
+                <div class="home-stat-body" data-home-stat-card="safe-book">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="profit" onclick="showScreen('profit', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-profit"></use></svg></div>
+                <h3>المكسب</h3>
+                <div class="home-stat-body" data-home-stat-card="profit">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="expenses" onclick="showScreen('expenses', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-expenses"></use></svg></div>
+                <h3>المصاريف</h3>
+                <div class="home-stat-body" data-home-stat-card="expenses">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="company-vouchers" onclick="showScreen('company-vouchers', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-company-vouchers"></use></svg></div>
+                <h3>بونات الشركة</h3>
+                <div class="home-stat-body" data-home-stat-card="company-vouchers">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card home-stat-card" data-home-item="customer-invoices" onclick="openCustomerInvoices()">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-customers"></use></svg></div>
+                <h3>فواتير العملاء</h3>
+                <div class="home-stat-body" data-home-stat-card="customer-invoices">
+                  <strong class="home-stat-value">-</strong>
+                  <span class="home-stat-meta">جاري التحميل...</span>
+                  <div class="home-stat-rows"></div>
+                </div>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="tank-management" onclick="showScreen('tank-management', 'home')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-tank-management"></use></svg></div>
+                <h3>ادارة التنكات</h3>
+                <p>متابعة دخول وخروج الوقود من التنكات</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="shift-history" onclick="showShiftHistory()">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-shift-history"></use></svg></div>
+                <h3>سجل الورديات</h3>
+                <p>عرض سجل الورديات المسجلة</p>
+              </div>
+
+            </div>
+          </section>
+
+          <section class="home-grid-section" data-home-section="admin">
+            <h3 class="home-card-group-title">الإدارة والإعدادات</h3>
+            <div class="home-layout-grid" data-home-grid="admin">
+              <div class="home-grid-item action-card" data-home-item="depot" onclick="showDepotScreen()">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-depot"></use></svg></div>
+                <h3>إدارة المخزن</h3>
+                <p>تتبع مخزون الوقود والزيوت</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="manage-products" onclick="openSettingsSectionFromHome('manage-products')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-products"></use></svg></div>
+                <h3>إدارة المنتجات</h3>
+                <p>تعديل المنتجات والأسعار</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="manage-customers" onclick="openSettingsSectionFromHome('manage-customers')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-customers"></use></svg></div>
+                <h3>إدارة العملاء</h3>
+                <p>إضافة وتعديل بيانات العملاء</p>
+              </div>
+
+              <div class="home-grid-item action-card admin-only" data-home-item="app-users" onclick="openSettingsSectionFromHome('app-users')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-users"></use></svg></div>
+                <h3>إدارة المستخدمين</h3>
+                <p>الصلاحيات وحسابات البرنامج</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="excel-sales-import" onclick="openSettingsSectionFromHome('excel-sales-import')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-import-sales"></use></svg></div>
+                <h3>استيراد المبيعات</h3>
+                <p>استيراد مبيعات Excel</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="excel-expenses-import" onclick="openSettingsSectionFromHome('excel-expenses-import')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-import-expenses"></use></svg></div>
+                <h3>استيراد المصاريف</h3>
+                <p>استيراد مصاريف Excel</p>
+              </div>
+
+              <div class="home-grid-item action-card" data-home-item="backup" onclick="openSettingsSectionFromHome('backup')">
+                <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-backup"></use></svg></div>
+                <h3>النسخ الاحتياطي</h3>
+                <p>تصدير واستيراد نسخة احتياطية</p>
+              </div>
+            </div>
+          </section>
+
+          <div class="home-context-menu" id="home-context-menu" style="display:none;">
+            <button type="button" id="home-context-edit-btn">تعديل الصفحة الرئيسية</button>
           </div>
         </div>
       </div>
@@ -389,7 +662,9 @@
               <h2>بونات الشركة</h2>
               <p class="summary-subtitle">ملخص شهري للبونات المدفوعة مباشرة وبونات الشركة التي تُحصّل لاحقاً</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-compact" onclick="loadCompanyVouchersPage()">تحديث</button>
+            <div class="customer-invoices-toolbar">
+              <button type="button" class="btn btn-secondary btn-compact" onclick="loadCompanyVouchersPage()">تحديث</button>
+            </div>
           </div>
 
           <div class="customer-invoices-summary-grid company-vouchers-summary-grid">
@@ -401,14 +676,6 @@
               <span>بون الشركة</span>
               <strong id="company-vouchers-company-total">٠ ج.م.‏</strong>
             </div>
-            <div class="customer-invoices-total-card">
-              <span>المحصل من الشركة</span>
-              <strong id="company-vouchers-paid-total">٠ ج.م.‏</strong>
-            </div>
-            <div class="customer-invoices-total-card current-balance">
-              <span>المتبقي على الشركة</span>
-              <strong id="company-vouchers-remaining-total">٠ ج.م.‏</strong>
-            </div>
           </div>
 
           <div class="company-vouchers-layout">
@@ -419,7 +686,6 @@
                     <th>الشهر</th>
                     <th>بون جديد + له فرق</th>
                     <th>بون الشركة</th>
-                    <th>المتبقي</th>
                   </tr>
                 </thead>
                 <tbody id="company-vouchers-months-body"></tbody>
@@ -430,12 +696,6 @@
             <div class="company-vouchers-detail-card">
               <div class="company-vouchers-detail-header">
                 <h3 id="company-vouchers-selected-month">-</h3>
-                <div class="company-vouchers-pay-form">
-                  <input type="text" inputmode="decimal" id="company-vouchers-paid-amount" class="summary-numeric-input" placeholder="المبلغ المحصل">
-                  <input type="date" id="company-vouchers-paid-date">
-                  <input type="text" id="company-vouchers-notes" placeholder="ملاحظات">
-                  <button type="button" class="btn btn-primary btn-compact" onclick="saveCompanyVoucherSettlement()">حفظ التحصيل</button>
-                </div>
               </div>
               <div class="customer-invoices-table-wrapper">
                 <table class="base-table customer-invoices-table">
@@ -507,14 +767,48 @@
                 </div>
 
                 <div class="safe-book-actions">
-                  <button type="button" class="btn btn-secondary safe-book-add-btn" onclick="toggleSafeBookForm()">
+                  <button type="button" class="btn btn-secondary safe-book-add-btn" onclick="openSafeBookEntry('movement')">
                     إضافة حركة
                   </button>
-                  <button type="button" class="btn btn-secondary safe-book-audit-btn" onclick="toggleSafeBookAuditForm()">
+                  <button type="button" class="btn btn-secondary safe-book-audit-btn" onclick="openSafeBookEntry('audit')">
                     جرد الخزينة
                   </button>
                 </div>
               </div>
+            </div>
+
+            <div class="safe-book-table-wrapper">
+              <div id="safe-book-sticky-month" class="safe-book-sticky-month" style="display: none;"></div>
+              <table class="base-table safe-book-table">
+                <tbody id="safe-book-body">
+                  <tr>
+                    <td colspan="3" style="text-align:center; color:#777;">لا توجد حركات حالياً</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Safe Book Entry Screen -->
+      <div id="safe-book-entry-screen" class="screen">
+        <div class="safe-book-page">
+          <div class="safe-book-card safe-book-entry-card">
+            <div class="safe-book-header">
+              <div>
+                <h2>إدخال حركة خزينة</h2>
+                <p class="summary-subtitle">تسجيل حركة دخول أو خروج أو فرق جرد الخزينة</p>
+              </div>
+              <div class="safe-book-balance">
+                <span class="safe-book-balance-label">رصيد الخزنة الحالي</span>
+                <strong id="safe-book-entry-balance-value" class="safe-book-balance-value">٠ ج.م.‏</strong>
+              </div>
+            </div>
+
+            <div class="safe-book-entry-tabs">
+              <button type="button" class="btn btn-secondary btn-compact" id="safe-book-entry-movement-tab" onclick="initializeSafeBookEntryPage('movement')">حركة خزينة</button>
+              <button type="button" class="btn btn-secondary btn-compact" id="safe-book-entry-audit-tab" onclick="initializeSafeBookEntryPage('audit')">جرد الخزينة</button>
             </div>
 
             <div id="safe-book-form" class="safe-book-form" style="display: none;">
@@ -541,7 +835,7 @@
               </div>
               <div class="safe-book-form-actions">
                 <button type="button" class="btn btn-primary" onclick="saveSafeBookMovement()">حفظ</button>
-                <button type="button" class="btn btn-secondary" onclick="toggleSafeBookForm(false)">إلغاء</button>
+                <button type="button" class="btn btn-secondary" onclick="showScreen('safe-book', 'home')">إلغاء</button>
               </div>
             </div>
 
@@ -558,19 +852,8 @@
               </div>
               <div class="safe-book-form-actions">
                 <button type="button" class="btn btn-primary" onclick="saveSafeBookAuditMovement()">حفظ الجرد</button>
-                <button type="button" class="btn btn-secondary" onclick="toggleSafeBookAuditForm(false)">إلغاء</button>
+                <button type="button" class="btn btn-secondary" onclick="showScreen('safe-book', 'home')">إلغاء</button>
               </div>
-            </div>
-
-            <div class="safe-book-table-wrapper">
-              <div id="safe-book-sticky-month" class="safe-book-sticky-month" style="display: none;"></div>
-              <table class="base-table safe-book-table">
-                <tbody id="safe-book-body">
-                  <tr>
-                    <td colspan="3" style="text-align:center; color:#777;">لا توجد حركات حالياً</td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -600,9 +883,6 @@
             <div class="form-group compact">
               <label for="customer-invoices-select">العميل:</label>
               <select id="customer-invoices-select" onchange="handleCustomerInvoiceClientChange()"></select>
-            </div>
-            <div class="customer-invoices-balance-edit">
-              <button type="button" class="btn btn-secondary btn-compact" id="customer-invoices-edit-balance-btn" onclick="openCustomerInvoiceBalanceModal()">تعديل الرصيد السابق</button>
             </div>
           </div>
 
@@ -654,6 +934,44 @@
               <tbody id="customer-invoices-payments-body"></tbody>
             </table>
             <div id="customer-invoices-payments-empty" class="empty-state" style="display:none;">لا توجد مدفوعات لهذا العميل في هذا الأسبوع</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Customer Balance Entry Screen -->
+      <div id="customer-balance-screen" class="screen">
+        <div class="customer-invoices-page customer-balance-page">
+          <div class="customer-invoices-header">
+            <div>
+              <h2>أرصدة العملاء</h2>
+              <p class="summary-subtitle">تعديل الرصيد السابق للعميل في بداية الأسبوع المحدد</p>
+            </div>
+            <div class="customer-invoices-toolbar">
+              <button type="button" class="customer-week-nav-btn" id="customer-balance-prev-week-btn" title="الأسبوع السابق" aria-label="الأسبوع السابق" onclick="changeCustomerBalanceWeek(-1)">
+                ‹
+              </button>
+              <div class="customer-invoices-week" id="customer-balance-week-label">-</div>
+              <button type="button" class="customer-invoices-current-week-btn" id="customer-balance-current-week-btn" onclick="goToCurrentCustomerBalanceWeek()">الأسبوع الحالي</button>
+              <button type="button" class="customer-week-nav-btn" id="customer-balance-next-week-btn" title="الأسبوع التالي" aria-label="الأسبوع التالي" onclick="changeCustomerBalanceWeek(1)">
+                ›
+              </button>
+            </div>
+          </div>
+
+          <div class="customer-balance-entry-panel">
+            <div class="form-group compact">
+              <label for="customer-balance-select">العميل:</label>
+              <select id="customer-balance-select" onchange="handleCustomerBalanceClientChange()"></select>
+            </div>
+            <div class="form-group compact">
+              <label for="customer-balance-previous-balance">الرصيد السابق:</label>
+              <input type="text" inputmode="decimal" id="customer-balance-previous-balance" class="summary-numeric-input" oninput="sanitizeSummaryNumericInput(this)">
+            </div>
+            <div class="customer-balance-entry-note" id="customer-balance-entry-note">سيتم تسجيل الفرق كتصحيح في جدول المدفوعات.</div>
+            <div class="safe-book-form-actions">
+              <button type="button" class="btn btn-primary" onclick="saveCustomerBalanceOpeningBalance()">حفظ الرصيد</button>
+              <button type="button" class="btn btn-secondary" onclick="openCustomerInvoices()">عرض فواتير العملاء</button>
+            </div>
           </div>
         </div>
       </div>
@@ -741,11 +1059,30 @@
             <div class="accounting-actions">
               <div class="accounting-month-control" aria-label="اختيار الشهر">
                 <button type="button" class="customer-week-nav-btn accounting-month-btn" id="accounting-prev-month" title="الشهر السابق" aria-label="الشهر السابق">‹</button>
-                <input type="month" id="accounting-month-input" class="form-input">
+                <div class="accounting-month-picker-wrapper">
+                  <button type="button" id="accounting-month-display" class="form-input accounting-month-display" onclick="toggleAccountingMonthPicker(event)" aria-haspopup="true" aria-expanded="false">-</button>
+                  <div id="accounting-month-picker" class="accounting-month-picker">
+                    <div class="accounting-month-picker-year">
+                      <button type="button" id="accounting-picker-prev-year" title="السنة السابقة" aria-label="السنة السابقة">‹</button>
+                      <span id="accounting-picker-year">٢٠٢٦</span>
+                      <button type="button" id="accounting-picker-next-year" title="السنة التالية" aria-label="السنة التالية">›</button>
+                    </div>
+                    <div id="accounting-month-picker-grid" class="accounting-month-picker-grid"></div>
+                  </div>
+                </div>
                 <button type="button" class="customer-week-nav-btn accounting-month-btn" id="accounting-next-month" title="الشهر التالي" aria-label="الشهر التالي">›</button>
               </div>
               <button type="button" class="btn btn-secondary" id="accounting-edit-btn" style="display:none;">تعديل</button>
               <button type="button" class="btn btn-primary" id="accounting-save-btn">حفظ</button>
+              <button type="button" class="btn btn-primary" id="accounting-page-save-btn" style="display:none;">حفظ الصفحة</button>
+              <div class="shift-menu-wrapper accounting-page-menu-wrapper">
+                <button type="button" class="shift-menu-btn" onclick="toggleAccountingMenu(event)" title="خيارات الصفحة" aria-label="خيارات الصفحة">
+                  <span></span><span></span><span></span>
+                </button>
+                <div id="accounting-menu" class="shift-menu accounting-page-menu">
+                  <div class="shift-menu-item" onclick="toggleAccountingPageEditMode()">تعديل الصفحة</div>
+                </div>
+              </div>
               <div id="accounting-save-status" class="accounting-save-status">جاهز</div>
             </div>
           </div>
@@ -1497,51 +1834,6 @@
         </div>
       </div>
 
-      <!-- Charts Screen -->
-      <div id="charts-screen" class="screen">
-        <h2>الرسوم البيانية</h2>
-        <div class="charts-container">
-          <div class="chart-card">
-            <h3>مشتريات الوقود حسب النوع</h3>
-            <canvas id="fuel-sales-chart"></canvas>
-          </div>
-          <div class="chart-card">
-            <h3>المصروفات الشهرية</h3>
-            <canvas id="monthly-revenue-chart"></canvas>
-          </div>
-          <div class="chart-card">
-            <h3>توزيع طرق الدفع</h3>
-            <canvas id="payment-methods-chart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Report Screen -->
-      <div id="report-screen" class="screen">
-        <h2>التقارير</h2>
-        <div class="report-controls">
-          <div class="date-range">
-            <label for="start-date">من تاريخ:</label>
-            <input type="date" id="start-date">
-            <label for="end-date">إلى تاريخ:</label>
-            <input type="date" id="end-date">
-            <button class="btn btn-primary" onclick="generateReport()">إنشاء التقرير</button>
-          </div>
-          <button class="btn btn-secondary" onclick="exportToPDF()">تصدير PDF</button>
-          </div>
-
-        <div id="report-content" class="report-content">
-          <div class="report-summary">
-            <h3>ملخص التقرير</h3>
-            <div id="report-summary-data"></div>
-          </div>
-          <div class="report-details">
-            <h3>تفاصيل المشتريات</h3>
-            <div id="report-details-table"></div>
-          </div>
-        </div>
-      </div>
-
       <!-- Settings Screen -->
       <div id="settings-screen" class="screen">
         <div class="settings-layout">
@@ -1830,7 +2122,6 @@
                       <th>الاسم</th>
                       <th>اسم النظام</th>
                       <th>الإصدار</th>
-                      <th>آخر دخول</th>
                       <th>آخر اتصال</th>
                       <th>النظام</th>
                     </tr>
@@ -2077,7 +2368,7 @@
                 </div>
                 <div class="stat-card ghost-card">
                   <div class="stat-label">اسم المنتج</div>
-                  <div id="breadcrumb-product" class="stat-value muted">-</div>
+                  <div id="depot-selected-product" class="stat-value muted">-</div>
                 </div>
               </div>
 
@@ -2172,6 +2463,91 @@
           </div>
         </div>
         </div>
+
+      <!-- Sales Reconciliation Screen -->
+      <div id="sales-reconciliation-screen" class="screen">
+        <div class="sales-reconciliation-page">
+          <div class="home-summary-header reconciliation-header">
+            <div>
+              <h2>مراجعة المبيعات</h2>
+              <p class="summary-subtitle">مطابقة العدادات والرواكد مع ملخص المبيعات لنفس الشهر</p>
+            </div>
+            <div class="summary-filters">
+              <div class="form-group compact">
+                <label for="sales-reconciliation-month">الشهر:</label>
+                <input type="month" id="sales-reconciliation-month" class="form-control">
+              </div>
+              <button class="btn btn-secondary" id="sales-reconciliation-refresh-btn">تطبيق</button>
+            </div>
+          </div>
+
+          <div class="reconciliation-kpis" id="sales-reconciliation-kpis">
+            <div class="reconciliation-kpi">
+              <span>مطابق</span>
+              <strong id="sales-reconciliation-ok">٠</strong>
+            </div>
+            <div class="reconciliation-kpi mismatch">
+              <span>فروق</span>
+              <strong id="sales-reconciliation-mismatch">٠</strong>
+            </div>
+            <div class="reconciliation-kpi missing">
+              <span>بيانات ناقصة</span>
+              <strong id="sales-reconciliation-missing">٠</strong>
+            </div>
+          </div>
+
+          <div id="sales-reconciliation-empty" class="empty-state reconciliation-empty">اختر الشهر ثم اضغط تطبيق</div>
+
+          <section class="reconciliation-section">
+            <div class="reconciliation-section-header">
+              <h3>وقود</h3>
+              <span id="sales-reconciliation-fuel-note"></span>
+            </div>
+            <div class="summary-table-scroll">
+              <table class="base-table summary-table reconciliation-table">
+                <thead>
+                  <tr>
+                    <th>المنتج</th>
+                    <th>عداد الشهر السابق</th>
+                    <th>عداد نهاية الشهر</th>
+                    <th>المباع من العدادات</th>
+                    <th>عيارات</th>
+                    <th>المتوقع</th>
+                    <th>ملخص المبيعات</th>
+                    <th>الفرق</th>
+                    <th>الحالة</th>
+                  </tr>
+                </thead>
+                <tbody id="sales-reconciliation-fuel-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="reconciliation-section">
+            <div class="reconciliation-section-header">
+              <h3>زيوت</h3>
+              <span id="sales-reconciliation-oil-note"></span>
+            </div>
+            <div class="summary-table-scroll">
+              <table class="base-table summary-table reconciliation-table">
+                <thead>
+                  <tr>
+                    <th>المنتج</th>
+                    <th>رواكد الشهر السابق</th>
+                    <th>وارد الشهر</th>
+                    <th>رواكد نهاية الشهر</th>
+                    <th>المتوقع</th>
+                    <th>ملخص المبيعات</th>
+                    <th>الفرق</th>
+                    <th>الحالة</th>
+                  </tr>
+                </thead>
+                <tbody id="sales-reconciliation-oil-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
 
         <!-- Modal prodotti per mobile -->
       <div id="products-modal" class="modal">
@@ -2615,10 +2991,10 @@
         <div class="modal-body">
           <div class="app-user-form-grid">
             <div class="app-user-avatar-editor">
-              <div id="app-user-avatar-preview" class="app-user-avatar-preview">?</div>
+              <div id="app-user-avatar-preview" class="app-user-avatar-preview"></div>
               <input type="file" id="app-user-avatar-file" accept="image/*" style="display:none;" onchange="handleAppUserAvatarFile(event)">
               <button type="button" class="btn btn-secondary btn-compact" onclick="openAppUserAvatarPicker()">تغيير الصورة</button>
-              <button type="button" class="btn btn-secondary btn-compact" onclick="clearAppUserAvatar()">استخدام الحرف</button>
+              <button type="button" class="btn btn-secondary btn-compact" onclick="clearAppUserAvatar()">إزالة الصورة</button>
             </div>
             <div class="app-user-fields">
               <div class="form-group">
@@ -2653,63 +3029,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Bottom Navigation -->
-    <nav class="bottom-navigation">
-      <!-- Connection Status in Navigation -->
-      <div class="nav-connection-status">
-        <div id="connection-indicator" class="connection-indicator connection-online" title="حالة الاتصال">
-          <svg class="status-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M15.384 6.115a.485.485 0 0 0-.047-.736A12.444 12.444 0 0 0 8 3C5.259 3 2.723 3.882.663 5.379a.485.485 0 0 0-.048.736.518.518 0 0 0 .668.05A11.448 11.448 0 0 1 8 4c2.507 0 4.827.802 6.716 2.164.205.148.49.13.668-.049z"/>
-            <path d="M13.229 8.271a.482.482 0 0 0-.063-.745A9.455 9.455 0 0 0 8 6c-1.905 0-3.68.56-5.166 1.526a.48.48 0 0 0-.063.745.525.525 0 0 0 .652.065A8.46 8.46 0 0 1 8 7a8.46 8.46 0 0 1 4.577 1.336c.206.132.48.108.652-.065zm-2.183 2.183c.226-.226.185-.605-.1-.75A6.473 6.473 0 0 0 8 9c-1.06 0-2.062.254-2.946.704-.285.145-.326.524-.1.75l.015.015c.16.16.407.19.611.09A5.478 5.478 0 0 1 8 10c.868 0 1.69.201 2.42.56.203.1.45.07.61-.091l.016-.015zM9.06 12.44c.196-.196.198-.52-.04-.66A1.99 1.99 0 0 0 8 11.5a1.99 1.99 0 0 0-1.02.28c-.238.14-.236.464-.04.66l.706.706a.5.5 0 0 0 .707 0l.707-.707z"/>
-          </svg>
-          <span id="connection-text" class="connection-text-short">متصل</span>
-        </div>
-
-        <!-- Connection Details Tooltip (appears on hover) -->
-        <div class="connection-tooltip" id="connection-tooltip">
-          <div id="sync-status" class="sync-status" style="display: none;">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
-              <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
-            </svg>
-            <span id="pending-count">0</span> في انتظار المزامنة
-          </div>
-
-          <div id="last-sync" class="last-sync">
-            آخر مزامنة: <span id="last-sync-time">-</span>
-          </div>
-
-          <button id="manual-sync-btn" class="btn-mini" style="display: none;">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
-              <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
-            </svg>
-            مزامنة
-          </button>
-        </div>
-      </div>
-
-      <button class="nav-btn active" data-screen="home">الرئيسية</button>
-      <button class="nav-btn" data-screen="charts">الرسوم البيانية</button>
-      <button class="nav-btn" data-screen="report">التقارير</button>
-      <button class="nav-btn" data-screen="settings">الإعدادات</button>
-      <button class="nav-btn nav-land" data-screen="land-dashboard">الأراضي</button>
-      <button class="nav-btn nav-land" data-screen="land-plots">قطع الأرض</button>
-      <button class="nav-btn nav-land" data-screen="land-tenants">المستأجرون</button>
-      <button class="nav-btn nav-land" data-screen="land-assignments">العقود</button>
-      <button class="nav-btn nav-land" data-screen="land-reports">التقارير</button>
-      <div class="nav-user-status" id="nav-user-status" style="display: none;">
-        <div class="nav-user-avatar" id="nav-user-avatar"></div>
-        <span class="nav-user-name" id="nav-user-name"></span>
-        <button type="button" class="nav-user-logout-btn" onclick="logoutAppUser()" title="تسجيل الخروج" aria-label="تسجيل الخروج">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path fill-rule="evenodd" d="M6 2.5A1.5 1.5 0 0 1 7.5 1h4A1.5 1.5 0 0 1 13 2.5v11A1.5 1.5 0 0 1 11.5 15h-4A1.5 1.5 0 0 1 6 13.5v-2a.5.5 0 0 1 1 0v2a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5v2a.5.5 0 0 1-1 0v-2z"/>
-            <path fill-rule="evenodd" d="M.146 8.354a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L1.707 7.5H9.5a.5.5 0 0 1 0 1H1.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3z"/>
-          </svg>
-        </button>
-      </div>
-    </nav>
   </div>
 
   <!-- Toast Notification Container -->

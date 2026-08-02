@@ -296,20 +296,21 @@ class DatabaseManager {
       app_version TEXT NOT NULL,
       platform TEXT,
       arch TEXT,
-      first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      first_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      last_opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )`);
     await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS system_name TEXT`);
     await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS display_name TEXT`);
     await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS app_version TEXT`);
     await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS platform TEXT`);
     await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS arch TEXT`);
-    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`);
+    await this.pgPool.query(`ALTER TABLE app_devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`);
+    await this.ensureAppDeviceUtcTimestamps();
     try {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)`);
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)`);
@@ -718,7 +719,55 @@ class DatabaseManager {
       console.log('Monthly accounting documents index creation:', err.message);
     }
 
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS accounting_label_defaults (
+      row_key TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      is_default INTEGER DEFAULT 1,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    try {
+      await this.pgPool.query(`ALTER TABLE accounting_label_defaults ADD COLUMN IF NOT EXISTS is_default INTEGER DEFAULT 1`);
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)`);
+    } catch (err) {
+      console.log('Accounting label defaults index creation:', err.message);
+    }
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS home_layout_settings (
+      key TEXT PRIMARY KEY,
+      layout_data TEXT NOT NULL DEFAULT '[]',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     await this.createPostgreSQLLandTables();
+  }
+
+  async ensureAppDeviceUtcTimestamps() {
+    const timestampColumns = ['first_seen_at', 'last_opened_at', 'last_seen_at', 'updated_at'];
+
+    for (const columnName of timestampColumns) {
+      const columnInfo = await this.pgPool.query(
+        `SELECT data_type
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'app_devices'
+           AND column_name = $1`,
+        [columnName]
+      );
+      const dataType = columnInfo.rows[0]?.data_type;
+
+      if (dataType === 'timestamp without time zone') {
+        await this.pgPool.query(`
+          ALTER TABLE app_devices
+          ALTER COLUMN ${columnName} TYPE TIMESTAMPTZ
+          USING ${columnName} AT TIME ZONE 'UTC'
+        `);
+      }
+
+      await this.pgPool.query(`
+        ALTER TABLE app_devices
+        ALTER COLUMN ${columnName} SET DEFAULT CURRENT_TIMESTAMP
+      `);
+    }
   }
 
   async createPostgreSQLLandTables() {
@@ -1147,7 +1196,8 @@ class DatabaseManager {
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'company_voucher_settlements', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
-      'monthly_accounting_documents',
+      'monthly_accounting_documents', 'accounting_label_defaults',
+      'home_layout_settings',
       'app_devices', 'app_users',
       'land_seasons', 'land_plots', 'land_plot_terms', 'land_tenants',
       'land_assignments', 'land_installments', 'land_payments', 'land_receipts', 'land_settings'
