@@ -1,10 +1,11 @@
-const { getEntryName, normalizeDate, parseObject, roundQuantity, toNumber } = require('./common');
+const { getEntryName, normalizeDate, normalizeMonth, parseObject, roundQuantity, toNumber } = require('./common');
 const { getShiftFuelSoldQuantity } = require('./fuel-accounting');
 const { extractAccountingFuelPurchaseRows } = require('./monthly-accounting');
 
 const HOME_CHART_MODES = {
   SALES: 'sales',
-  PURCHASES: 'purchases'
+  PURCHASES: 'purchases',
+  PROFIT: 'profit'
 };
 
 const HOME_CHART_FUEL_TYPES = ['بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'سولار', 'غاز سيارات'];
@@ -59,9 +60,55 @@ function aggregateChartEntries(entries = []) {
   ));
 }
 
-function buildHomeChartData({ mode = HOME_CHART_MODES.SALES, sales = [], shifts = [], fuelMovements = [], monthlyAccountingDocuments = [] } = {}) {
-  const selectedMode = mode === HOME_CHART_MODES.PURCHASES ? HOME_CHART_MODES.PURCHASES : HOME_CHART_MODES.SALES;
+function getLatestAccountingChartMonth(accountingMonths = []) {
+  const months = (Array.isArray(accountingMonths) ? accountingMonths : [])
+    .map((month) => normalizeMonth(month))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return months[months.length - 1] || '';
+}
+
+function filterProfitRowsThroughLatestAccountingMonth(rows = [], accountingMonths = null) {
+  if (!Array.isArray(accountingMonths)) return Array.isArray(rows) ? rows : [];
+  const latestAccountingMonth = getLatestAccountingChartMonth(accountingMonths);
+  if (!latestAccountingMonth) return [];
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const monthKey = normalizeMonth(row?.month_key || String(row?.date || '').slice(0, 7));
+    return monthKey && monthKey <= latestAccountingMonth;
+  });
+}
+
+function aggregateProfitChartEntries(rows = [], accountingMonths = null) {
+  const byMonth = new Map();
+  filterProfitRowsThroughLatestAccountingMonth(rows, accountingMonths).forEach((row) => {
+    const monthKey = normalizeMonth(row?.month_key || String(row?.date || '').slice(0, 7));
+    if (!monthKey) return;
+    byMonth.set(monthKey, (byMonth.get(monthKey) || 0) + toNumber(row?.net_profit));
+  });
+
+  return Array.from(byMonth.entries())
+    .map(([month_key, net_profit]) => ({
+      month_key,
+      net_profit
+    }))
+    .sort((a, b) => a.month_key.localeCompare(b.month_key));
+}
+
+function buildHomeChartData({
+  mode = HOME_CHART_MODES.SALES,
+  sales = [],
+  shifts = [],
+  fuelMovements = [],
+  monthlyAccountingDocuments = [],
+  profitRows = [],
+  accountingMonths = null
+} = {}) {
+  const selectedMode = Object.values(HOME_CHART_MODES).includes(mode) ? mode : HOME_CHART_MODES.SALES;
   const entries = [];
+
+  if (selectedMode === HOME_CHART_MODES.PROFIT) {
+    return { mode: selectedMode, entries: aggregateProfitChartEntries(profitRows, accountingMonths) };
+  }
 
   if (selectedMode === HOME_CHART_MODES.PURCHASES) {
     (Array.isArray(monthlyAccountingDocuments) ? monthlyAccountingDocuments : []).forEach((document) => {
@@ -94,6 +141,8 @@ module.exports = {
   HOME_CHART_FUEL_TYPES,
   HOME_CHART_MODES,
   aggregateChartEntries,
+  aggregateProfitChartEntries,
   buildHomeChartData,
+  filterProfitRowsThroughLatestAccountingMonth,
   normalizeFuelTypeForChart
 };

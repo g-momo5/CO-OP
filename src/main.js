@@ -41,6 +41,7 @@ const {
   shiftMonth,
   splitDraftAndFinal
 } = require('./accounting/monthly-accounting');
+const { calculateMonthlyProfit } = require('./accounting/monthly-profit');
 
 let mainWindow;
 let splashWindow = null;
@@ -1804,6 +1805,81 @@ async function getProductByCodeOrName(productType, productCode, productName) {
   return null;
 }
 
+function normalizeDateOnlyValue(value) {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0];
+  }
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateOnlyMatch) {
+    return dateOnlyMatch[1];
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
+}
+
+function getTodayDateOnly() {
+  return new Date().toISOString().split('T')[0];
+}
+
+async function getCurrentPurchasePriceFromHistory(product, currentDate = getTodayDateOnly()) {
+  const productId = product?.product_id || product?.id || null;
+  const productCode = String(product?.product_code || '').trim();
+  const fuelType = String(product?.fuel_type || product?.product_name || '').trim();
+  const normalizedCurrentDate = normalizeDateOnlyValue(currentDate) || getTodayDateOnly();
+
+  const rows = await executeQuery(
+    `
+      SELECT id, fuel_type, product_code, price, start_date, product_id, created_at
+      FROM purchase_price_history
+      WHERE (
+          product_id = $1
+          OR product_code = NULLIF($2, '')
+          OR (product_id IS NULL AND (product_code IS NULL OR TRIM(product_code) = '') AND fuel_type = $3)
+        )
+        AND start_date <= $4
+      ORDER BY created_at DESC, start_date DESC, id DESC
+      LIMIT 1
+    `,
+    [productId, productCode, fuelType, normalizedCurrentDate]
+  );
+
+  return rows[0] || null;
+}
+
+async function syncCurrentPurchasePriceFromHistory(product, currentDate = getTodayDateOnly()) {
+  const currentPrice = await getCurrentPurchasePriceFromHistory(product, currentDate);
+  if (!currentPrice) {
+    return null;
+  }
+
+  const fuelType = String(product?.fuel_type || product?.product_name || currentPrice.fuel_type || '').trim();
+  const productCode = String(product?.product_code || currentPrice.product_code || '').trim() || null;
+  const productId = product?.product_id || product?.id || currentPrice.product_id || null;
+  const effectiveDate = normalizeDateOnlyValue(currentPrice.start_date);
+
+  if (!fuelType || !effectiveDate) {
+    return null;
+  }
+
+  await executeUpdate(
+    `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
+     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+     ON CONFLICT (fuel_type) DO UPDATE
+     SET product_code = EXCLUDED.product_code,
+         price = EXCLUDED.price,
+         effective_date = EXCLUDED.effective_date,
+         product_id = EXCLUDED.product_id,
+         updated_at = CURRENT_TIMESTAMP`,
+    [fuelType, productCode, currentPrice.price, effectiveDate, productId]
+  );
+
+  return { ...currentPrice, start_date: effectiveDate };
+}
+
 async function migrateShiftProductDataKeys() {
   try {
     const productRows = await executeQuery(
@@ -2126,6 +2202,86 @@ function setupIPCHandlers() {
     }
 
     return Array.from(monthSet).sort((a, b) => a.localeCompare(b));
+  };
+
+  const collectMonthlyProfitRowsForRange = async (fromMonth, toMonth) => {
+    const startMonth = normalizeMonthKey(fromMonth);
+    const endMonth = normalizeMonthKey(toMonth);
+    if (!startMonth || !endMonth || startMonth > endMonth) return [];
+
+    const fromDateRange = monthToRange(startMonth);
+    const toDateRange = monthToRange(endMonth);
+    const startDate = fromDateRange?.startDate;
+    const endDate = toDateRange?.endDate;
+    if (!startDate || !endDate) return [];
+
+    const [
+      manualRows,
+      shiftRows,
+      oilInvoiceRows,
+      customRows,
+      customValueRows,
+      accountingDocumentRows
+    ] = await Promise.all([
+      executeQuery(
+        'SELECT * FROM monthly_profit_inputs WHERE month_key BETWEEN $1 AND $2 ORDER BY month_key ASC',
+        [startMonth, endMonth]
+      ).catch((error) => {
+        console.warn('Unable to read monthly profit manual rows:', error.message);
+        return [];
+      }),
+      executeQuery(
+        'SELECT date, fuel_data, oil_data, data, wash_lube_revenue, total_expenses FROM shifts WHERE date BETWEEN $1 AND $2 AND (is_saved = 1 OR is_saved IS NULL)',
+        [startDate, endDate]
+      ).catch((error) => {
+        console.warn('Unable to read shifts for monthly profit rows:', error.message);
+        return [];
+      }),
+      executeQuery(
+        'SELECT date, invoice_number, total_purchase, immediate_discount, martyrs_tax FROM oil_invoices WHERE date BETWEEN $1 AND $2',
+        [startDate, endDate]
+      ).catch((error) => {
+        console.warn('Unable to read oil invoices for monthly profit rows:', error.message);
+        return [];
+      }),
+      executeQuery(
+        'SELECT row_key, row_label, row_type, display_order FROM monthly_profit_custom_rows ORDER BY row_type ASC, display_order ASC'
+      ).catch((error) => {
+        console.warn('Unable to read monthly profit custom rows:', error.message);
+        return [];
+      }),
+      executeQuery(
+        'SELECT row_key, month_key, amount FROM monthly_profit_custom_values WHERE month_key BETWEEN $1 AND $2',
+        [startMonth, endMonth]
+      ).catch((error) => {
+        console.warn('Unable to read monthly profit custom values:', error.message);
+        return [];
+      }),
+      executeQuery(
+        'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE month_key BETWEEN $1 AND $2 AND is_final = 1 ORDER BY month_key ASC',
+        [startMonth, endMonth]
+      ).catch((error) => {
+        console.warn('Unable to read monthly accounting documents for monthly profit rows:', error.message);
+        return [];
+      })
+    ]);
+
+    const normalizedAccountingDocuments = accountingDocumentRows.map((row) => ({
+      month_key: normalizeMonthKey(row.month_key),
+      final_data: parseStoredObject(row.final_data, {}),
+      is_final: row.is_final
+    }));
+
+    return calculateMonthlyProfit({
+      shifts: normalizeShiftRowsForAccounting(shiftRows),
+      oilInvoices: oilInvoiceRows,
+      monthlyInputs: manualRows,
+      customRows,
+      customValues: customValueRows,
+      monthlyAccountingDocuments: normalizedAccountingDocuments,
+      fromMonth: startMonth,
+      toMonth: endMonth
+    });
   };
 
   const getCurrentMonthKey = () => {
@@ -3354,14 +3510,15 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-purchase-prices', async () => {
     try {
-      return await executeQuery(`
+      const currentDate = getTodayDateOnly();
+      const rows = await executeQuery(`
         SELECT
           pp.id,
           p.id AS product_id,
           p.product_code,
           p.product_name AS fuel_type,
-          pp.price,
-          pp.effective_date,
+          pp.price AS fallback_price,
+          pp.effective_date AS fallback_effective_date,
           pp.updated_at
         FROM products p
         LEFT JOIN purchase_prices pp
@@ -3370,6 +3527,25 @@ function setupIPCHandlers() {
         WHERE p.product_type = 'fuel'
         ORDER BY p.product_name
       `);
+
+      const purchasePrices = [];
+      for (const row of rows) {
+        const currentPrice = await getCurrentPurchasePriceFromHistory(row, currentDate);
+        const fallbackEffectiveDate = normalizeDateOnlyValue(row.fallback_effective_date);
+        const canUseFallback = !fallbackEffectiveDate || fallbackEffectiveDate <= currentDate;
+
+        purchasePrices.push({
+          id: row.id,
+          product_id: row.product_id,
+          product_code: row.product_code,
+          fuel_type: row.fuel_type,
+          price: currentPrice ? currentPrice.price : (canUseFallback ? row.fallback_price : null),
+          effective_date: currentPrice ? currentPrice.start_date : (canUseFallback ? row.fallback_effective_date : null),
+          updated_at: row.updated_at
+        });
+      }
+
+      return purchasePrices;
     } catch (error) {
       console.error('Error getting purchase prices:', error);
       throw error;
@@ -3382,24 +3558,20 @@ function setupIPCHandlers() {
       const productCode = product?.product_code || null;
       const productId = product?.id || null;
       const productName = product?.product_name || fuel_type;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getTodayDateOnly();
       await executeInsert(
         `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
          VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
         [productName, productCode, price, today, productId],
         'purchase_price_history'
       );
-      return await executeUpdate(
-        `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-         ON CONFLICT (fuel_type) DO UPDATE
-         SET product_code = EXCLUDED.product_code,
-             price = EXCLUDED.price,
-             effective_date = EXCLUDED.effective_date,
-             product_id = EXCLUDED.product_id,
-             updated_at = CURRENT_TIMESTAMP`,
-        [productName, productCode, price, today, productId]
-      );
+      await syncCurrentPurchasePriceFromHistory({
+        id: productId,
+        product_code: productCode,
+        product_name: productName
+      }, today);
+
+      return { success: true };
     } catch (error) {
       console.error('Error updating purchase price:', error);
       throw error;
@@ -3676,7 +3848,6 @@ function setupIPCHandlers() {
         }
 
         if (normalizedPrice === '') {
-          skipped.push({ product_name, reason: 'empty_price' });
           continue;
         }
 
@@ -3767,7 +3938,6 @@ function setupIPCHandlers() {
         }
 
         if (normalizedPrice === '') {
-          skipped.push({ product_name, reason: 'empty_price' });
           continue;
         }
 
@@ -3785,11 +3955,6 @@ function setupIPCHandlers() {
         const product_id = product.id;
         const product_code = product.product_code || product_code_input || null;
         const fuel_type = product.product_name || product_name;
-        const currentRows = await executeQuery(
-          'SELECT effective_date FROM purchase_prices WHERE product_code = $1 OR (product_code IS NULL AND fuel_type = $2) LIMIT 1',
-          [product_code, fuel_type]
-        );
-        const current_effective_date = normalizeDateOnly(currentRows[0]?.effective_date);
 
         await executeInsert(
           `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
@@ -3799,18 +3964,16 @@ function setupIPCHandlers() {
         );
         saved++;
 
-        if (!current_effective_date || start_date >= current_effective_date) {
-          await executeUpdate(
-            `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
-             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-             ON CONFLICT (fuel_type) DO UPDATE
-             SET product_code = EXCLUDED.product_code,
-                 price = EXCLUDED.price,
-                 effective_date = EXCLUDED.effective_date,
-                 product_id = EXCLUDED.product_id,
-                 updated_at = CURRENT_TIMESTAMP`,
-            [fuel_type, product_code, price, start_date, product_id]
-          );
+        const currentPrice = await syncCurrentPurchasePriceFromHistory({
+          id: product_id,
+          product_code,
+          product_name: fuel_type
+        });
+        if (
+          currentPrice
+          && normalizeDateOnly(currentPrice.start_date) === start_date
+          && parseFloat(currentPrice.price) === price
+        ) {
           updatedCurrent++;
         }
       }
@@ -3872,23 +4035,38 @@ function setupIPCHandlers() {
 
       return await executeQuery(
         `
+          WITH requested_date(value) AS (SELECT $1)
           SELECT
             p.id AS product_id,
             p.product_code,
             p.product_name AS fuel_type,
-            (
+            COALESCE((
               SELECT pph.price
               FROM purchase_price_history pph
               WHERE (
                   pph.product_id = p.id
-                  OR pph.product_code = p.product_code
-                  OR (pph.product_id IS NULL AND pph.product_code IS NULL AND pph.fuel_type = p.product_name)
+                  OR pph.product_code = NULLIF(p.product_code, '')
+                  OR (pph.product_id IS NULL AND (pph.product_code IS NULL OR TRIM(pph.product_code) = '') AND pph.fuel_type = p.product_name)
                 )
-                AND pph.start_date <= $1
-              ORDER BY pph.start_date DESC, pph.created_at DESC, pph.id DESC
+                AND SUBSTR(CAST(pph.start_date AS TEXT), 1, 10) <= rd.value
+              ORDER BY pph.created_at DESC, pph.start_date DESC, pph.id DESC
               LIMIT 1
-            ) AS price
+            ), CASE
+              WHEN pp.price IS NOT NULL
+                AND (
+                  pp.effective_date IS NULL
+                  OR TRIM(CAST(pp.effective_date AS TEXT)) = ''
+                  OR SUBSTR(CAST(pp.effective_date AS TEXT), 1, 10) <= rd.value
+                )
+              THEN pp.price
+              ELSE NULL
+            END) AS price
           FROM products p
+          CROSS JOIN requested_date rd
+          LEFT JOIN purchase_prices pp
+            ON pp.product_id = p.id
+            OR pp.product_code = NULLIF(p.product_code, '')
+            OR (pp.product_id IS NULL AND (pp.product_code IS NULL OR TRIM(pp.product_code) = '') AND pp.fuel_type = p.product_name)
           WHERE p.product_type = 'fuel'
           ORDER BY p.product_name
         `,
@@ -4010,11 +4188,37 @@ ipcMain.handle('get-sales-summary', async () => {
   });
 
   ipcMain.handle('get-home-chart-data', async (_event, payload = {}) => {
-    const mode = payload?.mode === HOME_CHART_MODES.PURCHASES ? HOME_CHART_MODES.PURCHASES : HOME_CHART_MODES.SALES;
+    const requestedMode = String(payload?.mode || '').trim();
+    const mode = Object.values(HOME_CHART_MODES).includes(requestedMode) ? requestedMode : HOME_CHART_MODES.SALES;
     const cacheKey = `home-chart:${mode}`;
 
     return viewCache.getOrSet(cacheKey, async () => {
       try {
+        if (mode === HOME_CHART_MODES.PROFIT) {
+          const [availableMonths, accountingMonths] = await Promise.all([
+            collectAvailableProfitMonths(),
+            getFinalizedAccountingMonths().catch((error) => {
+              console.warn('Unable to read finalized accounting months for home profit chart:', error.message);
+              return [];
+            })
+          ]);
+          if (availableMonths.length === 0 || accountingMonths.length === 0) {
+            return buildHomeChartData({ mode, profitRows: [], accountingMonths });
+          }
+
+          const latestAccountingMonth = accountingMonths[accountingMonths.length - 1];
+          const eligibleMonths = availableMonths.filter((monthKey) => monthKey <= latestAccountingMonth);
+          if (eligibleMonths.length === 0) {
+            return buildHomeChartData({ mode, profitRows: [], accountingMonths });
+          }
+
+          const profitRows = await collectMonthlyProfitRowsForRange(
+            eligibleMonths[0],
+            eligibleMonths[eligibleMonths.length - 1]
+          );
+          return buildHomeChartData({ mode, profitRows, accountingMonths });
+        }
+
         if (mode === HOME_CHART_MODES.PURCHASES) {
           const monthlyAccountingDocuments = await executeQuery(
             'SELECT month_key, final_data, is_final FROM monthly_accounting_documents WHERE is_final = 1 ORDER BY month_key ASC'

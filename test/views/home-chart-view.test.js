@@ -67,3 +67,60 @@ test('builds home chart purchases from finalized monthly accounting fuel rows', 
     { date: '2026-07-02', fuel_type: 'سولار', quantity: 50 }
   ]);
 });
+
+test('builds home chart profit from monthly net profit rows', () => {
+  const result = buildHomeChartData({
+    mode: 'profit',
+    profitRows: [
+      { month_key: '2026-07', net_profit: 900 },
+      { month_key: '2026-06', net_profit: 500 },
+      { month_key: '2026-07', net_profit: 100 },
+      { month_key: 'bad', net_profit: 999 }
+    ]
+  });
+
+  assert.equal(result.mode, 'profit');
+  assert.deepEqual(result.entries, [
+    { month_key: '2026-06', net_profit: 500 },
+    { month_key: '2026-07', net_profit: 1000 }
+  ]);
+});
+
+test('home chart profit trims trailing months without finalized accounting', () => {
+  const result = buildHomeChartData({
+    mode: 'profit',
+    accountingMonths: ['2026-06', '2026-07'],
+    profitRows: [
+      { month_key: '2026-06', net_profit: 500 },
+      { month_key: '2026-07', net_profit: 700 },
+      { month_key: '2026-08', net_profit: 900 }
+    ]
+  });
+
+  assert.deepEqual(result.entries, [
+    { month_key: '2026-06', net_profit: 500 },
+    { month_key: '2026-07', net_profit: 700 }
+  ]);
+});
+
+test('home chart profit keeps months without accounting when a later month has accounting', () => {
+  const result = buildHomeChartData({
+    mode: 'profit',
+    accountingMonths: ['2026-06', '2026-09'],
+    profitRows: [
+      { month_key: '2026-06', net_profit: 500 },
+      { month_key: '2026-07', net_profit: 700 },
+      { month_key: '2026-08', net_profit: 800 },
+      { month_key: '2026-09', net_profit: 900 },
+      { month_key: '2026-10', net_profit: 1000 },
+      { month_key: '2026-11', net_profit: 1100 }
+    ]
+  });
+
+  assert.deepEqual(result.entries, [
+    { month_key: '2026-06', net_profit: 500 },
+    { month_key: '2026-07', net_profit: 700 },
+    { month_key: '2026-08', net_profit: 800 },
+    { month_key: '2026-09', net_profit: 900 }
+  ]);
+});

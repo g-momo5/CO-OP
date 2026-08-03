@@ -77,6 +77,26 @@ test('manual previous increase is preserved unless cascade forces recalculation'
   assert.equal(cascadeData.credit_rows.find((row) => row.auto).amount, 321.75);
 });
 
+test('manual previous increase can replace automatic zero and is preserved in draft', () => {
+  const record = splitDraftAndFinal({
+    month_key: '2026-06',
+    is_final: 0,
+    draft_data: {
+      month_key: '2026-06',
+      credit_rows: [{
+        row_key: ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE,
+        label: 'زيادة محاسبة شهر ٢٠٢٦ / ٥',
+        amount: 750
+      }]
+    }
+  }, 0);
+
+  const autoRow = record.active_data.credit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE);
+  assert.equal(autoRow.auto, true);
+  assert.equal(autoRow.amount, 750);
+  assert.equal(record.active_data.totals.credit_total, 750);
+});
+
 test('normalizes multiple accounting fuel purchase rows with different dates and prices', () => {
   const data = buildAccountingDocumentData({
     month_key: '2026-06',
@@ -386,6 +406,25 @@ test('profit extraction excludes system rows by key after label changes', () => 
   assert.deepEqual(rows.map((row) => [row.row_label, row.row_type, row.amount]), [
     ['ضريبة باسم مخصص', 'deduction', 12],
     ['إيراد باسم مخصص', 'revenue', 30]
+  ]);
+});
+
+test('profit extraction excludes manually edited previous increase by stable row key', () => {
+  const rows = extractAccountingProfitRows({
+    month_key: '2026-06',
+    credit_rows: [
+      {
+        row_key: ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE,
+        label: 'زيادة محاسبة شهر ٢٠٢٦ / ٥',
+        amount: 750,
+        auto: true
+      },
+      { row_key: 'custom_revenue', label: 'إيراد إضافي', amount: 30 }
+    ]
+  });
+
+  assert.deepEqual(rows.map((row) => [row.row_label, row.row_type, row.amount]), [
+    ['إيراد إضافي', 'revenue', 30]
   ]);
 });
 

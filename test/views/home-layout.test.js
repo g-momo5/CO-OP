@@ -20,14 +20,20 @@ function overlaps(a, b) {
   );
 }
 
-test('default home layout keeps chart in accounting at 3 columns by 2 rows', () => {
+test('default home layout keeps charts in accounting as separate 3-column cards', () => {
   const layout = getDefaultHomeLayout();
   const chart = layout.find((item) => item.id === 'chart');
+  const profitChart = layout.find((item) => item.id === 'profit-chart');
 
   assert.equal(chart.section, HOME_LAYOUT_SECTIONS.ACCOUNTING);
   assert.equal(chart.col, 3);
   assert.equal(chart.colSpan, 3);
   assert.equal(chart.rowSpan, 2);
+  assert.equal(profitChart.section, HOME_LAYOUT_SECTIONS.ACCOUNTING);
+  assert.equal(profitChart.col, 3);
+  assert.equal(profitChart.row, 3);
+  assert.equal(profitChart.colSpan, 3);
+  assert.equal(profitChart.rowSpan, 2);
 });
 
 test('normalizes home layout dimensions inside the five-column grid', () => {
@@ -64,8 +70,8 @@ test('legacy home layout sections fall back to new default positions', () => {
   assert.equal(depot.col, 1);
   assert.equal(depot.row, 1);
   assert.equal(shiftHistory.section, HOME_LAYOUT_SECTIONS.ACCOUNTING);
-  assert.equal(shiftHistory.col, 4);
-  assert.equal(shiftHistory.row, 3);
+  assert.equal(shiftHistory.col, 2);
+  assert.equal(shiftHistory.row, 4);
 });
 
 test('admin defaults keep sales import next to customer management', () => {

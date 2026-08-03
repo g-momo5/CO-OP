@@ -727,7 +727,7 @@ body.modal-scroll-lock {
   position: relative;
 }
 
-.home-chart-container {
+.home-chart-card {
   background: white;
   padding: 2rem;
   border-radius: 15px;
@@ -735,6 +735,7 @@ body.modal-scroll-lock {
   direction: rtl;
   display: flex;
   flex-direction: column;
+  gap: 0.9rem;
   min-height: 0;
 }
 
@@ -809,6 +810,10 @@ body.modal-scroll-lock {
 }
 
 .home-chart-container[data-home-locked-size="1"] {
+  cursor: default;
+}
+
+.home-profit-chart-container[data-home-locked-size="1"] {
   cursor: default;
 }
 
@@ -2589,6 +2594,59 @@ body.modal-scroll-lock {
   font-size: 1.2rem;
 }
 
+.accounting-increase-modal-content {
+  direction: rtl;
+}
+
+.accounting-increase-modal-summary {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.accounting-increase-modal-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.accounting-increase-modal-summary span {
+  color: #667085;
+  font-weight: 700;
+}
+
+.accounting-increase-modal-summary strong {
+  color: #2c3e50;
+  font-weight: 900;
+}
+
+.accounting-increase-mode-group {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.accounting-increase-mode-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.accounting-increase-mode-group input {
+  width: auto;
+  margin: 0;
+}
+
 .accounting-fuel-section {
   margin-top: 1rem;
   background: #fff;
@@ -2618,7 +2676,7 @@ body.modal-scroll-lock {
 
 .accounting-fuel-table {
   display: grid;
-  grid-template-columns: 150px minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) 42px;
+  grid-template-columns: 150px minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(170px, 1.1fr) minmax(130px, 1fr) 42px;
   gap: 0.32rem;
   align-items: center;
   min-width: 760px;
@@ -2666,6 +2724,13 @@ body.modal-scroll-lock {
 
 .accounting-fuel-select {
   text-align: right;
+}
+
+.accounting-fuel-price {
+  direction: ltr;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Noto Naskh Arabic', Arial, sans-serif;
 }
 
 .accounting-fuel-input:disabled,
@@ -3484,6 +3549,19 @@ body.modal-scroll-lock {
   margin-bottom: 1rem;
 }
 
+.home-profit-chart-header {
+  margin-bottom: 1rem;
+}
+
+.home-profit-chart-header h2 {
+  color: #1f8f3a;
+  font-size: 1.35rem;
+  margin: 0;
+  text-align: right;
+  direction: rtl;
+  line-height: 1.1;
+}
+
 #home-chart-title {
   color: #c4291d;
   font-size: 1.5rem;
@@ -3538,7 +3616,7 @@ body.modal-scroll-lock {
   position: relative;
   height: 100%;
   min-height: 0;
-  flex: 1;
+  flex: 1 1 0;
   direction: rtl; /* Charts need RTL for proper rendering */
 }
 
@@ -4028,6 +4106,16 @@ body.modal-scroll-lock {
 
 .shift-menu-item:hover {
   background: #f8f9fa;
+}
+
+.shift-menu-item.disabled {
+  color: #9aa5b1;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.shift-menu-item.disabled:hover {
+  background: transparent;
 }
 
 .shift-draft-status {
@@ -6643,8 +6731,8 @@ body.modal-scroll-lock {
     grid-row: auto !important;
   }
 
-  .home-chart-container {
-    min-height: 420px;
+  .home-chart-card {
+    min-height: 300px;
   }
 
   .home-layout.home-editing .home-layout-grid {
@@ -6652,7 +6740,7 @@ body.modal-scroll-lock {
   }
 
   .chart-wrapper {
-    min-height: 320px;
+    min-height: 220px;
   }
 
   .safe-book-header {

@@ -321,7 +321,7 @@
           <section class="home-grid-section" data-home-section="accounting">
             <h3 class="home-card-group-title">المحاسبة والتقارير</h3>
             <div class="home-layout-grid" data-home-grid="accounting">
-              <div class="home-grid-item home-chart-container" data-home-item="chart" data-home-locked-size="1">
+              <div class="home-grid-item home-chart-card home-chart-container" data-home-item="chart" data-home-locked-size="1">
                 <div class="home-chart-header">
                   <h2 id="home-chart-title">كميات المبيعات الشهرية حسب نوع الوقود</h2>
                   <div class="home-chart-toggle" role="group" aria-label="تبديل نوع الرسم البياني">
@@ -331,6 +331,15 @@
                 </div>
                 <div class="chart-wrapper">
                   <canvas id="monthly-fuel-sales-chart"></canvas>
+                </div>
+              </div>
+
+              <div class="home-grid-item home-chart-card home-profit-chart-container" data-home-item="profit-chart" data-home-locked-size="1">
+                <div class="home-profit-chart-header">
+                  <h2>صافي المكسب الشهري</h2>
+                </div>
+                <div class="chart-wrapper home-profit-chart-wrapper">
+                  <canvas id="monthly-profit-chart"></canvas>
                 </div>
               </div>
 
@@ -1072,15 +1081,18 @@
                 </div>
                 <button type="button" class="customer-week-nav-btn accounting-month-btn" id="accounting-next-month" title="الشهر التالي" aria-label="الشهر التالي">›</button>
               </div>
-              <button type="button" class="btn btn-secondary" id="accounting-edit-btn" style="display:none;">تعديل</button>
               <button type="button" class="btn btn-primary" id="accounting-save-btn">حفظ</button>
+              <button type="button" class="btn btn-secondary" id="accounting-discard-edit-btn" style="display:none;">تجاهل التعديلات</button>
               <button type="button" class="btn btn-primary" id="accounting-page-save-btn" style="display:none;">حفظ الصفحة</button>
+              <button type="button" class="btn btn-secondary" id="accounting-page-discard-btn" style="display:none;">تجاهل التعديلات</button>
               <div class="shift-menu-wrapper accounting-page-menu-wrapper">
-                <button type="button" class="shift-menu-btn" onclick="toggleAccountingMenu(event)" title="خيارات الصفحة" aria-label="خيارات الصفحة">
+                <button type="button" class="shift-menu-btn" onclick="toggleAccountingMenu(event)" title="خيارات تعديل المحاسبة والبيانات" aria-label="خيارات تعديل المحاسبة والبيانات">
                   <span></span><span></span><span></span>
                 </button>
                 <div id="accounting-menu" class="shift-menu accounting-page-menu">
-                  <div class="shift-menu-item" onclick="toggleAccountingPageEditMode()">تعديل الصفحة</div>
+                  <div class="shift-menu-item" id="accounting-final-edit-menu-item" onclick="enterAccountingFinalEditFromMenu()">تعديل المحاسبة النهائية</div>
+                  <div class="shift-menu-item" id="accounting-page-edit-menu-item" onclick="toggleAccountingPageEditMode()">إدارة البيانات</div>
+                  <div class="shift-menu-item" id="accounting-edit-increase-menu-item" onclick="openAccountingIncreaseModal()">تعديل زيادة محاسبة</div>
                 </div>
               </div>
               <div id="accounting-save-status" class="accounting-save-status">جاهز</div>
@@ -1241,6 +1253,48 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeCustomerInvoiceBalanceModal()">إلغاء</button>
             <button type="button" class="btn btn-primary" onclick="saveCustomerInvoiceOpeningBalance()">حفظ الرصيد</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="accounting-increase-modal" class="modal">
+        <div class="modal-content modal-compact modal-narrow accounting-increase-modal-content" dir="rtl">
+          <div class="modal-header">
+            <h3>تعديل زيادة محاسبة</h3>
+            <button class="close-modal" onclick="closeAccountingIncreaseModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form">
+              <div class="accounting-increase-modal-summary">
+                <div>
+                  <span>الشهر</span>
+                  <strong id="accounting-increase-modal-month">-</strong>
+                </div>
+                <div>
+                  <span>القيمة الحالية</span>
+                  <strong id="accounting-increase-modal-current">٠ ج.م.‏</strong>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="accounting-increase-modal-value">القيمة</label>
+                <input type="text" inputmode="decimal" id="accounting-increase-modal-value" class="summary-numeric-input" placeholder="٠">
+              </div>
+              <div class="accounting-increase-mode-group" role="radiogroup" aria-label="طريقة تعديل زيادة المحاسبة">
+                <label>
+                  <input type="radio" name="accounting-increase-mode" value="replace" checked>
+                  <span>استبدال القيمة</span>
+                </label>
+                <label>
+                  <input type="radio" name="accounting-increase-mode" value="add">
+                  <span>إضافة على القيمة</span>
+                </label>
+              </div>
+              <div id="accounting-increase-modal-error" class="modal-message-error"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeAccountingIncreaseModal()">إلغاء</button>
+            <button type="button" class="btn btn-primary" onclick="saveAccountingIncreaseModal()">حفظ</button>
           </div>
         </div>
       </div>

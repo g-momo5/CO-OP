@@ -47,7 +47,8 @@ let offlineRestricted = {
 };
 const HOME_CHART_MODE = {
   PURCHASES: 'purchases',
-  SALES: 'sales'
+  SALES: 'sales',
+  PROFIT: 'profit'
 };
 const HOME_CHART_FORECAST_DASH = [8, 5];
 const HOME_LAYOUT_EDITING_ENABLED = true;
@@ -180,6 +181,12 @@ function invalidateInvoiceFuelProductsCache() {
   invoiceFuelProductsCache = null;
   invoiceFuelProductsCacheDate = '';
   invoiceFuelProductsLoadingPromise = null;
+}
+
+function invalidateAccountingFuelPriceCache() {
+  if (accountingState?.fuelPriceCache instanceof Map) {
+    accountingState.fuelPriceCache.clear();
+  }
 }
 
 const VIEW_CACHE_TTL_MS = 15_000;
@@ -1033,6 +1040,11 @@ function setupEventListeners() {
     const appUserModal = document.getElementById('app-user-modal');
     if (e.target === appUserModal) {
       closeAppUserModal();
+    }
+
+    const accountingIncreaseModal = document.getElementById('accounting-increase-modal');
+    if (e.target === accountingIncreaseModal) {
+      closeAccountingIncreaseModal();
     }
   });
 
@@ -2889,7 +2901,7 @@ function setupHomeChartToggle() {
 
       currentHomeChartMode = selectedMode;
       updateHomeChartToggleUI();
-      await loadHomeChart();
+      await loadHomeFuelChart();
     });
   });
 
@@ -2932,8 +2944,9 @@ function getCurrentMonthForecastValue(actualQuantity, monthKey, registeredDays, 
 function syncHomeChartHeightToCardRows() {
   const homeScreen = document.getElementById('home-screen');
   if (!homeScreen || !homeScreen.classList.contains('active')) return;
-  const chartContainer = homeScreen.querySelector('.home-chart-container');
-  if (chartContainer) chartContainer.style.removeProperty('height');
+  homeScreen.querySelectorAll('.home-chart-card').forEach((chartCard) => {
+    chartCard.style.removeProperty('height');
+  });
 }
 
 function scheduleHomeChartHeightSync() {
@@ -3239,6 +3252,21 @@ function resizeHomeChartCanvas() {
   if (charts.monthlyFuelSales && typeof charts.monthlyFuelSales.resize === 'function') {
     charts.monthlyFuelSales.resize();
   }
+  if (charts.monthlyProfit && typeof charts.monthlyProfit.resize === 'function') {
+    charts.monthlyProfit.resize();
+  }
+}
+
+function getHomeChartTitle(mode = currentHomeChartMode) {
+  switch (mode) {
+    case HOME_CHART_MODE.PROFIT:
+      return 'صافي المكسب الشهري';
+    case HOME_CHART_MODE.PURCHASES:
+      return 'كميات المشتريات الشهرية حسب نوع الوقود';
+    case HOME_CHART_MODE.SALES:
+    default:
+      return 'كميات المبيعات الشهرية حسب نوع الوقود';
+  }
 }
 
 function stabilizeHomeLayoutAfterLogin() {
@@ -3267,9 +3295,7 @@ function stabilizeHomeLayoutAfterLogin() {
 function updateHomeChartToggleUI() {
   const chartTitle = document.getElementById('home-chart-title');
   if (chartTitle) {
-    chartTitle.textContent = currentHomeChartMode === HOME_CHART_MODE.SALES
-      ? 'كميات المبيعات الشهرية حسب نوع الوقود'
-      : 'كميات المشتريات الشهرية حسب نوع الوقود';
+    chartTitle.textContent = getHomeChartTitle();
   }
 
   document.querySelectorAll('.home-chart-toggle-btn').forEach(button => {
@@ -3793,6 +3819,13 @@ function calculateAnnualInventory() {
 }
 
 async function loadHomeChart() {
+  await Promise.all([
+    loadHomeFuelChart(),
+    loadHomeProfitChart()
+  ]);
+}
+
+async function loadHomeFuelChart() {
   const isSalesMode = currentHomeChartMode === HOME_CHART_MODE.SALES;
 
   try {
@@ -3824,6 +3857,19 @@ async function loadHomeChart() {
       createMonthlyFuelSalesChart([], currentHomeChartMode);
     }
     console.error('Error loading home chart:', error);
+    scheduleHomeChartHeightSync();
+  }
+}
+
+async function loadHomeProfitChart() {
+  try {
+    const result = await invokeCached('get-home-chart-data', { mode: HOME_CHART_MODE.PROFIT });
+    const chartData = Array.isArray(result?.entries) ? result.entries : [];
+    createMonthlyProfitChart(chartData);
+    scheduleHomeChartHeightSync();
+  } catch (error) {
+    console.error('Error loading home profit chart:', error);
+    createMonthlyProfitChart([]);
     scheduleHomeChartHeightSync();
   }
 }
@@ -3988,6 +4034,144 @@ function normalizeFuelTypeForHomeChart(value) {
   if (isFuelName && (hasOctane('80') || normalized === 'بنزين 8')) return 'بنزين ٨٠';
 
   return text;
+}
+
+function formatHomeChartMonthLabel(month) {
+  const normalizedMonth = normalizeMonthKey(month);
+  if (!normalizedMonth) return '';
+  const [year, monthNum] = normalizedMonth.split('-');
+  const monthNames = [
+    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+  ];
+  return `${monthNames[parseInt(monthNum, 10) - 1]} ${year}`;
+}
+
+function createMonthlyProfitChart(entries = []) {
+  const canvas = document.getElementById('monthly-profit-chart');
+  const ctx = canvas?.getContext('2d');
+  const ChartCtor = getChartConstructor();
+  if (!canvas || !ctx || !ChartCtor) {
+    clearChartCanvas('monthly-profit-chart');
+    return;
+  }
+
+  if (charts.monthlyProfit) {
+    charts.monthlyProfit.destroy();
+  }
+
+  const monthlyData = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const month = normalizeMonthKey(entry?.month_key || String(entry?.date || '').slice(0, 7));
+    const netProfit = parseFloat(entry?.net_profit);
+    if (!month || !Number.isFinite(netProfit)) return;
+    monthlyData.set(month, (monthlyData.get(month) || 0) + netProfit);
+  });
+
+  const months = Array.from(monthlyData.keys()).sort();
+  const values = months.map((month) => monthlyData.get(month) || 0);
+  let cumulativeTotal = 0;
+  const cumulativeValues = values.map((value) => {
+    cumulativeTotal += value;
+    return cumulativeTotal;
+  });
+
+  charts.monthlyProfit = new ChartCtor(ctx, {
+    type: 'line',
+    data: {
+      labels: months.map(formatHomeChartMonthLabel),
+      datasets: [
+        {
+          label: 'صافي المكسب',
+          data: values,
+          backgroundColor: 'rgba(46, 125, 50, 0.14)',
+          borderColor: '#2E7D32',
+          borderWidth: 3,
+          pointBackgroundColor: '#2E7D32',
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          tension: 0.28,
+          fill: true
+        },
+        {
+          label: 'المكسب التراكمي',
+          data: cumulativeValues,
+          backgroundColor: 'rgba(21, 101, 192, 0.08)',
+          borderColor: '#1565C0',
+          borderWidth: 3,
+          pointBackgroundColor: '#1565C0',
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          tension: 0.24,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      rtl: true,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: {
+              family: 'Noto Naskh Arabic'
+            }
+          }
+        },
+        title: {
+          display: true,
+          text: getHomeChartTitle(HOME_CHART_MODE.PROFIT),
+          font: {
+            family: 'Noto Naskh Arabic',
+            size: 16
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label}: ${formatArabicCurrency(context.parsed.y || 0)}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          title: {
+            display: true,
+            text: 'المبلغ (ج.م.‏)',
+            font: {
+              family: 'Noto Naskh Arabic'
+            }
+          },
+          ticks: {
+            callback: (value) => formatArabicNumberWhole(value),
+            font: {
+              family: 'Noto Naskh Arabic'
+            }
+          }
+        },
+        x: {
+          title: {
+            display: true,
+            text: 'الشهر',
+            font: {
+              family: 'Noto Naskh Arabic'
+            }
+          },
+          ticks: {
+            font: {
+              family: 'Noto Naskh Arabic'
+            }
+          }
+        }
+      }
+    }
+  });
 }
 
 async function loadFuelPrices() {
@@ -4591,6 +4775,7 @@ async function updatePurchasePrice(fuelType) {
 
   try {
     await ipcRenderer.invoke('update-purchase-price', { fuel_type: fuelType, price });
+    invalidateAccountingFuelPriceCache();
     invalidateViewDataCaches();
     invalidateInvoiceFuelProductsCache();
     showMessage('تم تحديث سعر الشراء بنجاح', 'success');
@@ -4612,9 +4797,7 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
     charts.monthlyFuelSales.destroy();
   }
 
-  const chartTitle = mode === HOME_CHART_MODE.SALES
-    ? 'كميات المبيعات الشهرية حسب نوع الوقود'
-    : 'كميات المشتريات الشهرية حسب نوع الوقود';
+  const chartTitle = getHomeChartTitle(mode);
 
   // Group entries by month and fuel type
   const monthlyData = {};
@@ -4695,14 +4878,7 @@ function createMonthlyFuelSalesChart(entries, mode = HOME_CHART_MODE.PURCHASES) 
   charts.monthlyFuelSales = new ChartCtor(ctx, {
     type: 'line',
     data: {
-      labels: months.map(month => {
-        const [year, monthNum] = month.split('-');
-        const monthNames = [
-          'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-          'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-        ];
-        return `${monthNames[parseInt(monthNum) - 1]} ${year}`;
-      }),
+      labels: months.map(formatHomeChartMonthLabel),
       datasets: datasets
     },
     options: {
@@ -6524,7 +6700,8 @@ async function saveAllPrices() {
     }
 
     if (salePrices.length === 0 && purchasePrices.length === 0) {
-      showMessage('لم يتم إدخال أي أسعار', 'error');
+      showMessage('لم يتم إدخال أسعار جديدة؛ سيتم استخدام السعر السابق للحقول الفارغة', 'info');
+      closePriceEditModal();
       return;
     }
 
@@ -6552,6 +6729,7 @@ async function saveAllPrices() {
     }
 
     if (purchasePrices.length > 0) {
+      invalidateAccountingFuelPriceCache();
       invalidateInvoiceFuelProductsCache();
       await refreshFuelInvoicePurchasePricesForDate();
     }
@@ -9987,6 +10165,7 @@ let profitCustomRowsCache = [];
 let profitCustomValuesMap = new Map();
 let profitLoadRequestId = 0;
 const ACCOUNTING_AUTOSAVE_DELAY_MS = SHIFT_DRAFT_AUTOSAVE_DELAY_MS;
+const ACCOUNTING_PREVIOUS_INCREASE_ROW_KEY = 'credit_previous_increase';
 let accountingState = {
   monthKey: '',
   data: null,
@@ -11320,6 +11499,20 @@ function isAccountingRowFilled(row) {
   return Boolean(String(row?.label || '').trim()) || Math.abs(parseAnnualInventoryValue(row?.amount)) > 0.0001;
 }
 
+function isAccountingPreviousIncreaseRow(row = {}) {
+  return String(row?.row_key || '').trim() === ACCOUNTING_PREVIOUS_INCREASE_ROW_KEY
+    || String(row?.label || '').trim().startsWith('زيادة محاسبة شهر');
+}
+
+function canEditAccountingPreviousIncreaseValue(row = {}, amount = 0) {
+  return isAccountingPreviousIncreaseRow(row)
+    && row.auto === true
+    && !accountingState.isFinal
+    && accountingState.pageEditMode !== true
+    && !accountingState.loading
+    && Math.abs(parseAnnualInventoryValue(amount)) < 0.0001;
+}
+
 function normalizeAccountingRowsForRender(rows = [], options = {}) {
   const addBlankRow = options.addBlankRow === true;
   const renderedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -11371,11 +11564,11 @@ function renderAccountingSide(side, rows) {
 
   tbody.innerHTML = renderedRows.map((row, index) => {
     const rowId = `${side}-${index}`;
+    const numericAmount = parseAnnualInventoryValue(row.amount);
     const labelEditableInPageMode = pageEditActive && row.can_save_default && !row.locked && String(row.label || '').trim();
     const labelReadonly = row.locked || (pageEditActive ? !labelEditableInPageMode : (row.fixed || readOnly)) ? 'readonly' : '';
-    const amountReadonly = pageEditActive || row.auto || readOnly ? 'readonly' : '';
+    const amountReadonly = pageEditActive || readOnly || (row.auto && !canEditAccountingPreviousIncreaseValue(row, numericAmount)) ? 'readonly' : '';
     const disabled = readOnly && !pageEditActive ? 'disabled' : '';
-    const numericAmount = parseAnnualInventoryValue(row.amount);
     const amountValue = row.amount === '' || Math.abs(numericAmount) < 0.0001
       ? ''
       : formatArabicNumberFixed(numericAmount);
@@ -11405,6 +11598,7 @@ function renderAccountingSide(side, rows) {
         data-accounting-fixed="${row.fixed ? '1' : '0'}"
         data-accounting-locked="${row.locked ? '1' : '0'}"
         data-accounting-auto="${row.auto ? '1' : '0'}"
+        data-accounting-previous-increase="${isAccountingPreviousIncreaseRow(row) ? '1' : '0'}"
         data-accounting-can-save-default="${row.can_save_default ? '1' : '0'}"
         data-accounting-default-label="${escapeHtml(defaultLabel)}"
         data-accounting-visible-default="${row.is_visible_default ? '1' : '0'}"
@@ -11568,18 +11762,13 @@ async function getAccountingPurchasePricesByDate(date) {
   const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())
     ? String(date).trim()
     : getAccountingFuelDefaultDate();
-  if (accountingState.fuelPriceCache.has(requestedDate)) {
-    return accountingState.fuelPriceCache.get(requestedDate);
+  try {
+    const rows = await ipcRenderer.invoke('get-purchase-prices-by-date', { date: requestedDate });
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    console.warn('Unable to load accounting fuel prices by date:', error);
+    return [];
   }
-
-  const promise = invokeCached('get-purchase-prices-by-date', { date: requestedDate }, { ttlMs: 30_000 })
-    .then((rows) => Array.isArray(rows) ? rows : [])
-    .catch((error) => {
-      console.warn('Unable to load accounting fuel prices by date:', error);
-      return [];
-    });
-  accountingState.fuelPriceCache.set(requestedDate, promise);
-  return promise;
 }
 
 function getAccountingFuelOptions(selectedCode = '', selectedFuel = '') {
@@ -11648,7 +11837,9 @@ function renderAccountingFuelRows(rows = []) {
 
   container.innerHTML = renderedRows.map((row, index) => {
     const quantity = parseAnnualInventoryValue(row?.quantity);
-    const purchasePrice = parseAnnualInventoryValue(row?.purchase_price);
+    const rawPurchasePrice = row?.purchase_price;
+    const purchasePrice = parseAnnualInventoryValue(rawPurchasePrice);
+    const purchasePriceDisplay = purchasePrice > 0 ? formatAccountingPurchasePrice(rawPurchasePrice) : '';
     const total = getAccountingFuelRowTotal({
       fuel_type: row?.fuel_type,
       quantity,
@@ -11666,7 +11857,7 @@ function renderAccountingFuelRows(rows = []) {
           ${getAccountingFuelOptions(row?.product_code, row?.fuel_type)}
         </select>
         <input type="text" class="accounting-fuel-input accounting-fuel-quantity" inputmode="decimal" placeholder="الكمية" value="${quantity > 0 ? escapeHtml(formatArabicNumberFixed(quantity)) : ''}" ${disabled}>
-        <input type="text" class="accounting-fuel-input accounting-fuel-price" inputmode="decimal" placeholder="سعر الشراء" value="${purchasePrice > 0 ? escapeHtml(formatEditablePricePreserveDecimals(purchasePrice)) : ''}" readonly ${disabled}>
+        <input type="text" class="accounting-fuel-input accounting-fuel-price" inputmode="decimal" placeholder="سعر الشراء" value="${escapeHtml(purchasePriceDisplay)}" title="${escapeHtml(purchasePriceDisplay)}" readonly ${disabled}>
         <input type="text" class="accounting-fuel-input accounting-fuel-total" placeholder="الإجمالي" value="${total > 0 ? escapeHtml(formatArabicNumberFixed(total)) : ''}" readonly disabled>
         ${removeCell}
       </div>
@@ -11750,11 +11941,14 @@ async function prefillAccountingFuelPrice(rowElement, options = {}) {
     || String(item?.fuel_type || '').trim() === fuelType
   ));
   const price = parseFloat(match?.price);
-  if (!Number.isFinite(price) || price <= 0) return;
 
   const priceInput = rowElement.querySelector('.accounting-fuel-price');
   if (priceInput) {
-    priceInput.value = formatEditablePricePreserveDecimals(price);
+    const currentPrice = parseAnnualInventoryValue(priceInput.value);
+    const nextPrice = Number.isFinite(price) && price > 0 ? price : 0;
+    if (Math.abs(currentPrice - nextPrice) <= 0.0001) return;
+
+    priceInput.value = nextPrice > 0 ? formatAccountingPurchasePrice(match?.price) : '';
     calculateAccountingFuelRow(rowElement);
     if (markDirty) markAccountingChanged();
   }
@@ -11765,9 +11959,8 @@ async function prefillAccountingFuelPricesForBaseRows() {
   if (!container) return;
   const rows = Array.from(container.querySelectorAll('.accounting-fuel-row[data-accounting-fuel-base="1"]'));
   for (const row of rows) {
-    const priceInput = row.querySelector('.accounting-fuel-price');
-    if (String(priceInput?.value || '').trim()) continue;
-    await prefillAccountingFuelPrice(row, { markDirty: false });
+    const quantity = parseAnnualInventoryValue(row.querySelector('.accounting-fuel-quantity')?.value);
+    await prefillAccountingFuelPrice(row, { markDirty: quantity > 0 });
   }
 }
 
@@ -11844,22 +12037,62 @@ function renderAccountingDocument(documentRecord) {
 function updateAccountingModeControls() {
   const editBtn = document.getElementById('accounting-edit-btn');
   const saveBtn = document.getElementById('accounting-save-btn');
+  const discardEditBtn = document.getElementById('accounting-discard-edit-btn');
   const pageSaveBtn = document.getElementById('accounting-page-save-btn');
+  const pageDiscardBtn = document.getElementById('accounting-page-discard-btn');
   const monthDisplay = document.getElementById('accounting-month-display');
   const prevBtn = document.getElementById('accounting-prev-month');
   const nextBtn = document.getElementById('accounting-next-month');
+  const finalEditMenuItem = document.getElementById('accounting-final-edit-menu-item');
+  const pageEditMenuItem = document.getElementById('accounting-page-edit-menu-item');
+  const increaseMenuItem = document.getElementById('accounting-edit-increase-menu-item');
   const readOnly = getAccountingReadOnly();
   const pageEditMode = accountingState.pageEditMode === true;
 
-  if (editBtn) editBtn.style.display = accountingState.isFinal && !accountingState.editMode && !pageEditMode ? '' : 'none';
+  if (editBtn) editBtn.style.display = 'none';
   if (saveBtn) saveBtn.style.display = pageEditMode || (accountingState.isFinal && !accountingState.editMode) ? 'none' : '';
+  if (discardEditBtn) {
+    discardEditBtn.style.display = accountingState.isFinal && accountingState.editMode && !pageEditMode ? '' : 'none';
+    discardEditBtn.disabled = accountingState.loading;
+  }
   if (pageSaveBtn) {
     pageSaveBtn.style.display = pageEditMode ? '' : 'none';
     pageSaveBtn.disabled = accountingState.loading;
   }
+  if (pageDiscardBtn) {
+    pageDiscardBtn.style.display = pageEditMode ? '' : 'none';
+    pageDiscardBtn.disabled = accountingState.loading;
+  }
   if (monthDisplay) monthDisplay.disabled = accountingState.loading || pageEditMode;
   if (prevBtn) prevBtn.disabled = accountingState.loading || pageEditMode;
   if (nextBtn) nextBtn.disabled = accountingState.loading || pageEditMode;
+  if (finalEditMenuItem) {
+    const disabled = !accountingState.isFinal || accountingState.editMode || pageEditMode || accountingState.loading;
+    finalEditMenuItem.classList.toggle('disabled', disabled);
+    finalEditMenuItem.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    finalEditMenuItem.setAttribute(
+      'title',
+      !accountingState.isFinal ? 'متاح بعد الحفظ النهائي فقط' : ''
+    );
+  }
+  if (pageEditMenuItem) {
+    const disabled = accountingState.editMode || accountingState.loading;
+    pageEditMenuItem.classList.toggle('disabled', disabled);
+    pageEditMenuItem.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    pageEditMenuItem.setAttribute(
+      'title',
+      accountingState.editMode ? 'أغلق تعديل المحاسبة النهائية أولاً' : ''
+    );
+  }
+  if (increaseMenuItem) {
+    const disabled = accountingState.isFinal || accountingState.loading || pageEditMode || accountingState.editMode;
+    increaseMenuItem.classList.toggle('disabled', disabled);
+    increaseMenuItem.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    increaseMenuItem.setAttribute(
+      'title',
+      accountingState.isFinal ? 'لا يمكن تعديل زيادة المحاسبة بعد الحفظ النهائي' : ''
+    );
+  }
 
   document.querySelectorAll('.accounting-row-label').forEach((input) => {
     input.disabled = accountingState.loading || (readOnly && !pageEditMode);
@@ -12047,7 +12280,38 @@ function enableAccountingFinalEdit() {
   renderAccountingFuelRows(data.fuel_purchase_rows || []);
   calculateAccountingPageTotals();
   updateAccountingModeControls();
-  setAccountingSaveStatus('edit');
+  setAccountingSaveStatus('edit', 'وضع تعديل المحاسبة النهائية');
+}
+
+function enterAccountingFinalEditFromMenu() {
+  closeAccountingMenu();
+  if (accountingState.loading) {
+    showMessage('انتظر حتى ينتهي تحميل المحاسبة', 'warning');
+    return;
+  }
+  if (!accountingState.isFinal) {
+    showMessage('تعديل المحاسبة النهائية متاح بعد الحفظ النهائي فقط', 'warning');
+    return;
+  }
+  if (accountingState.pageEditMode) {
+    showMessage('أغلق إدارة البيانات أولاً', 'warning');
+    return;
+  }
+  enableAccountingFinalEdit();
+}
+
+async function discardAccountingEditChanges() {
+  if (!accountingState.editMode || accountingState.loading) return;
+  accountingState.editMode = false;
+  accountingState.dirty = false;
+  await loadAccountingMonth(accountingState.monthKey);
+}
+
+async function discardAccountingPageChanges() {
+  if (!accountingState.pageEditMode || accountingState.loading) return;
+  accountingState.pageEditMode = false;
+  accountingState.pageSettingsDirty = false;
+  await loadAccountingMonth(accountingState.monthKey);
 }
 
 async function changeAccountingMonth(offset) {
@@ -12062,6 +12326,119 @@ function closeAccountingMenu() {
   if (menu) menu.classList.remove('show');
 }
 
+function getAccountingPreviousIncreaseRowElement() {
+  return document.querySelector('#accounting-credit-body tr[data-accounting-previous-increase="1"]')
+    || document.querySelector(`#accounting-credit-body tr[data-accounting-row-key="${ACCOUNTING_PREVIOUS_INCREASE_ROW_KEY}"]`);
+}
+
+function getAccountingPreviousIncreaseInput() {
+  return getAccountingPreviousIncreaseRowElement()?.querySelector('[data-accounting-field="amount"]') || null;
+}
+
+function setAccountingIncreaseModalError(message = '') {
+  const errorEl = document.getElementById('accounting-increase-modal-error');
+  if (errorEl) errorEl.textContent = message;
+}
+
+function parseAccountingIncreaseModalAmount(value) {
+  const normalized = convertFromArabicNumerals(String(value || ''))
+    .replace(/[٬\s]/g, '')
+    .replace(/[٫،,]/g, '.')
+    .replace(/[^\d.-]/g, '');
+  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalized)) return null;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function closeAccountingIncreaseModal() {
+  const modal = document.getElementById('accounting-increase-modal');
+  if (modal) modal.classList.remove('show');
+  setAccountingIncreaseModalError('');
+}
+
+function openAccountingIncreaseModal() {
+  closeAccountingMenu();
+
+  if (accountingState.isFinal) {
+    showMessage('لا يمكن تعديل زيادة المحاسبة بعد الحفظ النهائي', 'warning');
+    return;
+  }
+
+  if (accountingState.loading) {
+    showMessage('انتظر حتى ينتهي تحميل المحاسبة', 'warning');
+    return;
+  }
+
+  if (accountingState.pageEditMode) {
+    showMessage('أغلق تعديل الصفحة أولاً لتعديل زيادة المحاسبة', 'warning');
+    return;
+  }
+
+  if (accountingState.editMode) {
+    showMessage('أغلق تعديل المحاسبة النهائية أولاً', 'warning');
+    return;
+  }
+
+  const input = getAccountingPreviousIncreaseInput();
+  if (!input) {
+    showMessage('لم يتم العثور على صف زيادة المحاسبة', 'error');
+    return;
+  }
+
+  const modal = document.getElementById('accounting-increase-modal');
+  const valueInput = document.getElementById('accounting-increase-modal-value');
+  const monthEl = document.getElementById('accounting-increase-modal-month');
+  const currentEl = document.getElementById('accounting-increase-modal-current');
+  const replaceMode = document.querySelector('input[name="accounting-increase-mode"][value="replace"]');
+  const currentValue = parseAnnualInventoryValue(input.value);
+
+  if (monthEl) monthEl.textContent = formatAccountingMonthLabel(accountingState.monthKey);
+  if (currentEl) currentEl.textContent = formatArabicCurrency(currentValue);
+  if (valueInput) valueInput.value = '';
+  if (replaceMode) replaceMode.checked = true;
+  setAccountingIncreaseModalError('');
+
+  if (modal) {
+    modal.classList.add('show');
+    setTimeout(() => valueInput?.focus(), 0);
+  }
+}
+
+function saveAccountingIncreaseModal() {
+  if (accountingState.isFinal) {
+    setAccountingIncreaseModalError('لا يمكن تعديل زيادة المحاسبة بعد الحفظ النهائي');
+    return;
+  }
+
+  const valueInput = document.getElementById('accounting-increase-modal-value');
+  const rawValue = String(valueInput?.value || '').trim();
+  if (!rawValue) {
+    setAccountingIncreaseModalError('يرجى إدخال قيمة');
+    return;
+  }
+
+  const amount = parseAccountingIncreaseModalAmount(rawValue);
+  if (amount === null) {
+    setAccountingIncreaseModalError('قيمة غير صحيحة');
+    return;
+  }
+
+  const targetInput = getAccountingPreviousIncreaseInput();
+  if (!targetInput) {
+    setAccountingIncreaseModalError('لم يتم العثور على صف زيادة المحاسبة');
+    return;
+  }
+
+  const currentValue = parseAnnualInventoryValue(targetInput.value);
+  const selectedMode = document.querySelector('input[name="accounting-increase-mode"]:checked')?.value;
+  const nextValue = selectedMode === 'add' ? currentValue + amount : amount;
+
+  targetInput.value = Math.abs(nextValue) < 0.0001 ? '' : formatArabicNumberFixed(nextValue);
+  calculateAccountingPageTotals();
+  markAccountingChanged();
+  closeAccountingIncreaseModal();
+}
+
 function toggleAccountingMenu(event) {
   event?.stopPropagation?.();
   const menu = document.getElementById('accounting-menu');
@@ -12074,6 +12451,14 @@ function toggleAccountingMenu(event) {
 
 async function toggleAccountingPageEditMode() {
   closeAccountingMenu();
+  if (accountingState.loading) {
+    showMessage('انتظر حتى ينتهي تحميل المحاسبة', 'warning');
+    return;
+  }
+  if (accountingState.editMode) {
+    showMessage('أغلق تعديل المحاسبة النهائية أولاً', 'warning');
+    return;
+  }
   const nextMode = !accountingState.pageEditMode;
   if (nextMode) {
     await flushAccountingDraftAutoSave();
@@ -12096,7 +12481,7 @@ async function toggleAccountingPageEditMode() {
       renderAccountingSide('credit', data.credit_rows || []);
       renderAccountingFuelRows(data.fuel_purchase_rows || []);
       calculateAccountingPageTotals();
-      setAccountingSaveStatus('edit', 'وضع تعديل الصفحة');
+      setAccountingSaveStatus('edit', 'وضع إدارة البيانات');
     } catch (error) {
       console.error('Error entering accounting page edit mode:', error);
       showMessage(error?.message || 'تعذر فتح تعديل الصفحة', 'error');
@@ -12292,7 +12677,9 @@ function bindAccountingEvents() {
   const pickerGrid = document.getElementById('accounting-month-picker-grid');
   const editBtn = document.getElementById('accounting-edit-btn');
   const saveBtn = document.getElementById('accounting-save-btn');
+  const discardEditBtn = document.getElementById('accounting-discard-edit-btn');
   const pageSaveBtn = document.getElementById('accounting-page-save-btn');
+  const pageDiscardBtn = document.getElementById('accounting-page-discard-btn');
   const page = document.getElementById('accounting-screen');
 
   if (prevBtn) prevBtn.addEventListener('click', () => changeAccountingMonth(-1));
@@ -12314,7 +12701,9 @@ function bindAccountingEvents() {
   });
   if (editBtn) editBtn.addEventListener('click', enableAccountingFinalEdit);
   if (saveBtn) saveBtn.addEventListener('click', saveAccountingDocument);
+  if (discardEditBtn) discardEditBtn.addEventListener('click', discardAccountingEditChanges);
   if (pageSaveBtn) pageSaveBtn.addEventListener('click', saveAccountingPageSettings);
+  if (pageDiscardBtn) pageDiscardBtn.addEventListener('click', discardAccountingPageChanges);
   if (page) {
     page.addEventListener('input', handleAccountingInput);
     page.addEventListener('change', handleAccountingChange);
@@ -14525,6 +14914,17 @@ function formatEditablePricePreserveDecimals(value) {
   }
 
   return String(num);
+}
+
+function formatAccountingPurchasePrice(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const raw = convertFromArabicNumerals(String(value)).trim().replace(/[٫،,]/g, '.');
+  const match = raw.match(/^-?\d+(?:\.\d+)?/);
+  if (match) {
+    return match[0].replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  }
+  const numericValue = Number(raw);
+  return Number.isFinite(numericValue) ? String(numericValue) : '';
 }
 
 function formatOilCashTotalDisplay(value) {

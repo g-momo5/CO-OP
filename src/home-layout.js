@@ -18,6 +18,7 @@ const HOME_LAYOUT_ITEMS = [
   { id: 'annual-inventory', section: HOME_LAYOUT_SECTIONS.INPUT, col: 2, row: 2, colSpan: 1, rowSpan: 1 },
 
   { id: 'chart', section: HOME_LAYOUT_SECTIONS.ACCOUNTING, col: 3, row: 1, colSpan: 3, rowSpan: 2, lockedSize: true, lockedPosition: true },
+  { id: 'profit-chart', section: HOME_LAYOUT_SECTIONS.ACCOUNTING, col: 3, row: 3, colSpan: 3, rowSpan: 2, lockedSize: true, lockedPosition: true },
   { id: 'sales-summary', section: HOME_LAYOUT_SECTIONS.ACCOUNTING, col: 1, row: 1, colSpan: 1, rowSpan: 1 },
   { id: 'safe-book', section: HOME_LAYOUT_SECTIONS.ACCOUNTING, col: 2, row: 1, colSpan: 1, rowSpan: 1 },
   { id: 'profit', section: HOME_LAYOUT_SECTIONS.ACCOUNTING, col: 1, row: 2, colSpan: 1, rowSpan: 1 },
