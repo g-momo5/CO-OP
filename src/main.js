@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
+const { CustomerService, normalizeCustomerName } = require('./customer-service');
 const { LAND_TABLES, registerLandIpcHandlers } = require('./land-service');
 const {
   buildCascadeUpdates,
@@ -27,7 +28,8 @@ const { buildSalesReconciliationView, previousMonth } = require('./accounting/sa
 const {
   buildHomeAccountingStats,
   getPreviousWeekRange,
-  getSaturdayWeekRange
+  getSaturdayWeekRange,
+  HOME_ACCOUNTING_CARD_KEYS
 } = require('./accounting/home-accounting-stats');
 const { TimedViewCache } = require('./accounting/view-cache');
 const {
@@ -35,12 +37,14 @@ const {
   buildAccountingDocumentData,
   buildAccountingProfitRows,
   calculateAccountingTotals,
+  collectAccountingLabelSuggestions,
   getPreviousMonthKey,
   normalizeAccountingLabelDefaults,
   selectDefaultAccountingMonth,
   shiftMonth,
   splitDraftAndFinal
 } = require('./accounting/monthly-accounting');
+const { calculateOilInvoiceTotals } = require('./accounting/invoice-accounting');
 const { calculateMonthlyProfit } = require('./accounting/monthly-profit');
 
 let mainWindow;
@@ -899,6 +903,12 @@ async function executeInsert(query, params = [], tableName = 'unknown') {
   return result;
 }
 
+const customerService = new CustomerService({
+  query: executeQuery,
+  update: executeUpdate,
+  insert: executeInsert
+});
+
 function getAppSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
@@ -1483,10 +1493,6 @@ async function seedDefaultVoucherCustomers() {
   }
 }
 
-function normalizeCustomerName(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ');
-}
-
 function getPositiveInteger(value) {
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -1718,32 +1724,6 @@ async function migrateStableCustomerIds() {
   } catch (error) {
     console.warn('Unable to migrate stable customer ids:', error.message);
   }
-}
-
-async function isCustomerReferenced(customerId) {
-  const id = getPositiveInteger(customerId);
-  if (!id) return false;
-
-  const balanceRows = await executeQuery(
-    'SELECT id FROM customer_balance_adjustments WHERE customer_id = $1 LIMIT 1',
-    [id]
-  );
-  if (balanceRows.length > 0) return true;
-
-  const shiftRows = await executeQuery('SELECT data, oil_data FROM shifts ORDER BY id ASC');
-  for (const row of shiftRows) {
-    const legacyData = parseStoredObject(row?.data, {});
-    const customerRows = Array.isArray(legacyData.customer_rows) ? legacyData.customer_rows : [];
-    if (customerRows.some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
-
-    const oilData = parseStoredObject(row?.oil_data || legacyData.oil_data, {});
-    if (Object.values(oilData).some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
-
-    const payments = Array.isArray(legacyData.customer_payments) ? legacyData.customer_payments : [];
-    if (payments.some((item) => getPositiveInteger(item?.customer_id) === id)) return true;
-  }
-
-  return false;
 }
 
 function requireOnline(featureName = 'هذه الوظيفة') {
@@ -2360,6 +2340,71 @@ function setupIPCHandlers() {
     return normalized;
   };
 
+  const normalizeAccountingSuggestionSide = (value) => {
+    const side = String(value || '').trim();
+    return side === 'credit' ? 'credit' : side === 'debit' ? 'debit' : '';
+  };
+
+  const getAccountingLabelSuggestions = async (monthKey) => {
+    const normalizedMonth = normalizeMonthKey(monthKey);
+    if (!normalizedMonth) {
+      throw new Error('صيغة الشهر غير صحيحة');
+    }
+
+    const [documentRows, ignoredRows] = await Promise.all([
+      executeQuery(
+        `SELECT month_key, draft_data, final_data, is_final
+         FROM monthly_accounting_documents
+         WHERE month_key < $1
+         ORDER BY month_key ASC`,
+        [normalizedMonth]
+      ).catch((error) => {
+        console.warn('Unable to read accounting label suggestion documents:', error.message);
+        return [];
+      }),
+      executeQuery(
+        `SELECT side, label, ignored_at_month
+         FROM accounting_label_suggestion_ignores
+         ORDER BY updated_at DESC`,
+        []
+      ).catch((error) => {
+        console.warn('Unable to read accounting label suggestion ignores:', error.message);
+        return [];
+      })
+    ]);
+
+    return collectAccountingLabelSuggestions(
+      documentRows.map((row) => ({
+        month_key: row.month_key,
+        draft_data: parseStoredObject(row.draft_data, {}),
+        final_data: parseStoredObject(row.final_data, {}),
+        is_final: row.is_final
+      })),
+      ignoredRows,
+      normalizedMonth
+    );
+  };
+
+  const ignoreAccountingLabelSuggestion = async ({ side, label, month_key }) => {
+    const normalizedSide = normalizeAccountingSuggestionSide(side);
+    const normalizedLabel = String(label || '').replace(/\s+/g, ' ').trim();
+    const monthKey = normalizeMonthKey(month_key);
+    if (!normalizedSide || !normalizedLabel || !monthKey) {
+      throw new Error('بيانات الاقتراح غير صحيحة');
+    }
+
+    await executeInsert(`
+      INSERT INTO accounting_label_suggestion_ignores (side, label, ignored_at_month, created_at, updated_at)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (side, label)
+      DO UPDATE SET
+        ignored_at_month = EXCLUDED.ignored_at_month,
+        updated_at = CURRENT_TIMESTAMP
+    `, [normalizedSide, normalizedLabel, monthKey], 'accounting_label_suggestion_ignores');
+
+    return await getAccountingLabelSuggestions(monthKey);
+  };
+
   const readMonthlyAccountingDocument = async (monthKey, options = {}) => {
     const normalizedMonth = normalizeMonthKey(monthKey);
     if (!normalizedMonth) {
@@ -2661,31 +2706,16 @@ function setupIPCHandlers() {
       if (!groupedOilInvoices.has(groupKey)) {
         groupedOilInvoices.set(groupKey, {
           monthKey,
-          subtotal: 0,
-          immediateDiscount: null,
-          martyrsTax: null
+          rows: []
         });
       }
 
-      const entry = groupedOilInvoices.get(groupKey);
-      entry.subtotal += toNumber(row?.total_purchase);
-      const discountValue = parseFloat(row?.immediate_discount);
-      if (Number.isFinite(discountValue)) {
-        entry.immediateDiscount = entry.immediateDiscount === null
-          ? discountValue
-          : Math.max(entry.immediateDiscount, discountValue);
-      }
-      const taxValue = parseFloat(row?.martyrs_tax);
-      if (Number.isFinite(taxValue)) {
-        entry.martyrsTax = entry.martyrsTax === null
-          ? taxValue
-          : Math.max(entry.martyrsTax, taxValue);
-      }
+      groupedOilInvoices.get(groupKey).rows.push(row);
     });
 
     const oilPurchasesByMonth = new Map();
     groupedOilInvoices.forEach((entry) => {
-      const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
+      const invoiceTotal = calculateOilInvoiceTotals(entry.rows).invoice_total;
       oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
     });
 
@@ -4264,7 +4294,7 @@ ipcMain.handle('get-sales-summary', async () => {
     });
   });
 
-  ipcMain.handle('get-home-accounting-stats', async () => {
+  ipcMain.handle('get-home-accounting-stats', async (_event, payload = {}) => {
     const currentMonth = getCurrentMonthKey();
     const currentRange = monthToRange(currentMonth);
     const previousMonthKey = previousMonth(currentMonth);
@@ -4272,7 +4302,14 @@ ipcMain.handle('get-sales-summary', async () => {
     const previousRange = monthToRange(previousMonthKey);
     const twoMonthsAgoRange = monthToRange(twoMonthsAgoKey);
     const weekRange = getSaturdayWeekRange(new Date());
-    const cacheKey = `home-accounting-stats:${currentMonth}:${weekRange.startDate}:${weekRange.endDate}`;
+    const requestedIds = Array.isArray(payload?.stat_card_ids)
+      ? payload.stat_card_ids
+        .map((id) => String(id || '').trim())
+        .filter((id) => HOME_ACCOUNTING_CARD_KEYS.includes(id))
+      : [];
+    const requestedStats = new Set(requestedIds.length ? requestedIds : HOME_ACCOUNTING_CARD_KEYS);
+    const shouldLoadStat = (id) => requestedStats.has(id);
+    const cacheKey = `home-accounting-stats:${currentMonth}:${weekRange.startDate}:${weekRange.endDate}:${Array.from(requestedStats).sort().join(',')}`;
 
     const runMetric = async (name, task, fallback) => {
       try {
@@ -4644,26 +4681,15 @@ ipcMain.handle('get-sales-summary', async () => {
           if (!groupedOilInvoices.has(groupKey)) {
             groupedOilInvoices.set(groupKey, {
               monthKey,
-              subtotal: 0,
-              immediateDiscount: null,
-              martyrsTax: null
+              rows: []
             });
           }
-          const entry = groupedOilInvoices.get(groupKey);
-          entry.subtotal += toNumber(row?.total_purchase);
-          const discountValue = parseFloat(row?.immediate_discount);
-          if (Number.isFinite(discountValue)) {
-            entry.immediateDiscount = entry.immediateDiscount === null ? discountValue : Math.max(entry.immediateDiscount, discountValue);
-          }
-          const taxValue = parseFloat(row?.martyrs_tax);
-          if (Number.isFinite(taxValue)) {
-            entry.martyrsTax = entry.martyrsTax === null ? taxValue : Math.max(entry.martyrsTax, taxValue);
-          }
+          groupedOilInvoices.get(groupKey).rows.push(row);
         });
 
         const oilPurchasesByMonth = new Map();
         groupedOilInvoices.forEach((entry) => {
-          const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
+          const invoiceTotal = calculateOilInvoiceTotals(entry.rows).invoice_total;
           oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
         });
 
@@ -4984,30 +5010,36 @@ ipcMain.handle('get-sales-summary', async () => {
         companyVoucherMonths,
         customerInvoices
       ] = await Promise.all([
-        loadSalesSummary(),
-        loadSalesReconciliation(),
-        loadSafeBook(),
-        loadProfitRows(),
-        loadExpenses(),
-        loadCompanyVouchers(),
-        loadCustomerInvoices()
+        shouldLoadStat('sales-summary') ? loadSalesSummary() : Promise.resolve(null),
+        shouldLoadStat('sales-reconciliation') ? loadSalesReconciliation() : Promise.resolve(null),
+        shouldLoadStat('safe-book') ? loadSafeBook() : Promise.resolve({ view: null, movements: { items: [], period_label: currentMonth } }),
+        shouldLoadStat('profit') ? loadProfitRows() : Promise.resolve([]),
+        shouldLoadStat('expenses') ? loadExpenses() : Promise.resolve({ currentTotal: 0, previousTotal: 0, period_label: currentMonth, comparison_month: previousMonthKey }),
+        shouldLoadStat('company-vouchers') ? loadCompanyVouchers() : Promise.resolve([]),
+        shouldLoadStat('customer-invoices') ? loadCustomerInvoices() : Promise.resolve({ invoicesByCustomer: {} })
       ]);
+
+      const builtStats = buildHomeAccountingStats({
+        currentMonth,
+        salesSummary,
+        salesReconciliation,
+        safeBookView: safeBook.view,
+        safeBookMonthMovements: safeBook.movements,
+        profitRows,
+        expenses,
+        companyVoucherMonths,
+        customerInvoices
+      });
+      const stats = {};
+      requestedStats.forEach((id) => {
+        if (builtStats[id]) stats[id] = builtStats[id];
+      });
 
       return {
         generated_at: new Date().toISOString(),
         current_month: currentMonth,
         current_week: weekRange,
-        stats: buildHomeAccountingStats({
-          currentMonth,
-          salesSummary,
-          salesReconciliation,
-          safeBookView: safeBook.view,
-          safeBookMonthMovements: safeBook.movements,
-          profitRows,
-          expenses,
-          companyVoucherMonths,
-          customerInvoices
-        })
+        stats
       };
     });
   });
@@ -5577,6 +5609,24 @@ ipcMain.handle('get-sales-summary', async () => {
     }
   });
 
+  ipcMain.handle('get-accounting-label-suggestions', async (_event, payload = {}) => {
+    try {
+      return await getAccountingLabelSuggestions(payload?.month_key);
+    } catch (error) {
+      console.error('Error getting accounting label suggestions:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('ignore-accounting-label-suggestion', async (_event, payload = {}) => {
+    try {
+      return await ignoreAccountingLabelSuggestion(payload);
+    } catch (error) {
+      console.error('Error ignoring accounting label suggestion:', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('save-monthly-accounting-draft', async (_event, payload = {}) => {
     try {
       const monthKey = normalizeMonthKey(payload?.month_key);
@@ -5989,33 +6039,16 @@ ipcMain.handle('get-sales-summary', async () => {
         if (!groupedOilInvoices.has(groupKey)) {
           groupedOilInvoices.set(groupKey, {
             monthKey,
-            subtotal: 0,
-            immediateDiscount: null,
-            martyrsTax: null
+            rows: []
           });
         }
 
-        const entry = groupedOilInvoices.get(groupKey);
-        entry.subtotal += toNumber(row?.total_purchase);
-
-        const discountValue = parseFloat(row?.immediate_discount);
-        if (Number.isFinite(discountValue)) {
-          entry.immediateDiscount = entry.immediateDiscount === null
-            ? discountValue
-            : Math.max(entry.immediateDiscount, discountValue);
-        }
-
-        const taxValue = parseFloat(row?.martyrs_tax);
-        if (Number.isFinite(taxValue)) {
-          entry.martyrsTax = entry.martyrsTax === null
-            ? taxValue
-            : Math.max(entry.martyrsTax, taxValue);
-        }
+        groupedOilInvoices.get(groupKey).rows.push(row);
       }
 
       const oilPurchasesByMonth = new Map();
       for (const entry of groupedOilInvoices.values()) {
-        const invoiceTotal = entry.subtotal - toNumber(entry.immediateDiscount) + toNumber(entry.martyrsTax);
+        const invoiceTotal = calculateOilInvoiceTotals(entry.rows).invoice_total;
         oilPurchasesByMonth.set(entry.monthKey, (oilPurchasesByMonth.get(entry.monthKey) || 0) + invoiceTotal);
       }
 
@@ -7455,6 +7488,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const monthlyProfitCustomValues = await executeQuery('SELECT * FROM monthly_profit_custom_values ORDER BY month_key DESC');
       const monthlyAccountingDocuments = await executeQuery('SELECT * FROM monthly_accounting_documents ORDER BY month_key DESC');
       const accountingLabelDefaults = await executeQuery('SELECT * FROM accounting_label_defaults ORDER BY row_key ASC');
+      const accountingLabelSuggestionIgnores = await executeQuery('SELECT * FROM accounting_label_suggestion_ignores ORDER BY side ASC, label ASC');
       const homeLayoutSettings = await executeQuery('SELECT * FROM home_layout_settings ORDER BY key ASC');
       const appUsers = await executeQuery('SELECT * FROM app_users ORDER BY id ASC');
       const landData = {};
@@ -7486,6 +7520,7 @@ ipcMain.handle('get-sales-summary', async () => {
         monthlyProfitCustomValues,
         monthlyAccountingDocuments,
         accountingLabelDefaults,
+        accountingLabelSuggestionIgnores,
         homeLayoutSettings,
         appUsers,
         landData,
@@ -7846,6 +7881,29 @@ ipcMain.handle('get-sales-summary', async () => {
             }
           ])
         ));
+      }
+
+      if (backupData.accountingLabelSuggestionIgnores) {
+        for (const entry of backupData.accountingLabelSuggestionIgnores) {
+          const side = normalizeAccountingSuggestionSide(entry.side);
+          const label = String(entry.label || '').replace(/\s+/g, ' ').trim();
+          const ignoredAtMonth = normalizeMonthKey(entry.ignored_at_month);
+          if (!side || !label || !ignoredAtMonth) continue;
+          await executeInsert(`
+            INSERT INTO accounting_label_suggestion_ignores (side, label, ignored_at_month, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (side, label)
+            DO UPDATE SET
+              ignored_at_month = EXCLUDED.ignored_at_month,
+              updated_at = EXCLUDED.updated_at
+          `, [
+            side,
+            label,
+            ignoredAtMonth,
+            entry.created_at || null,
+            entry.updated_at || null
+          ], 'accounting_label_suggestion_ignores');
+        }
       }
 
       if (backupData.homeLayoutSettings) {
@@ -8368,7 +8426,7 @@ ipcMain.on('check-for-updates-manual', () => {
 // Customer management handlers
 ipcMain.handle('get-customers', async () => {
   try {
-    return await executeQuery('SELECT * FROM customers ORDER BY name');
+    return await customerService.listActive();
   } catch (error) {
     console.error('Error getting customers:', error);
     throw error;
@@ -8377,16 +8435,7 @@ ipcMain.handle('get-customers', async () => {
 
 ipcMain.handle('add-customer', async (event, { name }) => {
   try {
-    const cleanName = String(name || '').trim();
-    if (!cleanName) {
-      throw new Error('اسم العميل مطلوب');
-    }
-    const existingRows = await executeQuery('SELECT id FROM customers WHERE name = $1 LIMIT 1', [cleanName]);
-    if (existingRows.length > 0) {
-      throw new Error('يوجد عميل بنفس الاسم بالفعل');
-    }
-    const insertQuery = 'INSERT INTO customers (name) VALUES ($1)';
-    return await executeInsert(insertQuery, [cleanName], 'customers');
+    return await customerService.add({ name });
   } catch (error) {
     console.error('Error adding customer:', error);
     throw error;
@@ -8395,14 +8444,7 @@ ipcMain.handle('add-customer', async (event, { name }) => {
 
 ipcMain.handle('delete-customer', async (event, { id }) => {
   try {
-    if (await isCustomerReferenced(id)) {
-      const error = new Error('لا يمكن حذف العميل لأنه مستخدم في ورديات أو أرصدة محفوظة');
-      error.code = 'CUSTOMER_REFERENCED';
-      throw error;
-    }
-
-    const deleteQuery = 'DELETE FROM customers WHERE id = $1';
-    return await executeUpdate(deleteQuery, [id]);
+    return await customerService.archive({ id });
   } catch (error) {
     console.error('Error deleting customer:', error);
     throw error;
@@ -8411,31 +8453,7 @@ ipcMain.handle('delete-customer', async (event, { id }) => {
 
 ipcMain.handle('update-customer', async (event, { id, name }) => {
   try {
-    const customerId = parseInt(id, 10);
-    const cleanName = String(name || '').trim();
-    if (!Number.isFinite(customerId) || customerId <= 0) {
-      throw new Error('معرف العميل غير صالح');
-    }
-    if (!cleanName) {
-      throw new Error('اسم العميل مطلوب');
-    }
-
-    const existingCustomer = await executeQuery('SELECT id FROM customers WHERE id = $1 LIMIT 1', [customerId]);
-    if (existingCustomer.length === 0) {
-      throw new Error('العميل غير موجود');
-    }
-
-    const duplicateRows = await executeQuery('SELECT id FROM customers WHERE name = $1 AND id <> $2 LIMIT 1', [cleanName, customerId]);
-    if (duplicateRows.length > 0) {
-      throw new Error('يوجد عميل آخر بنفس الاسم');
-    }
-
-    const updateQuery = 'UPDATE customers SET name = $1 WHERE id = $2';
-    const updatedRows = await executeUpdate(updateQuery, [cleanName, customerId]);
-    if (updatedRows < 1) {
-      throw new Error('لم يتم تحديث أي عميل');
-    }
-    return { success: true, updatedRows };
+    return await customerService.rename({ id, name });
   } catch (error) {
     console.error('Error updating customer:', error);
     throw error;

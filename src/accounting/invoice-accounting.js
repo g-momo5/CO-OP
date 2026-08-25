@@ -8,6 +8,42 @@ const {
 const { getShiftFuelSoldQuantity } = require('./fuel-accounting');
 const { normalizeShiftRecord } = require('./shift-accounting');
 
+const OIL_VALUE_ADDED_TAX_RATE = 0.14;
+
+function resolveCommonOilValueAddedTaxRate(ivaValues = []) {
+  const rates = (Array.isArray(ivaValues) ? ivaValues : [])
+    .map((value) => toNumber(value))
+    .filter((value) => Number.isFinite(value));
+  if (rates.length === 0) return null;
+  const firstRate = rates[0];
+  const allSame = rates.every((rate) => Math.abs(rate - firstRate) < 0.0001);
+  return allSame ? firstRate / 100 : null;
+}
+
+function summarizeOilInvoiceAmounts({
+  subtotal = 0,
+  immediateDiscount = 0,
+  martyrsTax = 0,
+  ivaValues = []
+} = {}) {
+  const normalizedSubtotal = toNumber(subtotal);
+  const normalizedDiscount = toNumber(immediateDiscount);
+  const normalizedMartyrsTax = toNumber(martyrsTax);
+  const valueAddedTaxRate = resolveCommonOilValueAddedTaxRate(ivaValues);
+  const valueAddedTax = valueAddedTaxRate === null
+    ? 0
+    : Math.max(0, normalizedSubtotal - normalizedDiscount) * valueAddedTaxRate;
+
+  return {
+    subtotal: roundMoney(normalizedSubtotal),
+    immediate_discount: roundMoney(normalizedDiscount),
+    value_added_tax: roundMoney(valueAddedTax),
+    martyrs_tax: roundMoney(normalizedMartyrsTax),
+    invoice_total: roundMoney(normalizedSubtotal + valueAddedTax - normalizedDiscount + normalizedMartyrsTax),
+    value_added_tax_rate: valueAddedTaxRate === null ? null : roundMoney(valueAddedTaxRate * 100)
+  };
+}
+
 function calculateFuelInvoiceTotals(rows = []) {
   const items = Array.isArray(rows) ? rows : rows.items || rows.fuel_items || [];
   const rowsTotal = items.reduce((sum, row) => sum + toNumber(row.total), 0);
@@ -32,13 +68,14 @@ function calculateOilInvoiceTotals(rows = []) {
   const subtotal = items.reduce((sum, row) => sum + toNumber(row.total_purchase), 0);
   const immediateDiscount = items.reduce((max, row) => Math.max(max, toNumber(row.immediate_discount)), 0);
   const martyrsTax = items.reduce((max, row) => Math.max(max, toNumber(row.martyrs_tax)), 0);
+  const ivaValues = items.map((row) => row.iva ?? row.vat);
 
-  return {
-    subtotal: roundMoney(subtotal),
-    immediate_discount: roundMoney(immediateDiscount),
-    martyrs_tax: roundMoney(martyrsTax),
-    invoice_total: roundMoney(subtotal - immediateDiscount + martyrsTax)
-  };
+  return summarizeOilInvoiceAmounts({
+    subtotal,
+    immediateDiscount,
+    martyrsTax,
+    ivaValues
+  });
 }
 
 function normalizeFuelProfitKey(fuelType) {
@@ -186,5 +223,8 @@ module.exports = {
   calculateOilStock,
   groupFuelPurchasesByMonth,
   groupOilPurchasesByMonth,
+  OIL_VALUE_ADDED_TAX_RATE,
+  resolveCommonOilValueAddedTaxRate,
+  summarizeOilInvoiceAmounts,
   normalizeFuelProfitKey
 };

@@ -10,6 +10,7 @@ const {
   calculateAccountingCashInsurance,
   calculateFuelPurchaseTotal,
   calculateAccountingTotals,
+  collectAccountingLabelSuggestions,
   createDefaultAccountingData,
   extractAccountingProfitRows,
   getPreviousIncreaseLabel,
@@ -58,6 +59,73 @@ test('buildAccountingDocumentData fills previous increase when the row is missin
   assert.equal(data.totals.credit_total, 3321.75);
 });
 
+test('collectAccountingLabelSuggestions uses only previous manual rows separated by side', () => {
+  const suggestions = collectAccountingLabelSuggestions([
+    {
+      month_key: '2026-05',
+      is_final: 1,
+      final_data: {
+        debit_rows: [
+          { row_key: ACCOUNTING_ROW_KEYS.DEBIT_FUEL_WITHDRAWALS, label: 'جملة مسحوبات المواد البترولية', fixed: true },
+          { label: 'غرامة تأخير سداد نقدى', amount: 350, fixed: false },
+          { label: 'زيادة محاسبة شهر ٢٠٢٦ / ٤', amount: 10, auto: true }
+        ],
+        credit_rows: [
+          { label: 'جملة النقدية والشيكات للزيوت', amount: 100, fixed: false },
+          { row_key: ACCOUNTING_ROW_KEYS.CREDIT_FUEL_CASH, label: 'جملة النقدية والشيكات للمواد البترولية', fixed: true }
+        ]
+      }
+    },
+    {
+      month_key: '2026-07',
+      is_final: 0,
+      draft_data: {
+        debit_rows: [{ label: 'لا يظهر من الشهر الحالي', amount: 1, fixed: false }],
+        credit_rows: []
+      }
+    }
+  ], [], '2026-07');
+
+  assert.deepEqual(suggestions.debit, [{
+    side: 'debit',
+    label: 'غرامة تأخير سداد نقدى',
+    last_used_month: '2026-05'
+  }]);
+  assert.deepEqual(suggestions.credit, [{
+    side: 'credit',
+    label: 'جملة النقدية والشيكات للزيوت',
+    last_used_month: '2026-05'
+  }]);
+});
+
+test('collectAccountingLabelSuggestions hides ignored labels until reused later', () => {
+  const documents = [
+    {
+      month_key: '2026-04',
+      is_final: 1,
+      final_data: {
+        debit_rows: [{ label: 'فرق فاتورة', amount: 100, fixed: false }],
+        credit_rows: []
+      }
+    },
+    {
+      month_key: '2026-06',
+      is_final: 1,
+      final_data: {
+        debit_rows: [{ label: 'غرامة تأخير سداد نقدى', amount: 200, fixed: false }],
+        credit_rows: []
+      }
+    }
+  ];
+
+  const hidden = collectAccountingLabelSuggestions(documents, [
+    { side: 'debit', label: 'فرق فاتورة', ignored_at_month: '2026-05' },
+    { side: 'debit', label: 'غرامة تأخير سداد نقدى', ignored_at_month: '2026-05' }
+  ], '2026-07');
+
+  assert.deepEqual(hidden.debit.map((row) => row.label), ['غرامة تأخير سداد نقدى']);
+});
+
 test('manual previous increase is preserved unless cascade forces recalculation', () => {
   const manualData = buildAccountingDocumentData({
     month_key: '2026-06',
@@ -95,6 +163,26 @@ test('manual previous increase can replace automatic zero and is preserved in dr
   assert.equal(autoRow.auto, true);
   assert.equal(autoRow.amount, 750);
   assert.equal(record.active_data.totals.credit_total, 750);
+});
+
+test('stale automatic zero previous increase is refreshed from previous final month', () => {
+  const record = splitDraftAndFinal({
+    month_key: '2026-07',
+    is_final: 0,
+    draft_data: {
+      month_key: '2026-07',
+      credit_rows: [{
+        row_key: ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE,
+        label: 'زيادة محاسبة شهر ٢٠٢٦ / ٦',
+        amount: 0,
+        auto: true
+      }]
+    }
+  }, 2190436.96);
+
+  const autoRow = record.active_data.credit_rows.find((row) => row.row_key === ACCOUNTING_ROW_KEYS.CREDIT_PREVIOUS_INCREASE);
+  assert.equal(autoRow.amount, 2190436.96);
+  assert.equal(autoRow.manual_previous_increase, false);
 });
 
 test('normalizes multiple accounting fuel purchase rows with different dates and prices', () => {

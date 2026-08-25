@@ -20,18 +20,42 @@ test('calculates fuel invoice totals and prefers net quantity', () => {
   assert.equal(totals.quantity, 148);
 });
 
-test('calculates oil invoice total with discount and martyrs tax', () => {
+test('calculates oil invoice total with value added tax, discount and martyrs tax', () => {
   const totals = calculateOilInvoiceTotals([
-    { oil_type: 'زيت أ', quantity: 5, total_purchase: 100, immediate_discount: 10, martyrs_tax: 3 },
-    { oil_type: 'زيت ب', quantity: 2, total_purchase: 40, immediate_discount: 10, martyrs_tax: 3 }
+    { oil_type: 'زيت أ', quantity: 5, total_purchase: 100, iva: 14, immediate_discount: 10, martyrs_tax: 3 },
+    { oil_type: 'زيت ب', quantity: 2, total_purchase: 40, iva: 14, immediate_discount: 10, martyrs_tax: 3 }
   ]);
 
   assert.deepEqual(totals, {
     subtotal: 140,
     immediate_discount: 10,
+    value_added_tax: 18.2,
     martyrs_tax: 3,
-    invoice_total: 133
+    invoice_total: 151.2,
+    value_added_tax_rate: 14
   });
+});
+
+test('skips value added tax when oil rows have different tax rates', () => {
+  const totals = calculateOilInvoiceTotals([
+    { oil_type: 'زيت أ', quantity: 5, total_purchase: 100, iva: 14, immediate_discount: 0, martyrs_tax: 0 },
+    { oil_type: 'زيت ب', quantity: 2, total_purchase: 40, iva: 5, immediate_discount: 0, martyrs_tax: 0 }
+  ]);
+
+  assert.equal(totals.value_added_tax, 0);
+  assert.equal(totals.invoice_total, 140);
+  assert.equal(totals.value_added_tax_rate, null);
+});
+
+test('uses the shared oil tax rate from invoice rows', () => {
+  const totals = calculateOilInvoiceTotals([
+    { oil_type: 'منتج أ', quantity: 2, total_purchase: 100, iva: 5, immediate_discount: 0, martyrs_tax: 0 },
+    { oil_type: 'منتج ب', quantity: 1, total_purchase: 50, iva: 5, immediate_discount: 0, martyrs_tax: 0 }
+  ]);
+
+  assert.equal(totals.value_added_tax, 7.5);
+  assert.equal(totals.invoice_total, 157.5);
+  assert.equal(totals.value_added_tax_rate, 5);
 });
 
 test('calculates fuel stock after shift sales', () => {

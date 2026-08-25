@@ -12,6 +12,11 @@ const {
   resolveHomeLayoutCollisions,
   serializeHomeLayout
 } = require('./home-layout');
+const {
+  normalizeLocalizedNumberText,
+  parseLocalizedNumber,
+  sanitizeLocalizedDecimalText
+} = require('./localized-number');
 
 let XLSX = null;
 try {
@@ -27,6 +32,7 @@ window.__currentScreen = currentScreen;
 let currentParentScreen = null;
 let currentAppModule = '';
 let commonAppBootstrapped = false;
+let localizedNumericInputHandlingInitialized = false;
 let currentAppUser = null;
 let appBootstrapped = false;
 let rendererBootstrapNotified = false;
@@ -55,6 +61,7 @@ const HOME_LAYOUT_EDITING_ENABLED = true;
 const LEGACY_AGGREGATED_EXPENSE_LABEL = 'مصروفات مجمعة (بيانات قديمة)';
 const EMPTY_EXPENSE_DESCRIPTION_LABEL = 'بدون وصف';
 const EDITABLE_OIL_INITIAL_NAME = 'سايب ١ ك';
+const { summarizeOilInvoiceAmounts } = require('./accounting/invoice-accounting');
 let currentHomeChartMode = HOME_CHART_MODE.SALES;
 let homeLayoutState = {
   layout: getDefaultHomeLayout(),
@@ -192,15 +199,6 @@ function invalidateAccountingFuelPriceCache() {
 const VIEW_CACHE_TTL_MS = 15_000;
 const viewDataCache = new Map();
 const viewDataInFlight = new Map();
-const HOME_ACCOUNTING_STAT_CARD_IDS = [
-  'sales-summary',
-  'sales-reconciliation',
-  'safe-book',
-  'profit',
-  'expenses',
-  'company-vouchers',
-  'customer-invoices'
-];
 
 function getViewCacheKey(channel, payload = {}) {
   return `${channel}:${JSON.stringify(payload || {})}`;
@@ -474,9 +472,11 @@ async function selectAppModule(moduleName) {
   } else {
     document.body.classList.remove('module-selecting');
     await bootstrapApp();
-    showScreenWithoutHistory('home');
-    updatePageNavigation('home');
-    stabilizeHomeLayoutAfterLogin();
+    if (currentScreen === 'home') {
+      showScreenWithoutHistory('home');
+      updatePageNavigation('home');
+      stabilizeHomeLayoutAfterLogin();
+    }
   }
 }
 
@@ -824,7 +824,6 @@ async function bootstrapApp() {
 
     await Promise.allSettled([
       loadHomeChart(),
-      loadHomeAccountingStats(),
       loadTodayStats()
     ]);
   } catch (error) {
@@ -850,6 +849,7 @@ async function bootstrapCommonApp() {
 
   try {
     // RTL configuration is handled by rtl-config.js before bootstrap runs.
+    initializeLocalizedNumericInputHandling();
     initializeApp();
     setupEventListeners();
     initializeConnectionMonitoring();
@@ -1294,7 +1294,6 @@ function showScreenWithoutHistory(screenName) {
     case 'home':
       initializeHomeLayoutEditor({ reload: !homeLayoutState.editMode });
       loadHomeChart();
-      loadHomeAccountingStats();
       loadTodayStats();
       loadSafeBookMovements();
       scheduleHomeChartHeightSync();
@@ -2202,9 +2201,6 @@ async function saveSafeBookAuditMovement() {
     showMessage('تمت إضافة فرق الجرد وتحديث رصيد الخزينة', 'success');
     toggleSafeBookAuditForm(false);
     await loadSafeBookMovements();
-    if (currentScreen === 'home') {
-      loadHomeAccountingStats();
-    }
     if (currentScreen === 'safe-book-entry') {
       showScreen('safe-book', 'home');
     }
@@ -2257,9 +2253,6 @@ async function saveSafeBookMovement() {
     showMessage('تمت إضافة حركة الخزينة بنجاح', 'success');
     toggleSafeBookForm(false);
     await loadSafeBookMovements();
-    if (currentScreen === 'home') {
-      loadHomeAccountingStats();
-    }
     if (currentScreen === 'safe-book-entry') {
       showScreen('safe-book', 'home');
     }
@@ -3874,147 +3867,6 @@ async function loadHomeProfitChart() {
   }
 }
 
-function formatHomeStatNumber(value, valueType = 'number', unit = '') {
-  const amount = parseFloat(value);
-  if (!Number.isFinite(amount)) return '-';
-
-  if (valueType === 'currency') {
-    return formatArabicCurrencyWhole(amount);
-  }
-
-  const formatted = valueType === 'count'
-    ? formatArabicNumberWhole(amount)
-    : formatArabicNumber(amount);
-  return unit ? `${formatted} ${unit}` : formatted;
-}
-
-function formatHomeStatValue(value, valueType = 'number', unit = '', valueText = '') {
-  const text = String(valueText || '').trim();
-  if (text) return text;
-  return formatHomeStatNumber(value, valueType, unit);
-}
-
-function formatHomeStatMeta(stat = {}) {
-  const parts = [];
-  if (stat.meta) parts.push(String(stat.meta));
-
-  const delta = parseFloat(stat.delta);
-  if (Number.isFinite(delta)) {
-    const formattedDelta = formatHomeStatNumber(Math.abs(delta), stat.value_type || 'number', stat.unit || '');
-    if (delta > 0) {
-      parts.push(`+${formattedDelta}`);
-    } else if (delta < 0) {
-      parts.push(`-${formattedDelta}`);
-    } else {
-      parts.push(formatHomeStatNumber(0, stat.value_type || 'number', stat.unit || ''));
-    }
-  }
-
-  return parts.join(' / ') || 'لا توجد بيانات';
-}
-
-function renderHomeStatCard(cardId, stat = null) {
-  const card = document.querySelector(`.home-stat-card[data-home-item="${cardId}"]`);
-  const body = card?.querySelector(`[data-home-stat-card="${cardId}"]`);
-  if (!card || !body) return;
-
-  const valueEl = body.querySelector('.home-stat-value');
-  const metaEl = body.querySelector('.home-stat-meta');
-  const rowsEl = body.querySelector('.home-stat-rows');
-  const normalizedStat = stat && typeof stat === 'object'
-    ? stat
-    : { value: null, value_type: 'number', meta: 'لا توجد بيانات', rows: [], empty: true };
-
-  card.classList.toggle('home-stat-empty', normalizedStat.empty === true);
-  card.classList.toggle('home-stat-rows-only', normalizedStat.layout === 'rows-only' || normalizedStat.hide_value === true);
-  card.classList.toggle('home-stat-message', normalizedStat.layout === 'message' || normalizedStat.value_type === 'text');
-  if (valueEl) {
-    if (normalizedStat.hide_value) {
-      valueEl.textContent = '';
-    } else if (normalizedStat.empty) {
-      valueEl.textContent = normalizedStat.value === null || normalizedStat.value === undefined
-        ? '-'
-        : formatHomeStatValue(normalizedStat.value, normalizedStat.value_type, normalizedStat.unit, normalizedStat.value_text);
-    } else {
-      valueEl.textContent = formatHomeStatValue(normalizedStat.value, normalizedStat.value_type, normalizedStat.unit, normalizedStat.value_text);
-    }
-  }
-  if (metaEl) {
-    metaEl.textContent = normalizedStat.empty ? 'لا توجد بيانات' : formatHomeStatMeta(normalizedStat);
-  }
-  if (rowsEl) {
-    rowsEl.innerHTML = (Array.isArray(normalizedStat.rows) ? normalizedStat.rows : [])
-      .map((row) => {
-        const statusClass = row.status ? ` home-stat-row-status-${escapeHtml(row.status)}` : '';
-        return `
-        <div class="home-stat-row${row.projected ? ' home-stat-row-projected' : ''}${statusClass}">
-          <span class="home-stat-row-label">${escapeHtml(row.label || '')}</span>
-          <span class="home-stat-row-value">
-            ${row.trend ? `<span class="home-stat-trend home-stat-trend-${escapeHtml(row.trend)}" aria-hidden="true">${row.trend === 'up' ? '▲' : row.trend === 'down' ? '▼' : '■'}</span>` : ''}
-            <span>${escapeHtml(formatHomeStatValue(row.value, row.value_type, row.unit, row.value_text))}</span>
-          </span>
-        </div>
-      `;
-      })
-      .join('');
-  }
-}
-
-function renderHomeAccountingStats(stats = {}) {
-  HOME_ACCOUNTING_STAT_CARD_IDS.forEach((cardId) => {
-    renderHomeStatCard(cardId, stats?.[cardId]);
-  });
-}
-
-function captureHomeScrollPosition() {
-  const mainContent = document.querySelector('.main-content');
-  return {
-    mainTop: mainContent ? mainContent.scrollTop : 0,
-    documentTop: document.documentElement.scrollTop || document.body.scrollTop || window.pageYOffset || 0
-  };
-}
-
-function restoreHomeScrollPosition(position) {
-  if (currentScreen !== 'home' || !position) return;
-  const mainContent = document.querySelector('.main-content');
-  if (mainContent) {
-    mainContent.scrollTop = position.mainTop || 0;
-  }
-  document.documentElement.scrollTop = position.documentTop || 0;
-  document.body.scrollTop = position.documentTop || 0;
-  window.scrollTo(0, position.documentTop || 0);
-}
-
-function withHomeScrollPreserved(renderFn) {
-  const position = captureHomeScrollPosition();
-  renderFn();
-  restoreHomeScrollPosition(position);
-  requestAnimationFrame(() => restoreHomeScrollPosition(position));
-}
-
-function setHomeAccountingStatsLoading() {
-  HOME_ACCOUNTING_STAT_CARD_IDS.forEach((cardId) => {
-    renderHomeStatCard(cardId, {
-      value: null,
-      value_type: 'number',
-      meta: 'جاري التحميل...',
-      rows: [],
-      empty: false
-    });
-  });
-}
-
-async function loadHomeAccountingStats() {
-  withHomeScrollPreserved(setHomeAccountingStatsLoading);
-  try {
-    const result = await invokeCached('get-home-accounting-stats', {}, { ttlMs: 10_000 });
-    withHomeScrollPreserved(() => renderHomeAccountingStats(result?.stats || {}));
-  } catch (error) {
-    console.error('Error loading home accounting stats:', error);
-    withHomeScrollPreserved(() => renderHomeAccountingStats({}));
-  }
-}
-
 function normalizeFuelTypeForHomeChart(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -4689,7 +4541,6 @@ async function saveFuelInvoice() {
       loadTodayStats();
       if (currentScreen === 'home') {
         loadHomeChart();
-        loadHomeAccountingStats();
       }
       return;
     } else {
@@ -4716,7 +4567,6 @@ async function saveFuelInvoice() {
     // Update home chart if currently on home screen
     if (currentScreen === 'home') {
       loadHomeChart();
-      loadHomeAccountingStats();
     }
   } catch (error) {
     showMessage(fuelInvoiceEditState ? 'حدث خطأ أثناء تعديل فاتورة الوقود' : 'حدث خطأ أثناء حفظ فاتورة الوقود', 'error');
@@ -5291,7 +5141,6 @@ function calculateOilItem() {
   const oilItem = this.closest('.oil-item');
   if (!oilItem) return;
   
-  const oilType = oilItem.dataset.oil;
   const quantityInput = oilItem.querySelector('.oil-quantity');
   const purchasePriceInput = oilItem.querySelector('.oil-purchase-price');
   const ivaInput = oilItem.querySelector('.oil-iva');
@@ -5301,17 +5150,47 @@ function calculateOilItem() {
   
   const quantity = parseFloat(quantityInput.value.replace(',', '.')) || 0;
   const purchasePrice = parseFloat(purchasePriceInput.value.replace(',', '.')) || 0;
-  const iva = parseFloat(ivaInput.value.replace(',', '.')) || 0;
   
-  const subtotal = quantity * purchasePrice;
-  // Se l'IVA è inserita come percentuale (es. 14 per 14%), dividiamo per 100
-  const ivaAmount = subtotal * (iva / 100);
-  const totalPurchase = subtotal + ivaAmount;
+  const totalPurchase = quantity * purchasePrice;
   
   totalPurchaseInput.value = totalPurchase > 0 ? formatArabicNumber(totalPurchase) : '';
   totalPurchaseInput.dataset.numericValue = totalPurchase; // Salva il valore numerico originale
   
   calculateOilInvoiceSummary();
+}
+
+function collectOilInvoiceIvaRatesFromDom() {
+  const rates = [];
+
+  document.querySelectorAll('#oil-items-list .oil-item').forEach((item) => {
+    const oilType = item.dataset.oil;
+    const quantity = parseFloat(item.querySelector('.oil-quantity')?.value.replace(',', '.')) || 0;
+    if (!oilType || quantity <= 0) return;
+
+    const ivaValue = parseFloat(item.querySelector('.oil-iva')?.value.replace(',', '.'));
+    if (Number.isFinite(ivaValue)) {
+      rates.push(ivaValue);
+    }
+  });
+
+  return rates;
+}
+
+function calculateOilInvoiceSummaryValues(subtotal = 0, immediateDiscount = 0, martyrsTax = 0, ivaValues = []) {
+  const totals = summarizeOilInvoiceAmounts({
+    subtotal,
+    immediateDiscount,
+    martyrsTax,
+    ivaValues
+  });
+
+  return {
+    subtotal: totals.subtotal,
+    immediateDiscount: totals.immediate_discount,
+    valueAddedTax: totals.value_added_tax,
+    martyrsTax: totals.martyrs_tax,
+    invoiceTotal: totals.invoice_total
+  };
 }
 
 function calculateOilInvoiceSummary() {
@@ -5333,13 +5212,17 @@ function calculateOilInvoiceSummary() {
 
   const discount = discountInput ? (parseFloat(discountInput.value.replace(',', '.')) || 0) : 0;
   const tax = taxInput ? (parseFloat(taxInput.value.replace(',', '.')) || 0) : 0;
+  const ivaValues = collectOilInvoiceIvaRatesFromDom();
+  const totals = calculateOilInvoiceSummaryValues(subtotal, discount, tax, ivaValues);
 
-  // Calculate final total: subtotal - discount + tax
-  const finalTotal = subtotal - discount + tax;
+  const valueAddedTaxElement = document.getElementById('oil-value-added-tax');
+  if (valueAddedTaxElement) {
+    valueAddedTaxElement.textContent = formatArabicNumber(totals.valueAddedTax) + ' جنيه';
+  }
 
   const totalElement = document.getElementById('oil-invoice-total');
   if (totalElement) {
-    totalElement.textContent = formatArabicNumber(finalTotal) + ' جنيه';
+    totalElement.textContent = formatArabicNumber(totals.invoiceTotal) + ' جنيه';
   }
 }
 
@@ -6910,6 +6793,35 @@ function openSettingsSectionFromHome(sectionName) {
   showSettingsSectionWithoutHistory(sectionName);
 }
 
+function activateSettingsSection(sectionName) {
+  document.querySelectorAll('.settings-menu-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.settingsSection === sectionName);
+  });
+
+  document.querySelectorAll('.settings-section').forEach(section => {
+    section.classList.toggle('active', section.id === `settings-section-${sectionName}`);
+  });
+
+  const targetSection = document.getElementById(`settings-section-${sectionName}`);
+  if (!targetSection) return false;
+
+  updatePageNavigation('settings', sectionName, currentParentScreen || 'home');
+  return true;
+}
+
+function keepSettingsSectionVisible(sectionName, parentScreen = 'home') {
+  const settingsScreen = document.getElementById('settings-screen');
+  if (!settingsScreen) return;
+
+  document.querySelectorAll('.screen').forEach(screen => {
+    screen.classList.toggle('active', screen === settingsScreen);
+  });
+  currentScreen = 'settings';
+  window.__currentScreen = currentScreen;
+  currentParentScreen = parentScreen || 'home';
+  activateSettingsSection(sectionName);
+}
+
 function showSettingsSectionWithoutHistory(sectionName) {
   if (settingsSectionRequiresPermission(sectionName)) {
     showMessage('هذه الصفحة متاحة للمدير فقط', 'error');
@@ -6919,22 +6831,7 @@ function showSettingsSectionWithoutHistory(sectionName) {
     showMessage('هذه الصفحة من الإعدادات تتطلب اتصالاً بالإنترنت', 'warning');
     return;
   }
-  // Update active state in settings menu
-  document.querySelectorAll('.settings-menu-item').forEach(item => {
-    item.classList.remove('active');
-    if (item.dataset.settingsSection === sectionName) {
-      item.classList.add('active');
-    }
-  });
-
-  // Show the selected settings section
-  document.querySelectorAll('.settings-section').forEach(section => {
-    section.classList.remove('active');
-  });
-  const targetSection = document.getElementById(`settings-section-${sectionName}`);
-  if (targetSection) {
-    targetSection.classList.add('active');
-    updatePageNavigation('settings', sectionName, currentParentScreen || 'home');
+  if (activateSettingsSection(sectionName)) {
 
     // Load data relevant to the section
     if (sectionName === 'manage-products') {
@@ -9042,7 +8939,6 @@ async function buildExcelSalesShiftPayloads() {
 async function refreshViewsAfterExcelSalesImport() {
   await Promise.allSettled([
     loadHomeChart(),
-    loadHomeAccountingStats(),
     loadTodayStats(),
     loadSafeBookMovements()
   ]);
@@ -9388,7 +9284,6 @@ async function buildExcelExpenseShiftPayload(date, importedExpenseItems) {
 
 async function refreshViewsAfterExcelExpensesImport() {
   await Promise.allSettled([
-    loadHomeAccountingStats(),
     loadSafeBookMovements(),
     loadTodayStats()
   ]);
@@ -9508,7 +9403,14 @@ async function loadInvoicesList() {
     // Calculate totals for oil invoices
     Object.values(oilInvoicesMap).forEach(invoice => {
       let subtotal = invoice.items.reduce((sum, item) => sum + (item.total_purchase || 0), 0);
-      invoice.total = subtotal - invoice.immediate_discount + invoice.martyrs_tax;
+      const totals = calculateOilInvoiceSummaryValues(
+        subtotal,
+        invoice.immediate_discount,
+        invoice.martyrs_tax,
+        invoice.items.map((item) => item.iva)
+      );
+      invoice.value_added_tax = totals.valueAddedTax;
+      invoice.total = totals.invoiceTotal;
     });
 
     // Combine and sort all invoices
@@ -9662,13 +9564,20 @@ async function showInvoiceDetails(type, invoiceNumber) {
   // Add oil invoice specific fields
   if (type === 'oil') {
     const subtotal = invoice.items.reduce((sum, item) => sum + (item.total_purchase || 0), 0);
+    const totals = calculateOilInvoiceSummaryValues(
+      subtotal,
+      invoice.immediate_discount,
+      invoice.martyrs_tax,
+      invoice.items.map((item) => item.iva)
+    );
     html += `
       <div class="invoice-summary-details">
         <p><strong>المجموع الفرعي:</strong> ${formatArabicNumber(subtotal)} جنيه</p>
+        <p><strong>ضريبة مضافة:</strong> ${formatArabicNumber(totals.valueAddedTax)} جنيه</p>
         ${invoice.immediate_discount > 0 ? `<p><strong>خصم فورى:</strong> ${formatArabicNumber(invoice.immediate_discount)} جنيه</p>` : ''}
         ${invoice.martyrs_tax > 0 ? `<p><strong>ضريبة تكريم شهداء:</strong> ${formatArabicNumber(invoice.martyrs_tax)} جنيه</p>` : ''}
         <p style="font-size: 1.2rem; font-weight: bold; margin-top: 1rem; border-top: 2px solid #c4291d; padding-top: 0.5rem;">
-          <strong>الإجمالي النهائي:</strong> ${formatArabicNumber(invoice.total)} جنيه
+          <strong>الإجمالي النهائي:</strong> ${formatArabicNumber(totals.invoiceTotal)} جنيه
         </p>
       </div>
     `;
@@ -10140,6 +10049,7 @@ let shiftDraftAutoSaveTimer = null;
 let shiftDraftAutoSaveInFlight = false;
 let shiftDraftAutoSaveQueued = false;
 let shiftDraftAutoSavePromise = null;
+let shiftFinalSaveInProgress = false;
 let summaryRevenueRowCounter = 0;
 let summaryExpenseRowCounter = 0;
 let customerPaymentRowCounter = 0;
@@ -10176,6 +10086,7 @@ let accountingState = {
   pageSettingsDirty: false,
   dirty: false,
   loading: false,
+  labelSuggestions: { debit: [], credit: [] },
   fuelProducts: [],
   fuelProductsLoadingPromise: null,
   fuelPriceCache: new Map(),
@@ -10479,33 +10390,12 @@ function getShiftNavigableFields(container) {
 }
 
 function normalizeShiftNumericText(value) {
-  const digitMap = {
-    '٠': '0',
-    '١': '1',
-    '٢': '2',
-    '٣': '3',
-    '٤': '4',
-    '٥': '5',
-    '٦': '6',
-    '٧': '7',
-    '٨': '8',
-    '٩': '9',
-    '۰': '0',
-    '۱': '1',
-    '۲': '2',
-    '۳': '3',
-    '۴': '4',
-    '۵': '5',
-    '۶': '6',
-    '۷': '7',
-    '۸': '8',
-    '۹': '9'
-  };
+  return normalizeLocalizedNumberText(value);
+}
 
-  return String(value ?? '')
-    .replace(/[٠-٩۰-۹]/g, (digit) => digitMap[digit] || digit)
-    .replace(/[٫،,]/g, '.')
-    .replace(/٬/g, '');
+function parseShiftNumericValue(value, fallback = 0) {
+  const parsed = parseLocalizedNumber(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function hasShiftArabicNumericText(value) {
@@ -10513,8 +10403,8 @@ function hasShiftArabicNumericText(value) {
 }
 
 function hasShiftNumericInsertText(value) {
-  const text = String(value ?? '').trim();
-  return text !== '' && /^[0-9٠-٩۰-۹.,٫٬،\s]+$/.test(text);
+  const normalized = normalizeLocalizedNumberText(value).trim();
+  return normalized !== '' && /^[+-]?[0-9.]+$/.test(normalized);
 }
 
 function isShiftNumericInputTarget(target) {
@@ -10528,6 +10418,21 @@ function isShiftNumericInputTarget(target) {
     || target.classList.contains('summary-numeric-input')
     || target.classList.contains('shift-revenue-amount')
     || target.classList.contains('shift-expense-amount');
+}
+
+function isLocalizedNumericInputTarget(target) {
+  if (!(target instanceof HTMLInputElement)) return false;
+  if (target.disabled || target.readOnly) return false;
+
+  return target.type === 'number'
+    || target.inputMode === 'decimal'
+    || target.inputMode === 'numeric';
+}
+
+function prepareLocalizedNumericInput(input) {
+  if (!(input instanceof HTMLInputElement) || input.type !== 'number') return;
+  input.lang = 'en';
+  input.dir = 'ltr';
 }
 
 function getShiftInputSelection(input) {
@@ -10548,6 +10453,19 @@ function setShiftInputSelection(input, position) {
   }
 }
 
+function normalizeLocalizedNumericInputValue(input) {
+  if (!isLocalizedNumericInputTarget(input)) return;
+
+  const currentValue = String(input.value ?? '');
+  const { start } = getShiftInputSelection(input);
+  const normalized = normalizeLocalizedNumberText(currentValue);
+  if (normalized === currentValue) return;
+
+  const normalizedCursorPosition = normalizeLocalizedNumberText(currentValue.slice(0, start)).length;
+  input.value = normalized;
+  setShiftInputSelection(input, normalizedCursorPosition);
+}
+
 function insertShiftNormalizedNumericText(input, text) {
   const normalized = normalizeShiftNumericText(text);
   const { start, end } = getShiftInputSelection(input);
@@ -10566,10 +10484,7 @@ function replaceShiftNumericText(input, text) {
 }
 
 function normalizeShiftNumericInputValue(input) {
-  const normalized = normalizeShiftNumericText(input.value);
-  if (normalized !== input.value) {
-    input.value = normalized;
-  }
+  normalizeLocalizedNumericInputValue(input);
 }
 
 function getShiftNavigationScope(currentField, fallbackContainer) {
@@ -10644,6 +10559,75 @@ function shouldReplaceShiftNumericOnInsert(target, text) {
   );
 }
 
+function initializeLocalizedNumericInputHandling() {
+  if (localizedNumericInputHandlingInitialized) return;
+  localizedNumericInputHandlingInitialized = true;
+
+  document.querySelectorAll('input[type="number"]').forEach(prepareLocalizedNumericInput);
+
+  document.addEventListener('focusin', (event) => {
+    prepareLocalizedNumericInput(event.target);
+  }, true);
+
+  document.addEventListener('keydown', (event) => {
+    const target = event.target;
+    if (
+      !isLocalizedNumericInputTarget(target)
+      || event.ctrlKey
+      || event.metaKey
+      || event.altKey
+      || !hasShiftArabicNumericText(event.key)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (shouldReplaceShiftNumericOnInsert(target, event.key)) {
+      replaceShiftNumericText(target, event.key);
+    } else {
+      insertShiftNormalizedNumericText(target, event.key);
+    }
+  }, true);
+
+  document.addEventListener('beforeinput', (event) => {
+    const target = event.target;
+    if (!isLocalizedNumericInputTarget(target) || !event.data) return;
+
+    const normalizedText = normalizeLocalizedNumberText(event.data);
+    const shouldReplace = shouldReplaceShiftNumericOnInsert(target, event.data);
+    if (!shouldReplace && normalizedText === event.data) return;
+
+    event.preventDefault();
+    if (shouldReplace) {
+      replaceShiftNumericText(target, event.data);
+    } else {
+      insertShiftNormalizedNumericText(target, event.data);
+    }
+  }, true);
+
+  document.addEventListener('paste', (event) => {
+    const target = event.target;
+    const pastedText = event.clipboardData?.getData('text') || '';
+    if (!isLocalizedNumericInputTarget(target) || !pastedText) return;
+
+    const normalizedText = normalizeLocalizedNumberText(pastedText);
+    const shouldReplace = shouldReplaceShiftNumericOnInsert(target, pastedText);
+    if (!shouldReplace && normalizedText === pastedText) return;
+
+    event.preventDefault();
+    if (shouldReplace) {
+      replaceShiftNumericText(target, pastedText);
+    } else {
+      insertShiftNormalizedNumericText(target, pastedText);
+    }
+  }, true);
+
+  document.addEventListener('input', (event) => {
+    normalizeLocalizedNumericInputValue(event.target);
+  }, true);
+}
+
 function isShiftNavigationField(el) {
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
     return false;
@@ -10713,6 +10697,49 @@ function pickShiftVerticalTableField(currentEntry, candidates) {
   return best?.field || null;
 }
 
+const SHIFT_FUEL_LAST_COUNTER_FIELD_IDS = Object.freeze([
+  'fuel-diesel-last-1',
+  'fuel-diesel-last-2',
+  'fuel-diesel-last-3',
+  'fuel-diesel-last-4',
+  'fuel-92-last-2',
+  'fuel-92-last-1',
+  'fuel-80-last-2',
+  'fuel-80-last-1',
+  'fuel-95-last-2',
+  'fuel-95-last-1',
+  'fuel-gas-last-1',
+  'fuel-gas-last-2'
+]);
+
+function getShiftFuelCustomerHorizontalFields() {
+  const fuelFields = SHIFT_FUEL_LAST_COUNTER_FIELD_IDS
+    .map((fieldId) => document.getElementById(fieldId))
+    .filter(isShiftNavigationField);
+  const firstCustomerField = document.querySelector(
+    '#customers-table-body tr[data-customer-row] input[data-field="diesel"]'
+  );
+
+  if (isShiftNavigationField(firstCustomerField)) {
+    fuelFields.push(firstCustomerField);
+  }
+
+  return fuelFields;
+}
+
+function findAdjacentShiftFuelCustomerField(currentField, direction) {
+  if (direction !== 'ArrowLeft' && direction !== 'ArrowRight') return null;
+
+  const fields = getShiftFuelCustomerHorizontalFields();
+  const currentIndex = fields.indexOf(currentField);
+  if (currentIndex < 0) return null;
+
+  const nextIndex = direction === 'ArrowLeft'
+    ? currentIndex + 1
+    : currentIndex - 1;
+  return fields[nextIndex] || null;
+}
+
 function findAdjacentFuelSectionField(currentField, direction) {
   if (!(currentField instanceof Element)) return null;
 
@@ -10727,6 +10754,11 @@ function findAdjacentShiftTableField(currentField, direction) {
   const table = currentField?.closest?.('.shift-fuel-table, .shift-oil-table, .customers-table');
   if (!table) {
     return { handled: false, field: null };
+  }
+
+  const linkedFuelCustomerField = findAdjacentShiftFuelCustomerField(currentField, direction);
+  if (linkedFuelCustomerField) {
+    return { handled: true, field: linkedFuelCustomerField };
   }
 
   const navigationContainer = table.classList.contains('shift-fuel-table')
@@ -11513,6 +11545,132 @@ function canEditAccountingPreviousIncreaseValue(row = {}, amount = 0) {
     && Math.abs(parseAnnualInventoryValue(amount)) < 0.0001;
 }
 
+function normalizeAccountingLabelSuggestions(raw = {}) {
+  const normalizeRows = (rows) => (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      side: String(row?.side || '').trim() === 'credit' ? 'credit' : 'debit',
+      label: String(row?.label || '').replace(/\s+/g, ' ').trim(),
+      last_used_month: normalizeMonthKey(row?.last_used_month) || ''
+    }))
+    .filter((row) => row.label);
+
+  return {
+    debit: normalizeRows(raw?.debit).filter((row) => row.side === 'debit'),
+    credit: normalizeRows(raw?.credit).filter((row) => row.side === 'credit')
+  };
+}
+
+function getAccountingLabelSuggestionRows(side) {
+  return side === 'credit'
+    ? (accountingState.labelSuggestions?.credit || [])
+    : (accountingState.labelSuggestions?.debit || []);
+}
+
+function isAccountingLabelSuggestionInput(input) {
+  if (!input?.classList?.contains('accounting-row-label')) return false;
+  if (accountingState.pageEditMode || accountingState.loading || getAccountingReadOnly()) return false;
+  if (input.readOnly || input.disabled) return false;
+  const row = input.closest('tr');
+  if (!row) return false;
+  return row.dataset.accountingFixed !== '1'
+    && row.dataset.accountingLocked !== '1'
+    && row.dataset.accountingAuto !== '1';
+}
+
+function getAccountingLabelSuggestionMenu(input) {
+  return input?.closest?.('.accounting-row-label-wrap')?.querySelector('.accounting-label-suggestion-menu') || null;
+}
+
+function hideAccountingLabelSuggestionMenus(exceptInput = null) {
+  document.querySelectorAll('.accounting-label-suggestion-menu').forEach((menu) => {
+    if (exceptInput && menu === getAccountingLabelSuggestionMenu(exceptInput)) return;
+    menu.classList.remove('show');
+    menu.innerHTML = '';
+  });
+}
+
+function showAccountingLabelSuggestionMenu(input) {
+  if (!isAccountingLabelSuggestionInput(input)) {
+    hideAccountingLabelSuggestionMenus();
+    return;
+  }
+
+  const menu = getAccountingLabelSuggestionMenu(input);
+  const row = input.closest('tr');
+  const side = row?.dataset.accountingSide === 'credit' ? 'credit' : 'debit';
+  if (!menu) return;
+
+  const query = String(input.value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('ar');
+  const rows = getAccountingLabelSuggestionRows(side)
+    .filter((suggestion) => !query || suggestion.label.toLocaleLowerCase('ar').includes(query))
+    .slice(0, 12);
+
+  hideAccountingLabelSuggestionMenus(input);
+  if (rows.length === 0) {
+    menu.classList.remove('show');
+    menu.innerHTML = '';
+    return;
+  }
+
+  menu.innerHTML = rows.map((suggestion) => `
+    <div class="accounting-label-suggestion-item" role="option">
+      <button
+        type="button"
+        class="accounting-label-suggestion-choice"
+        data-accounting-suggestion-label="${escapeHtml(suggestion.label)}"
+      >${escapeHtml(suggestion.label)}</button>
+      <button
+        type="button"
+        class="accounting-label-suggestion-delete"
+        data-accounting-suggestion-side="${escapeHtml(side)}"
+        data-accounting-suggestion-label="${escapeHtml(suggestion.label)}"
+        title="حذف من القائمة"
+        aria-label="حذف من القائمة"
+      >×</button>
+    </div>
+  `).join('');
+  menu.classList.add('show');
+}
+
+function applyAccountingLabelSuggestion(input, label) {
+  if (!isAccountingLabelSuggestionInput(input)) return;
+  input.value = String(label || '').trim();
+  hideAccountingLabelSuggestionMenus();
+
+  const row = input.closest('tr');
+  const side = row?.dataset.accountingSide;
+  const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
+  const rows = Array.from(tbody?.querySelectorAll('tr') || []);
+  if (row && rows[rows.length - 1] === row) {
+    const amountInput = row.querySelector('[data-accounting-field="amount"]');
+    if (isAccountingRowFilled({ label: input.value, amount: amountInput?.value })) {
+      appendAccountingBlankRow(side);
+    }
+  }
+  calculateAccountingPageTotals();
+  markAccountingChanged();
+}
+
+async function ignoreAccountingLabelSuggestion(button) {
+  const side = button?.dataset.accountingSuggestionSide === 'credit' ? 'credit' : 'debit';
+  const label = String(button?.dataset.accountingSuggestionLabel || '').trim();
+  const activeInput = button?.closest('.accounting-row-label-wrap')?.querySelector('.accounting-row-label');
+  if (!label || !normalizeMonthKey(accountingState.monthKey)) return;
+
+  try {
+    const updated = await ipcRenderer.invoke('ignore-accounting-label-suggestion', {
+      side,
+      label,
+      month_key: accountingState.monthKey
+    });
+    accountingState.labelSuggestions = normalizeAccountingLabelSuggestions(updated);
+    showAccountingLabelSuggestionMenu(activeInput);
+  } catch (error) {
+    console.error('Error ignoring accounting label suggestion:', error);
+    showMessage('تعذر حذف البيان من القائمة', 'error');
+  }
+}
+
 function normalizeAccountingRowsForRender(rows = [], options = {}) {
   const addBlankRow = options.addBlankRow === true;
   const renderedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -11526,6 +11684,7 @@ function normalizeAccountingRowsForRender(rows = [], options = {}) {
     default_label: String(row?.default_label || '').trim(),
     is_visible_default: row?.is_visible_default === true,
     is_default_label: row?.is_default_label === true,
+    manual_previous_increase: row?.manual_previous_increase === true || row?.manual_previous_increase === 1,
     save_as_default: row?.save_as_default === true
   }));
 
@@ -11569,6 +11728,7 @@ function renderAccountingSide(side, rows) {
     const labelReadonly = row.locked || (pageEditActive ? !labelEditableInPageMode : (row.fixed || readOnly)) ? 'readonly' : '';
     const amountReadonly = pageEditActive || readOnly || (row.auto && !canEditAccountingPreviousIncreaseValue(row, numericAmount)) ? 'readonly' : '';
     const disabled = readOnly && !pageEditActive ? 'disabled' : '';
+    const labelSuggestionsEnabled = !pageEditActive && !readOnly && !row.fixed && !row.locked && !row.auto;
     const amountValue = row.amount === '' || Math.abs(numericAmount) < 0.0001
       ? ''
       : formatArabicNumberFixed(numericAmount);
@@ -11599,12 +11759,13 @@ function renderAccountingSide(side, rows) {
         data-accounting-locked="${row.locked ? '1' : '0'}"
         data-accounting-auto="${row.auto ? '1' : '0'}"
         data-accounting-previous-increase="${isAccountingPreviousIncreaseRow(row) ? '1' : '0'}"
+        data-accounting-manual-previous-increase="${row.manual_previous_increase ? '1' : '0'}"
         data-accounting-can-save-default="${row.can_save_default ? '1' : '0'}"
         data-accounting-default-label="${escapeHtml(defaultLabel)}"
         data-accounting-visible-default="${row.is_visible_default ? '1' : '0'}"
       >
         <td>
-          <div class="accounting-row-label-wrap">
+          <div class="accounting-row-label-wrap${labelSuggestionsEnabled ? ' accounting-row-label-combobox' : ''}">
             <input
               type="text"
               class="accounting-row-label"
@@ -11617,6 +11778,7 @@ function renderAccountingSide(side, rows) {
               ${disabled}
             >
             ${defaultAction}
+            ${labelSuggestionsEnabled ? '<div class="accounting-label-suggestion-menu" role="listbox"></div>' : ''}
           </div>
         </td>
         <td>
@@ -11628,6 +11790,9 @@ function renderAccountingSide(side, rows) {
             data-accounting-row="${escapeHtml(rowId)}"
             value="${escapeHtml(amountValue)}"
             inputmode="decimal"
+            dir="ltr"
+            lang="en"
+            autocomplete="off"
             placeholder="٠"
             ${amountReadonly}
             ${disabled}
@@ -11657,7 +11822,7 @@ function appendAccountingBlankRow(side) {
       data-accounting-default-label=""
     >
       <td>
-        <div class="accounting-row-label-wrap">
+        <div class="accounting-row-label-wrap accounting-row-label-combobox">
           <input
             type="text"
             class="accounting-row-label"
@@ -11667,6 +11832,7 @@ function appendAccountingBlankRow(side) {
             value=""
             placeholder="بيان"
           >
+          <div class="accounting-label-suggestion-menu" role="listbox"></div>
         </div>
       </td>
       <td>
@@ -11678,6 +11844,9 @@ function appendAccountingBlankRow(side) {
           data-accounting-row="${escapeHtml(rowId)}"
           value=""
           inputmode="decimal"
+          dir="ltr"
+          lang="en"
+          autocomplete="off"
           placeholder="٠"
         >
       </td>
@@ -11702,6 +11871,7 @@ function collectAccountingSideRows(side) {
       locked: row.dataset.accountingLocked === '1',
       can_save_default: row.dataset.accountingCanSaveDefault === '1',
       is_visible_default: row.dataset.accountingVisibleDefault === '1',
+      manual_previous_increase: row.dataset.accountingManualPreviousIncrease === '1',
       save_as_default: false
     };
   }).filter((row) => isAccountingRowFilled(row));
@@ -11856,9 +12026,9 @@ function renderAccountingFuelRows(rows = []) {
         <select class="accounting-fuel-select" ${disabled}>
           ${getAccountingFuelOptions(row?.product_code, row?.fuel_type)}
         </select>
-        <input type="text" class="accounting-fuel-input accounting-fuel-quantity" inputmode="decimal" placeholder="الكمية" value="${quantity > 0 ? escapeHtml(formatArabicNumberFixed(quantity)) : ''}" ${disabled}>
-        <input type="text" class="accounting-fuel-input accounting-fuel-price" inputmode="decimal" placeholder="سعر الشراء" value="${escapeHtml(purchasePriceDisplay)}" title="${escapeHtml(purchasePriceDisplay)}" readonly ${disabled}>
-        <input type="text" class="accounting-fuel-input accounting-fuel-total" placeholder="الإجمالي" value="${total > 0 ? escapeHtml(formatArabicNumberFixed(total)) : ''}" readonly disabled>
+        <input type="text" class="accounting-fuel-input accounting-fuel-quantity" inputmode="decimal" dir="ltr" lang="en" autocomplete="off" placeholder="الكمية" value="${quantity > 0 ? escapeHtml(formatArabicNumberFixed(quantity)) : ''}" ${disabled}>
+        <input type="text" class="accounting-fuel-input accounting-fuel-price" inputmode="decimal" dir="ltr" lang="en" autocomplete="off" placeholder="سعر الشراء" value="${escapeHtml(purchasePriceDisplay)}" title="${escapeHtml(purchasePriceDisplay)}" readonly ${disabled}>
+        <input type="text" class="accounting-fuel-input accounting-fuel-total" dir="ltr" lang="en" autocomplete="off" placeholder="الإجمالي" value="${total > 0 ? escapeHtml(formatArabicNumberFixed(total)) : ''}" readonly disabled>
         ${removeCell}
       </div>
     `;
@@ -12119,10 +12289,19 @@ async function loadAccountingMonth(monthKey, options = {}) {
 
   try {
     await ensureAccountingFuelProducts();
-    const record = await ipcRenderer.invoke('get-monthly-accounting-document', {
-      month_key: normalizedMonth,
-      include_inactive_defaults: options.includeInactiveDefaults === true
-    });
+    const [record, suggestions] = await Promise.all([
+      ipcRenderer.invoke('get-monthly-accounting-document', {
+        month_key: normalizedMonth,
+        include_inactive_defaults: options.includeInactiveDefaults === true
+      }),
+      ipcRenderer.invoke('get-accounting-label-suggestions', {
+        month_key: normalizedMonth
+      }).catch((error) => {
+        console.warn('Unable to load accounting label suggestions:', error);
+        return { debit: [], credit: [] };
+      })
+    ]);
+    accountingState.labelSuggestions = normalizeAccountingLabelSuggestions(suggestions);
     renderAccountingDocument(record);
   } catch (error) {
     console.error('Error loading monthly accounting document:', error);
@@ -12434,6 +12613,10 @@ function saveAccountingIncreaseModal() {
   const nextValue = selectedMode === 'add' ? currentValue + amount : amount;
 
   targetInput.value = Math.abs(nextValue) < 0.0001 ? '' : formatArabicNumberFixed(nextValue);
+  const row = targetInput.closest('tr');
+  if (row?.dataset.accountingPreviousIncrease === '1') {
+    row.dataset.accountingManualPreviousIncrease = '1';
+  }
   calculateAccountingPageTotals();
   markAccountingChanged();
   closeAccountingIncreaseModal();
@@ -12582,6 +12765,13 @@ function handleAccountingInput(event) {
   }
   if (getAccountingReadOnly()) return;
 
+  if (
+    target.classList.contains('accounting-row-amount')
+    && target.closest('tr')?.dataset.accountingPreviousIncrease === '1'
+  ) {
+    target.closest('tr').dataset.accountingManualPreviousIncrease = '1';
+  }
+
   calculateAccountingPageTotals();
   const side = target.dataset.accountingSide;
   const tbody = document.getElementById(side === 'debit' ? 'accounting-debit-body' : 'accounting-credit-body');
@@ -12597,6 +12787,10 @@ function handleAccountingInput(event) {
       appendAccountingBlankRow(side);
     }
     calculateAccountingPageTotals();
+  }
+
+  if (target.classList.contains('accounting-row-label')) {
+    showAccountingLabelSuggestionMenu(target);
   }
 
   markAccountingChanged();
@@ -12644,6 +12838,23 @@ function removeAccountingFuelRow(rowElement) {
 
 function handleAccountingClick(event) {
   const target = event.target;
+  const suggestionDelete = target?.closest?.('.accounting-label-suggestion-delete');
+  if (suggestionDelete) {
+    event.preventDefault();
+    event.stopPropagation();
+    ignoreAccountingLabelSuggestion(suggestionDelete);
+    return;
+  }
+
+  const suggestionChoice = target?.closest?.('.accounting-label-suggestion-choice');
+  if (suggestionChoice) {
+    event.preventDefault();
+    event.stopPropagation();
+    const input = suggestionChoice.closest('.accounting-row-label-wrap')?.querySelector('.accounting-row-label');
+    applyAccountingLabelSuggestion(input, suggestionChoice.dataset.accountingSuggestionLabel);
+    return;
+  }
+
   if (target?.classList?.contains('accounting-default-label-btn')) {
     toggleAccountingDefaultLabel(target);
     return;
@@ -12659,6 +12870,14 @@ function handleAccountingClick(event) {
 
 function handleAccountingFocusOut(event) {
   const target = event.target;
+  if (target?.classList?.contains('accounting-row-label')) {
+    setTimeout(() => {
+      if (!target.closest('.accounting-row-label-wrap')?.contains(document.activeElement)) {
+        hideAccountingLabelSuggestionMenus(target);
+      }
+    }, 120);
+    return;
+  }
   if (!target?.classList?.contains('accounting-row-amount')) return;
   if (String(target.value || '').trim()) {
     target.value = formatArabicNumberFixed(parseAnnualInventoryValue(target.value));
@@ -12712,6 +12931,8 @@ function bindAccountingEvents() {
     page.addEventListener('focusin', (event) => {
       if (event.target?.classList?.contains('accounting-row-amount')) {
         event.target.select();
+      } else if (event.target?.classList?.contains('accounting-row-label')) {
+        showAccountingLabelSuggestionMenu(event.target);
       }
     });
   }
@@ -14099,8 +14320,8 @@ function calculateFuelQuantity(fuelType) {
     const quantityInput = document.getElementById(`fuel-${fuelId}-quantity-${i}`);
 
     if (lastShiftInput && firstShiftInput && quantityInput) {
-      const lastShift = parseFloat(lastShiftInput.value) || 0;
-      const firstShift = parseFloat(firstShiftInput.value) || 0;
+      const lastShift = parseShiftNumericValue(lastShiftInput.value);
+      const firstShift = parseShiftNumericValue(firstShiftInput.value);
 
       // Remove any previous error state
       lastShiftInput.classList.remove('input-error');
@@ -14139,8 +14360,8 @@ function calculateDieselQuantity() {
     const quantityInput = document.getElementById(`fuel-diesel-quantity-${i}`);
 
     if (lastShiftInput && firstShiftInput && quantityInput) {
-      const lastShift = parseFloat(lastShiftInput.value) || 0;
-      const firstShift = parseFloat(firstShiftInput.value) || 0;
+      const lastShift = parseShiftNumericValue(lastShiftInput.value);
+      const firstShift = parseShiftNumericValue(firstShiftInput.value);
 
       // Remove any previous error state
       lastShiftInput.classList.remove('input-error');
@@ -14178,10 +14399,10 @@ function calculateCashForFuel(fuelId) {
   const cashInput = document.getElementById(`fuel-${fuelId}-cash`);
 
   if (totalQtyInput && clientsInput && carsInput && priceInput && cashInput) {
-    const totalQty = parseFloat(totalQtyInput.value) || 0;
-    const clients = parseFloat(clientsInput.value) || 0;
-    const cars = parseFloat(carsInput.value) || 0;
-    const price = parseFloat(priceInput.value) || 0;
+    const totalQty = parseShiftNumericValue(totalQtyInput.value);
+    const clients = parseShiftNumericValue(clientsInput.value);
+    const cars = parseShiftNumericValue(carsInput.value);
+    const price = parseShiftNumericValue(priceInput.value);
 
     // Calculate: نقدى = (إجمالي الكمية - (عملاء + عيارات)) * السعر
     const cash = (totalQty - (clients + cars)) * price;
@@ -14199,7 +14420,7 @@ function calculateFuelTotal() {
   Object.values(fuelIdMap).forEach(fuelId => {
     const cashInput = document.getElementById(`fuel-${fuelId}-cash`);
     if (cashInput) {
-      const cash = parseFloat(cashInput.value) || 0;
+      const cash = parseShiftNumericValue(cashInput.value);
       total += cash;
     }
   });
@@ -14320,9 +14541,7 @@ function cacheOilPricesBatch(date, rows = []) {
 }
 
 function parseOilQuantity(value) {
-  const normalized = String(value ?? '').replace(',', '.').trim();
-  const numericValue = parseFloat(normalized);
-  return Number.isFinite(numericValue) ? numericValue : 0;
+  return parseShiftNumericValue(value);
 }
 
 function roundOilQuantity(value) {
@@ -14785,7 +15004,7 @@ async function calculateOilRow(oilId) {
   const initial = parseOilQuantity(initialInput.value);
   const added = parseOilQuantity(addedInput.value);
   const remainingRaw = String(remainingInput.value ?? '').trim();
-  const remainingParsed = parseFloat(String(remainingRaw).replace(',', '.'));
+  const remainingParsed = parseLocalizedNumber(remainingRaw);
   const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
   const emptyRemainingMeansZero = remainingRaw === '' && remainingInput.dataset.emptyMeansZero === 'true';
   const open = parseOilQuantity(openInput?.value);
@@ -15429,10 +15648,10 @@ function normalizeCustomerRowsData(items) {
   return normalizedItems
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
-      const diesel = parseFloat(item.diesel) || 0;
-      const fuel80 = parseFloat(item['80']) || 0;
-      const fuel92 = parseFloat(item['92']) || 0;
-      const fuel95 = parseFloat(item['95']) || 0;
+      const diesel = parseShiftNumericValue(item.diesel);
+      const fuel80 = parseShiftNumericValue(item['80']);
+      const fuel92 = parseShiftNumericValue(item['92']);
+      const fuel95 = parseShiftNumericValue(item['95']);
       const customerId = parseInt(item.customer_id, 10);
       const name = String(item.name || item.customer_name || '').trim();
       const voucherType = normalizeCustomerVoucherType(item);
@@ -15474,10 +15693,10 @@ function collectCustomerRowsData() {
     const voucher = voucherType === CUSTOMER_VOUCHER_TYPES.company;
 
     return {
-      diesel: parseFloat(getInputValue('input[data-field="diesel"]')) || 0,
-      '80': parseFloat(getInputValue('input[data-field="80"]')) || 0,
-      '92': parseFloat(getInputValue('input[data-field="92"]')) || 0,
-      '95': parseFloat(getInputValue('input[data-field="95"]')) || 0,
+      diesel: parseShiftNumericValue(getInputValue('input[data-field="diesel"]')),
+      '80': parseShiftNumericValue(getInputValue('input[data-field="80"]')),
+      '92': parseShiftNumericValue(getInputValue('input[data-field="92"]')),
+      '95': parseShiftNumericValue(getInputValue('input[data-field="95"]')),
       customer_id: isVoucherRow ? null : (customerOption?.id || null),
       name: isVoucherRow ? '' : String(customerOption?.name || '').trim(),
       voucher,
@@ -15548,7 +15767,7 @@ function updateCustomerColumnSums() {
 
   inputs.forEach(input => {
     const field = input.getAttribute('data-field');
-    const value = parseFloat(input.value) || 0;
+    const value = parseShiftNumericValue(input.value);
 
     if (sums.hasOwnProperty(field)) {
       sums[field] += value;
@@ -15758,18 +15977,21 @@ async function saveNewCustomer() {
 
 // Delete customer
 async function deleteCustomer(id, name) {
-  if (!confirm(`هل أنت متأكد من حذف العميل "${name}"؟`)) {
+  if (!confirm(`هل أنت متأكد من حذف العميل "${name}" من القائمة؟\nسيتم الاحتفاظ بجميع وردياته وحساباته السابقة.`)) {
     return;
   }
 
+	  const settingsParentScreen = currentParentScreen || 'home';
 	  try {
 	    await ipcRenderer.invoke('delete-customer', { id });
 	    invalidateViewDataCaches();
 	    await loadCustomersSettings();
-    showMessage('تم حذف العميل بنجاح', 'success');
+    showMessage('تم حذف العميل من القائمة مع الاحتفاظ بسجلاته السابقة', 'success');
   } catch (error) {
     console.error('Error deleting customer:', error);
-    showMessage('خطأ في حذف العميل', 'error');
+    showMessage(error.message || 'خطأ في حذف العميل', 'error');
+  } finally {
+    keepSettingsSectionVisible('manage-customers', settingsParentScreen);
   }
 }
 
@@ -15814,7 +16036,7 @@ async function updateCustomerName(id, newName) {
 function calculateGrandTotal() {
   // Simply call calculateTotalRevenue which does the proper calculation
   calculateTotalRevenue();
-  return parseFloat(document.getElementById('final-net-total')?.value) || 0;
+  return parseShiftNumericValue(document.getElementById('final-net-total')?.value);
 }
 
 // ============= TOTALS PAGE FUNCTIONS =============
@@ -15823,20 +16045,11 @@ function sanitizeSummaryNumericInput(input) {
   if (!(input instanceof HTMLInputElement)) return;
   if (!input.classList.contains('summary-numeric-input')) return;
 
-  let value = String(input.value || '').replace(/,/g, '.');
-  value = value.replace(/[^\d.]/g, '');
-
-  const firstDotIndex = value.indexOf('.');
-  if (firstDotIndex !== -1) {
-    value = value.slice(0, firstDotIndex + 1) + value.slice(firstDotIndex + 1).replace(/\./g, '');
-  }
-
-  input.value = value;
+  input.value = sanitizeLocalizedDecimalText(input.value, { allowNegative: false });
 }
 
 function parseSummaryNumber(value) {
-  const amount = parseFloat(String(value || '').replace(/,/g, '.'));
-  return Number.isFinite(amount) ? amount : 0;
+  return parseShiftNumericValue(value);
 }
 
 function getSummaryRowItems(containerId, descSelector, amountSelector) {
@@ -16072,10 +16285,10 @@ function initializeShiftSummaryRows() {
 // Populate totals page with cash values from fuel and oil tabs
 function updateTotalsPage() {
   // Populate individual fuel cash values
-  const dieselCash = parseFloat(document.getElementById('fuel-diesel-cash')?.value) || 0;
-  const cash80 = parseFloat(document.getElementById('fuel-80-cash')?.value) || 0;
-  const cash92 = parseFloat(document.getElementById('fuel-92-cash')?.value) || 0;
-  const cash95 = parseFloat(document.getElementById('fuel-95-cash')?.value) || 0;
+  const dieselCash = parseShiftNumericValue(document.getElementById('fuel-diesel-cash')?.value);
+  const cash80 = parseShiftNumericValue(document.getElementById('fuel-80-cash')?.value);
+  const cash92 = parseShiftNumericValue(document.getElementById('fuel-92-cash')?.value);
+  const cash95 = parseShiftNumericValue(document.getElementById('fuel-95-cash')?.value);
 
   document.getElementById('total-diesel-cash').value = formatPrice(dieselCash);
   document.getElementById('total-80-cash').value = formatPrice(cash80);
@@ -16162,6 +16375,7 @@ function calculateNetTotal() {
 // Collect fuel data from form
 function collectFuelData() {
   const fuelData = {};
+  const readFuelField = (fieldId) => parseShiftNumericValue(document.getElementById(fieldId)?.value);
 
   Object.entries(fuelIdMap).forEach(([fuelType, fuelId]) => {
     const productCode = fuelProductCodesByName.get(fuelType) || null;
@@ -16171,40 +16385,40 @@ function collectFuelData() {
       fuelData[fuelKey] = {
         product_code: productCode,
         product_name: fuelType,
-        lastShift1: parseFloat(document.getElementById('fuel-diesel-last-1')?.value) || 0,
-        firstShift1: parseFloat(document.getElementById('fuel-diesel-first-1')?.value) || 0,
-        lastShift2: parseFloat(document.getElementById('fuel-diesel-last-2')?.value) || 0,
-        firstShift2: parseFloat(document.getElementById('fuel-diesel-first-2')?.value) || 0,
-        lastShift3: parseFloat(document.getElementById('fuel-diesel-last-3')?.value) || 0,
-        firstShift3: parseFloat(document.getElementById('fuel-diesel-first-3')?.value) || 0,
-        lastShift4: parseFloat(document.getElementById('fuel-diesel-last-4')?.value) || 0,
-        firstShift4: parseFloat(document.getElementById('fuel-diesel-first-4')?.value) || 0,
-        quantity1: parseFloat(document.getElementById('fuel-diesel-quantity-1')?.value) || 0,
-        quantity2: parseFloat(document.getElementById('fuel-diesel-quantity-2')?.value) || 0,
-        quantity3: parseFloat(document.getElementById('fuel-diesel-quantity-3')?.value) || 0,
-        quantity4: parseFloat(document.getElementById('fuel-diesel-quantity-4')?.value) || 0,
-        totalQuantity: parseFloat(document.getElementById('fuel-diesel-total-qty')?.value) || 0,
-        clients: parseFloat(document.getElementById('fuel-diesel-clients')?.value) || 0,
-        cars: parseFloat(document.getElementById('fuel-diesel-cars')?.value) || 0,
-        price: parseFloat(document.getElementById('fuel-diesel-price')?.value) || 0,
-        cash: parseFloat(document.getElementById('fuel-diesel-cash')?.value) || 0
+        lastShift1: readFuelField('fuel-diesel-last-1'),
+        firstShift1: readFuelField('fuel-diesel-first-1'),
+        lastShift2: readFuelField('fuel-diesel-last-2'),
+        firstShift2: readFuelField('fuel-diesel-first-2'),
+        lastShift3: readFuelField('fuel-diesel-last-3'),
+        firstShift3: readFuelField('fuel-diesel-first-3'),
+        lastShift4: readFuelField('fuel-diesel-last-4'),
+        firstShift4: readFuelField('fuel-diesel-first-4'),
+        quantity1: readFuelField('fuel-diesel-quantity-1'),
+        quantity2: readFuelField('fuel-diesel-quantity-2'),
+        quantity3: readFuelField('fuel-diesel-quantity-3'),
+        quantity4: readFuelField('fuel-diesel-quantity-4'),
+        totalQuantity: readFuelField('fuel-diesel-total-qty'),
+        clients: readFuelField('fuel-diesel-clients'),
+        cars: readFuelField('fuel-diesel-cars'),
+        price: readFuelField('fuel-diesel-price'),
+        cash: readFuelField('fuel-diesel-cash')
       };
     } else {
       // Other fuels have 2 counters
       fuelData[fuelKey] = {
         product_code: productCode,
         product_name: fuelType,
-        lastShift1: parseFloat(document.getElementById(`fuel-${fuelId}-last-1`)?.value) || 0,
-        firstShift1: parseFloat(document.getElementById(`fuel-${fuelId}-first-1`)?.value) || 0,
-        lastShift2: parseFloat(document.getElementById(`fuel-${fuelId}-last-2`)?.value) || 0,
-        firstShift2: parseFloat(document.getElementById(`fuel-${fuelId}-first-2`)?.value) || 0,
-        quantity1: parseFloat(document.getElementById(`fuel-${fuelId}-quantity-1`)?.value) || 0,
-        quantity2: parseFloat(document.getElementById(`fuel-${fuelId}-quantity-2`)?.value) || 0,
-        totalQuantity: parseFloat(document.getElementById(`fuel-${fuelId}-total-qty`)?.value) || 0,
-        clients: parseFloat(document.getElementById(`fuel-${fuelId}-clients`)?.value) || 0,
-        cars: parseFloat(document.getElementById(`fuel-${fuelId}-cars`)?.value) || 0,
-        price: parseFloat(document.getElementById(`fuel-${fuelId}-price`)?.value) || 0,
-        cash: parseFloat(document.getElementById(`fuel-${fuelId}-cash`)?.value) || 0
+        lastShift1: readFuelField(`fuel-${fuelId}-last-1`),
+        firstShift1: readFuelField(`fuel-${fuelId}-first-1`),
+        lastShift2: readFuelField(`fuel-${fuelId}-last-2`),
+        firstShift2: readFuelField(`fuel-${fuelId}-first-2`),
+        quantity1: readFuelField(`fuel-${fuelId}-quantity-1`),
+        quantity2: readFuelField(`fuel-${fuelId}-quantity-2`),
+        totalQuantity: readFuelField(`fuel-${fuelId}-total-qty`),
+        clients: readFuelField(`fuel-${fuelId}-clients`),
+        cars: readFuelField(`fuel-${fuelId}-cars`),
+        price: readFuelField(`fuel-${fuelId}-price`),
+        cash: readFuelField(`fuel-${fuelId}-cash`)
       };
     }
   });
@@ -16252,8 +16466,8 @@ function collectOilData() {
       remaining: parseOilQuantity(remainingInput?.value),
       open: parseOilQuantity(openInput?.value),
       customers: parseOilQuantity(customersInput?.value),
-      price: parseFloat(priceInput?.value) || 0,
-      revenue: parseFloat(revenueInput?.value) || 0,
+      price: parseShiftNumericValue(priceInput?.value),
+      revenue: parseShiftNumericValue(revenueInput?.value),
       customer_id: voucher ? null : (customerOption?.id || null),
       customer_name: voucher ? '' : String(customerOption?.name || '').trim(),
       voucher
@@ -16363,8 +16577,8 @@ function validateShiftData(options = {}) {
         const lastShiftInput = document.getElementById(`fuel-diesel-last-${i}`);
         const firstShiftInput = document.getElementById(`fuel-diesel-first-${i}`);
 
-        const lastShift = parseFloat(lastShiftInput?.value) || 0;
-        const firstShift = parseFloat(firstShiftInput?.value) || 0;
+        const lastShift = parseShiftNumericValue(lastShiftInput?.value);
+        const firstShift = parseShiftNumericValue(firstShiftInput?.value);
 
         if (firstShift > 0 && lastShift < firstShift) {
           errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
@@ -16376,8 +16590,8 @@ function validateShiftData(options = {}) {
         const lastShiftInput = document.getElementById(`fuel-${fuelId}-last-${i}`);
         const firstShiftInput = document.getElementById(`fuel-${fuelId}-first-${i}`);
 
-        const lastShift = parseFloat(lastShiftInput?.value) || 0;
-        const firstShift = parseFloat(firstShiftInput?.value) || 0;
+        const lastShift = parseShiftNumericValue(lastShiftInput?.value);
+        const firstShift = parseShiftNumericValue(firstShiftInput?.value);
 
         if (firstShift > 0 && lastShift < firstShift) {
           errors.push(`${fuelType} (${i}): آخر الوردية يجب أن يكون أكبر من أو يساوي أول الوردية`);
@@ -16390,7 +16604,7 @@ function validateShiftData(options = {}) {
   if (customerRowsTable) {
     Array.from(customerRowsTable.querySelectorAll('tr[data-customer-row]')).forEach((row, index) => {
       const quantity = ['diesel', '80', '92', '95'].reduce((sum, field) => (
-        sum + (parseFloat(row.querySelector(`input[data-field="${field}"]`)?.value) || 0)
+        sum + parseShiftNumericValue(row.querySelector(`input[data-field="${field}"]`)?.value)
       ), 0);
       if (quantity <= 0) return;
 
@@ -16428,7 +16642,7 @@ function validateShiftData(options = {}) {
       const open = parseOilQuantity(openInput?.value);
       const customerQuantity = parseOilQuantity(customersInput?.value);
       const remainingRaw = String(remainingInput?.value ?? '').trim();
-      const remainingParsed = parseFloat(remainingRaw.replace(',', '.'));
+      const remainingParsed = parseLocalizedNumber(remainingRaw);
       const remaining = Number.isFinite(remainingParsed) ? remainingParsed : 0;
 
       if (normalizeOilName(oilName) === EDITABLE_OIL_INITIAL_NAME) {
@@ -16493,10 +16707,21 @@ function buildCurrentShiftPayload(date, shiftNumber, isSaved = 1) {
 
 // Save shift
 async function saveShift() {
+  if (shiftViewMode === 'correction') {
+    await saveShiftCorrection();
+    return;
+  }
+  if (shiftFinalSaveInProgress) return;
+
+  const saveButton = document.getElementById('save-shift-btn');
+  const originalSaveButtonText = saveButton?.textContent || 'حفظ الوردية';
+  let savedSuccessfully = false;
+
   try {
-    if (shiftViewMode === 'correction') {
-      await saveShiftCorrection();
-      return;
+    shiftFinalSaveInProgress = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = 'جارٍ الحفظ...';
     }
 
     applyNightShiftGasAutoClose();
@@ -16505,6 +16730,8 @@ async function saveShift() {
     // Validate data
     const errors = validateShiftData({ requireLooseOilOpen: !currentShiftData.isSaved });
     if (errors.length > 0) {
+      currentShiftData.hasUnsavedChanges = true;
+      setShiftDraftStatus('dirty', 'صحح الأخطاء ثم أعد الحفظ');
       alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
       return;
     }
@@ -16538,6 +16765,7 @@ async function saveShift() {
     const result = await ipcRenderer.invoke('save-shift', shiftData);
 
 	    if (result.success) {
+	      savedSuccessfully = true;
 	      invalidateViewDataCaches();
 	      currentShiftData.isSaved = true;
       currentShiftData.hasUnsavedChanges = false;
@@ -16568,14 +16796,27 @@ async function saveShift() {
       scheduleDieselLastShiftFocus();
     } else {
       if (result.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
+        currentShiftData.hasUnsavedChanges = true;
+        setShiftDraftStatus('dirty', 'صحح الأخطاء ثم أعد الحفظ');
         alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
         return;
       }
+      setShiftDraftStatus('error');
       showToast('خطأ في حفظ الوردية: ' + (result.error || 'خطأ غير معروف'), 'error');
     }
   } catch (error) {
     console.error('Error saving shift:', error);
+    setShiftDraftStatus('error');
     showToast('خطأ في حفظ الوردية', 'error');
+  } finally {
+    shiftFinalSaveInProgress = false;
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.textContent = originalSaveButtonText;
+    }
+    if (!savedSuccessfully) {
+      restoreShiftEditingControlsAfterFailedSave();
+    }
   }
 }
 
@@ -16851,6 +17092,22 @@ function setShiftIdentifierFieldsLocked(locked) {
   const shiftNumberSelect = document.getElementById('shift-number');
   if (dateInput) dateInput.disabled = Boolean(locked);
   if (shiftNumberSelect) shiftNumberSelect.disabled = Boolean(locked);
+}
+
+function restoreShiftEditingControlsAfterFailedSave() {
+  if (currentScreen !== 'shift-entry' || shiftViewMode === 'history') return;
+
+  disableReadOnlyMode();
+  setShiftIdentifierFieldsLocked(shiftViewMode === 'correction');
+  syncShiftVoucherControls();
+
+  const saveButton = document.getElementById('save-shift-btn');
+  if (saveButton) saveButton.disabled = false;
+
+  const correctionSaveButton = document.getElementById('save-shift-correction-btn');
+  if (correctionSaveButton && shiftViewMode === 'correction') {
+    correctionSaveButton.disabled = false;
+  }
 }
 
 // Get last shift (by ID - most recent)
@@ -17758,6 +18015,7 @@ async function saveShiftCorrection() {
 
   const saveButton = document.getElementById('save-shift-correction-btn');
   const originalSaveButtonText = saveButton?.textContent || 'حفظ التصحيح';
+  let savedSuccessfully = false;
 
   try {
     if (saveButton) {
@@ -17806,6 +18064,7 @@ async function saveShiftCorrection() {
     }
 
     currentShiftData.hasUnsavedChanges = false;
+    savedSuccessfully = true;
     invalidateViewDataCaches();
     const cascade = result.cascade || {};
     const updatedCount = parseInt(cascade.updated_count, 10) || 0;
@@ -17818,7 +18077,6 @@ async function saveShiftCorrection() {
     showToast(successMessage, 'success');
     await Promise.allSettled([
       loadHomeChart(),
-      loadHomeAccountingStats(),
       loadTodayStats(),
       loadSafeBookMovements()
     ]);
@@ -17831,6 +18089,9 @@ async function saveShiftCorrection() {
     if (saveButton) {
       saveButton.disabled = false;
       saveButton.textContent = originalSaveButtonText;
+    }
+    if (!savedSuccessfully) {
+      restoreShiftEditingControlsAfterFailedSave();
     }
   }
 }
@@ -18640,43 +18901,6 @@ async function initializeShiftEntry() {
 
     const shiftEntryScreen = document.getElementById('shift-entry-screen');
     if (shiftEntryScreen) {
-      shiftEntryScreen.addEventListener('beforeinput', (event) => {
-        const target = event.target;
-        if (!isShiftNumericInputTarget(target) || !event.data) {
-          return;
-        }
-
-        if (shouldReplaceShiftNumericOnInsert(target, event.data)) {
-          event.preventDefault();
-          replaceShiftNumericText(target, event.data);
-          return;
-        }
-
-        if (hasShiftArabicNumericText(event.data)) {
-          event.preventDefault();
-          insertShiftNormalizedNumericText(target, event.data);
-        }
-      });
-
-      shiftEntryScreen.addEventListener('paste', (event) => {
-        const target = event.target;
-        const pastedText = event.clipboardData?.getData('text') || '';
-        if (!isShiftNumericInputTarget(target)) {
-          return;
-        }
-
-        if (shouldReplaceShiftNumericOnInsert(target, pastedText)) {
-          event.preventDefault();
-          replaceShiftNumericText(target, pastedText);
-          return;
-        }
-
-        if (hasShiftArabicNumericText(pastedText)) {
-          event.preventDefault();
-          insertShiftNormalizedNumericText(target, pastedText);
-        }
-      });
-
       shiftEntryScreen.addEventListener('focusin', (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) {

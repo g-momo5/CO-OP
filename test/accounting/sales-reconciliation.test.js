@@ -152,6 +152,39 @@ test('reconciles oils from previous remaining, shift incoming, and current remai
   assert.equal(row.status, 'ok');
 });
 
+test('ignores oils without current month incoming or outgoing movement', () => {
+  const view = buildSalesReconciliationView({
+    month: '2026-07',
+    oilProducts: [
+      { oil_type: 'زيت متحرك' },
+      { oil_type: 'زيت ساكن' }
+    ],
+    shifts: [
+      {
+        id: 1,
+        date: '2026-06-30',
+        shift_number: 2,
+        oil_data: {
+          moving_oil: { product_name: 'زيت متحرك', remaining: 10 },
+          idle_oil: { product_name: 'زيت ساكن', remaining: 20 }
+        }
+      },
+      {
+        id: 2,
+        date: '2026-07-31',
+        shift_number: 2,
+        oil_data: {
+          moving_oil: { product_name: 'زيت متحرك', added: 3, remaining: 13, sold: 0 },
+          idle_oil: { product_name: 'زيت ساكن', added: 0, remaining: 20, sold: 0 }
+        }
+      }
+    ]
+  });
+
+  assert.ok(view.oil_rows.some((row) => row.product === 'زيت متحرك'));
+  assert.equal(view.oil_rows.some((row) => row.product === 'زيت ساكن'), false);
+});
+
 test('marks reconciliation as missing when previous or current reading is unavailable', () => {
   const view = buildSalesReconciliationView({
     month: '2026-07',
@@ -182,5 +215,5 @@ test('includes configured products even when only product type fields are provid
   });
 
   assert.ok(view.fuel_rows.some((row) => row.product === 'بنزين ٩٢'));
-  assert.ok(view.oil_rows.some((row) => row.product === 'زيت أ'));
+  assert.equal(view.oil_rows.some((row) => row.product === 'زيت أ'), false);
 });

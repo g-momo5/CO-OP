@@ -37,6 +37,7 @@ class DatabaseSchema {
     this.createMonthlyProfitCustomValuesTable(db);
     this.createMonthlyAccountingDocumentsTable(db);
     this.createAccountingLabelDefaultsTable(db);
+    this.createAccountingLabelSuggestionIgnoresTable(db);
     this.createHomeLayoutSettingsTable(db);
     this.createAppUsersTable(db);
     this.createAppDevicesTable(db);
@@ -272,9 +273,15 @@ class DatabaseSchema {
       CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
+        is_active INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
+
+    const tableInfo = db.prepare("PRAGMA table_info(customers)").all();
+    if (!tableInfo.some((column) => column.name === 'is_active')) {
+      db.exec('ALTER TABLE customers ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+    }
   }
 
   static createCustomerBalanceAdjustmentsTable(db) {
@@ -478,6 +485,20 @@ class DatabaseSchema {
     `);
   }
 
+  static createAccountingLabelSuggestionIgnoresTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS accounting_label_suggestion_ignores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        side TEXT NOT NULL,
+        label TEXT NOT NULL,
+        ignored_at_month TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(side, label)
+      )
+    `);
+  }
+
   static createHomeLayoutSettingsTable(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS home_layout_settings (
@@ -645,6 +666,7 @@ class DatabaseSchema {
     // Invoices indexes
     db.exec('CREATE INDEX IF NOT EXISTS idx_fuel_invoices_date ON fuel_invoices(date)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_oil_invoices_date ON oil_invoices(date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_customers_active ON customers(is_active)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_date ON customer_balance_adjustments(customer_name, effective_date)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_balance_adjustments_customer_id_date ON customer_balance_adjustments(customer_id, effective_date)');
 
@@ -656,6 +678,7 @@ class DatabaseSchema {
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_profit_custom_values_row_key ON monthly_profit_custom_values(row_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_monthly_accounting_documents_month_key ON monthly_accounting_documents(month_key)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_suggestion_ignores_side_label ON accounting_label_suggestion_ignores(side, label)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_seen ON app_devices(last_seen_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_app_devices_last_opened ON app_devices(last_opened_at)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)');
@@ -720,6 +743,8 @@ class DatabaseSchema {
       ensureColumn('fuel_movements', db.prepare("PRAGMA table_info(fuel_movements)").all(), 'product_code', 'TEXT');
       ensureColumn('fuel_invoices', db.prepare("PRAGMA table_info(fuel_invoices)").all(), 'product_code', 'TEXT');
       ensureColumn('oil_invoices', db.prepare("PRAGMA table_info(oil_invoices)").all(), 'product_code', 'TEXT');
+      ensureColumn('customers', db.prepare("PRAGMA table_info(customers)").all(), 'is_active', 'INTEGER NOT NULL DEFAULT 1');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_customers_active ON customers(is_active)');
 
       db.exec(`
         UPDATE products
@@ -998,6 +1023,13 @@ class DatabaseSchema {
         ensureColumn('accounting_label_defaults', accountingLabelDefaultsInfo, 'is_default', 'INTEGER DEFAULT 1');
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)');
+
+      const accountingLabelSuggestionIgnoresInfo = db.prepare("PRAGMA table_info(accounting_label_suggestion_ignores)").all();
+      if (accountingLabelSuggestionIgnoresInfo.length === 0) {
+        console.log('Creating accounting_label_suggestion_ignores table...');
+        this.createAccountingLabelSuggestionIgnoresTable(db);
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_accounting_label_suggestion_ignores_side_label ON accounting_label_suggestion_ignores(side, label)');
 
       const homeLayoutSettingsInfo = db.prepare("PRAGMA table_info(home_layout_settings)").all();
       if (homeLayoutSettingsInfo.length === 0) {

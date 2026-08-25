@@ -208,9 +208,17 @@ function normalizeManualRows(rows = [], side = 'debit') {
       auto: row?.auto === true,
       locked: row?.locked === true,
       can_save_default: row?.can_save_default === true,
+      manual_previous_increase: row?.manual_previous_increase === true || row?.manual_previous_increase === 1,
       save_as_default: row?.save_as_default === true
     }))
     .filter((row) => row.label || Math.abs(row.amount) > 0.0001);
+}
+
+function shouldPreservePreviousIncreaseAmount(row, previousIncrease = 0, forcePreviousIncrease = false) {
+  if (!row || forcePreviousIncrease) return false;
+  if (row.manual_previous_increase === true) return true;
+  if (row.auto !== true) return true;
+  return Math.abs(row.amount) > 0.0001 || Math.abs(previousIncrease) < 0.0001;
 }
 
 function normalizeDebitRows(rows = [], options = {}) {
@@ -305,12 +313,14 @@ function normalizeCreditRows(rows = [], monthKey, previousIncrease = 0, options 
     if (index >= 0) consumed.add(index);
     const row = index >= 0 ? manualRows[index] : null;
     if (!row && !defaultVisible && !includeInactiveDefaults) return [];
+    const preservePreviousIncreaseAmount = isPreviousIncrease
+      && shouldPreservePreviousIncreaseAmount(row, previousIncrease, forcePreviousIncrease);
     return {
       row_key: definition.row_key,
       label: isPreviousIncrease || SYSTEM_LOCKED_ACCOUNTING_ROW_KEYS.has(definition.row_key) ? label : (row?.label || label),
       default_label: label,
       amount: isPreviousIncrease
-        ? (row && !forcePreviousIncrease ? row.amount : normalizeAccountingAmount(previousIncrease))
+        ? (preservePreviousIncreaseAmount ? row.amount : normalizeAccountingAmount(previousIncrease))
         : (row ? row.amount : 0),
       fixed: true,
       auto: isPreviousIncrease,
@@ -318,6 +328,9 @@ function normalizeCreditRows(rows = [], monthKey, previousIncrease = 0, options 
       can_save_default: !SYSTEM_LOCKED_ACCOUNTING_ROW_KEYS.has(definition.row_key),
       is_visible_default: defaultVisible,
       is_default_label: normalizeAccountingProfitLabel(row?.label || label) === normalizeAccountingProfitLabel(label),
+      manual_previous_increase: isPreviousIncrease && preservePreviousIncreaseAmount && (
+        row?.manual_previous_increase === true || row?.auto !== true
+      ),
       save_as_default: row?.save_as_default === true
     };
   });
@@ -475,6 +488,78 @@ function isPreviousAccountingIncreaseRow(row = {}) {
     || label.startsWith('زيادة محاسبة شهر');
 }
 
+function normalizeAccountingSuggestionSide(value) {
+  const side = String(value || '').trim();
+  return side === 'credit' ? 'credit' : side === 'debit' ? 'debit' : '';
+}
+
+function isSystemAccountingRowKey(rowKey = '') {
+  return Object.values(ACCOUNTING_ROW_KEYS).includes(String(rowKey || '').trim());
+}
+
+function isManualAccountingSuggestionRow(row = {}) {
+  const label = normalizeAccountingProfitLabel(row?.label);
+  const rowKey = String(row?.row_key || '').trim();
+  return Boolean(label)
+    && row?.fixed !== true
+    && row?.auto !== true
+    && !isSystemAccountingRowKey(rowKey)
+    && !isPreviousAccountingIncreaseRow(row);
+}
+
+function collectAccountingLabelSuggestions(documents = [], ignoredSuggestions = [], currentMonthKey = '') {
+  const currentMonth = normalizeMonth(currentMonthKey);
+  const suggestionsByKey = new Map();
+
+  (Array.isArray(documents) ? documents : []).forEach((document) => {
+    const monthKey = normalizeMonth(document?.month_key);
+    if (!monthKey || (currentMonth && monthKey >= currentMonth)) return;
+    const sourceData = document?.is_final === true || document?.is_final === 1
+      ? parseObject(document?.final_data, {})
+      : parseObject(document?.draft_data, {});
+
+    [
+      ['debit', sourceData?.debit_rows],
+      ['credit', sourceData?.credit_rows]
+    ].forEach(([side, rows]) => {
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (!isManualAccountingSuggestionRow(row)) return;
+        const label = normalizeAccountingProfitLabel(row.label);
+        const key = `${side}::${label}`;
+        const existing = suggestionsByKey.get(key);
+        if (!existing || monthKey > existing.last_used_month) {
+          suggestionsByKey.set(key, { side, label, last_used_month: monthKey });
+        }
+      });
+    });
+  });
+
+  const ignoredByKey = new Map();
+  (Array.isArray(ignoredSuggestions) ? ignoredSuggestions : []).forEach((entry) => {
+    const side = normalizeAccountingSuggestionSide(entry?.side);
+    const label = normalizeAccountingProfitLabel(entry?.label);
+    const ignoredAtMonth = normalizeMonth(entry?.ignored_at_month);
+    if (!side || !label || !ignoredAtMonth) return;
+    ignoredByKey.set(`${side}::${label}`, ignoredAtMonth);
+  });
+
+  const result = { debit: [], credit: [] };
+  Array.from(suggestionsByKey.entries()).forEach(([key, suggestion]) => {
+    const ignoredAtMonth = ignoredByKey.get(key);
+    if (ignoredAtMonth && suggestion.last_used_month <= ignoredAtMonth) return;
+    result[suggestion.side].push(suggestion);
+  });
+
+  Object.keys(result).forEach((side) => {
+    result[side].sort((a, b) => (
+      b.last_used_month.localeCompare(a.last_used_month)
+      || a.label.localeCompare(b.label, 'ar')
+    ));
+  });
+
+  return result;
+}
+
 function createAccountingProfitRowKey(rowType, label) {
   const source = `${rowType}:${normalizeAccountingProfitLabel(label)}`;
   let hash = 0;
@@ -619,6 +704,7 @@ module.exports = {
   calculateAccountingTotals,
   calculateFuelPurchaseRowTotal,
   calculateFuelPurchaseTotal,
+  collectAccountingLabelSuggestions,
   createDefaultAccountingData,
   extractAccountingFuelPurchaseRows,
   extractAccountingProfitRows,

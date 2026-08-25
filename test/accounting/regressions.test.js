@@ -95,7 +95,7 @@ test('regression: full month net profit fixture', () => {
       { date: '2026-07-01', invoice_number: 'F-1', fuel_type: 'سولار', total: 9999, invoice_total: 9999 }
     ],
     oilInvoices: [
-      { date: '2026-07-02', invoice_number: 'O-1', total_purchase: 40 }
+      { date: '2026-07-02', invoice_number: 'O-1', total_purchase: 40, iva: 14 }
     ],
     monthlyInputs: [
       { month_key: '2026-07', bonuses: 10, commission_diff: 5, deposit_tax: 3, bonus_tax: 2 }
@@ -118,6 +118,6 @@ test('regression: full month net profit fixture', () => {
 
   assert.equal(rows[0].fuel_diesel, 500);
   assert.equal(rows[0].fuel_92, 521);
-  assert.equal(rows[0].oil_total, 50);
-  assert.equal(rows[0].net_profit, 1060);
+  assert.equal(rows[0].oil_total, 44.4);
+  assert.equal(rows[0].net_profit, 1054.4);
 });

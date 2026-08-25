@@ -8,6 +8,7 @@ const {
   toNumber
 } = require('./common');
 const { getFuelCounterCount } = require('./fuel-accounting');
+const { getOilSoldQuantity } = require('./oil-accounting');
 const { buildSalesSummaryView, normalizeFuelTypeForSalesSummary } = require('./sales-summary-view');
 
 const SALES_RECONCILIATION_TOLERANCE = 0.01;
@@ -211,6 +212,18 @@ function sumOilAdded(shifts, productName, startDate, endDate) {
     ), 0));
 }
 
+function hasOilMovementInMonth(shifts, productName, startDate, endDate, summaryQuantities = new Map()) {
+  const hasShiftMovement = shifts
+    .filter((shift) => inRange(shift?.date, startDate, endDate))
+    .some((shift) => getOilEntriesForProduct(shift, productName)
+      .some(([_entryKey, data]) => (
+        toNumber(data?.added) > 0
+        || getOilSoldQuantity(data) > 0
+      )));
+
+  return hasShiftMovement || toNumber(summaryQuantities.get(productName)) > 0;
+}
+
 function getSummaryQuantities(summaryRows = [], monthKey) {
   const quantities = new Map();
   summaryRows.forEach((row) => {
@@ -277,7 +290,15 @@ function buildFuelReconciliationRows({ monthKey, ranges, shifts, fuelNames, summ
 }
 
 function buildOilReconciliationRows({ monthKey, ranges, shifts, oilNames, summaryQuantities, tolerance }) {
-  return oilNames.map((product) => {
+  return oilNames
+    .filter((product) => hasOilMovementInMonth(
+      shifts,
+      product,
+      ranges.current.startDate,
+      ranges.current.endDate,
+      summaryQuantities
+    ))
+    .map((product) => {
     const previousReading = findLatestOilReading(shifts, product, ranges.previous.startDate, ranges.previous.endDate);
     const currentReading = findLatestOilReading(shifts, product, ranges.current.startDate, ranges.current.endDate);
     const added = sumOilAdded(shifts, product, ranges.current.startDate, ranges.current.endDate);

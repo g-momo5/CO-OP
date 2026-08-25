@@ -500,8 +500,11 @@ class DatabaseManager {
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS customers (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
+      is_active INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    await this.pgPool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1`);
+    await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_customers_active ON customers(is_active)`);
 
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS customer_balance_adjustments (
       id SERIAL PRIMARY KEY,
@@ -730,6 +733,21 @@ class DatabaseManager {
       await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_accounting_label_defaults_updated_at ON accounting_label_defaults(updated_at)`);
     } catch (err) {
       console.log('Accounting label defaults index creation:', err.message);
+    }
+
+    await this.pgPool.query(`CREATE TABLE IF NOT EXISTS accounting_label_suggestion_ignores (
+      id SERIAL PRIMARY KEY,
+      side TEXT NOT NULL,
+      label TEXT NOT NULL,
+      ignored_at_month TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(side, label)
+    )`);
+    try {
+      await this.pgPool.query(`CREATE INDEX IF NOT EXISTS idx_accounting_label_suggestion_ignores_side_label ON accounting_label_suggestion_ignores(side, label)`);
+    } catch (err) {
+      console.log('Accounting label suggestion ignores index creation:', err.message);
     }
 
     await this.pgPool.query(`CREATE TABLE IF NOT EXISTS home_layout_settings (
@@ -1196,7 +1214,7 @@ class DatabaseManager {
       'customers', 'customer_balance_adjustments', 'shifts', 'annual_inventories', 'company_voucher_settlements', 'safe_book_movements',
       'shift_balance_change_history', 'shift_corrections',
       'monthly_profit_inputs', 'monthly_profit_custom_rows', 'monthly_profit_custom_values',
-      'monthly_accounting_documents', 'accounting_label_defaults',
+      'monthly_accounting_documents', 'accounting_label_defaults', 'accounting_label_suggestion_ignores',
       'home_layout_settings',
       'app_devices', 'app_users',
       'land_seasons', 'land_plots', 'land_plot_terms', 'land_tenants',

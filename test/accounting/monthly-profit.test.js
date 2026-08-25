@@ -29,7 +29,7 @@ test('calculates monthly profit from shifts, invoices, inputs, and custom rows',
       { date: '2026-07-03', invoice_number: 'F1', fuel_type: 'سولار', total: 99999, invoice_total: 99999 }
     ],
     oilInvoices: [
-      { date: '2026-07-04', invoice_number: 'O1', total_purchase: 80, immediate_discount: 10, martyrs_tax: 5 }
+      { date: '2026-07-04', invoice_number: 'O1', total_purchase: 80, iva: 14, immediate_discount: 10, martyrs_tax: 5 }
     ],
     monthlyInputs: [
       { month_key: '2026-07', bonuses: 20, commission_diff: 30, deposit_tax: 5, bonus_tax: 3 }
@@ -63,11 +63,11 @@ test('calculates monthly profit from shifts, invoices, inputs, and custom rows',
   const july = rows[0];
   assert.equal(july.fuel_diesel, 700);
   assert.equal(july.fuel_80, 300.5);
-  assert.equal(july.oil_total, 85);
+  assert.equal(july.oil_total, 75.2);
   assert.equal(july.cash_insurance_month, 50.5);
-  assert.equal(july.total_positive, 1150.5);
+  assert.equal(july.total_positive, 1140.7);
   assert.equal(july.total_deductions, 87.5);
-  assert.equal(july.net_profit, 1063);
+  assert.equal(july.net_profit, 1053.2);
   assert.deepEqual(july.custom_values, { extra: 15, deduct: 7 });
 });
 

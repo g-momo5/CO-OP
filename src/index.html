@@ -343,74 +343,46 @@
                 </div>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="sales-summary" onclick="showScreen('sales-summary', 'home')">
+              <div class="home-grid-item action-card" data-home-item="sales-summary" onclick="showScreen('sales-summary', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-sales-summary"></use></svg></div>
                 <h3>ملخص المبيعات</h3>
-                <div class="home-stat-body" data-home-stat-card="sales-summary">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>عرض كميات وقيم المبيعات الشهرية</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="sales-reconciliation" onclick="showScreen('sales-reconciliation', 'home')">
+              <div class="home-grid-item action-card" data-home-item="sales-reconciliation" onclick="showScreen('sales-reconciliation', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-sales-reconciliation"></use></svg></div>
                 <h3>مراجعة المبيعات</h3>
-                <div class="home-stat-body" data-home-stat-card="sales-reconciliation">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>مطابقة العدادات والرواكد مع الملخص</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="safe-book" onclick="showScreen('safe-book', 'home')">
+              <div class="home-grid-item action-card" data-home-item="safe-book" onclick="showScreen('safe-book', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-safe-book"></use></svg></div>
                 <h3>دفتر الخزينة</h3>
-                <div class="home-stat-body" data-home-stat-card="safe-book">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>متابعة حركة الخزينة والرصيد</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="profit" onclick="showScreen('profit', 'home')">
+              <div class="home-grid-item action-card" data-home-item="profit" onclick="showScreen('profit', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-profit"></use></svg></div>
                 <h3>المكسب</h3>
-                <div class="home-stat-body" data-home-stat-card="profit">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>متابعة أرباح المحطة</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="expenses" onclick="showScreen('expenses', 'home')">
+              <div class="home-grid-item action-card" data-home-item="expenses" onclick="showScreen('expenses', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-expenses"></use></svg></div>
                 <h3>المصاريف</h3>
-                <div class="home-stat-body" data-home-stat-card="expenses">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>عرض وتتبع المصروفات</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="company-vouchers" onclick="showScreen('company-vouchers', 'home')">
+              <div class="home-grid-item action-card" data-home-item="company-vouchers" onclick="showScreen('company-vouchers', 'home')">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-company-vouchers"></use></svg></div>
                 <h3>بونات الشركة</h3>
-                <div class="home-stat-body" data-home-stat-card="company-vouchers">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>متابعة البونات المباشرة والمحصلة</p>
               </div>
 
-              <div class="home-grid-item action-card home-stat-card" data-home-item="customer-invoices" onclick="openCustomerInvoices()">
+              <div class="home-grid-item action-card" data-home-item="customer-invoices" onclick="openCustomerInvoices()">
                 <div class="card-icon"><svg aria-hidden="true" focusable="false"><use href="#home-icon-customers"></use></svg></div>
                 <h3>فواتير العملاء</h3>
-                <div class="home-stat-body" data-home-stat-card="customer-invoices">
-                  <strong class="home-stat-value">-</strong>
-                  <span class="home-stat-meta">جاري التحميل...</span>
-                  <div class="home-stat-rows"></div>
-                </div>
+                <p>عرض فواتير العملاء وأرصدتهم</p>
               </div>
 
               <div class="home-grid-item action-card" data-home-item="tank-management" onclick="showScreen('tank-management', 'home')">
@@ -1865,6 +1837,10 @@
           </div>
 
           <div class="invoice-summary">
+            <div class="summary-row tax-row">
+              <span>ضريبة مضافة:</span>
+              <span id="oil-value-added-tax">0.00 جنيه</span>
+            </div>
             <div class="summary-row discount-row">
               <label for="immediate-discount">خصم فورى:</label>
               <input type="number" id="immediate-discount" min="0" step="0.01" value="0" placeholder="0.00">
