@@ -10435,6 +10435,32 @@ function prepareLocalizedNumericInput(input) {
   input.dir = 'ltr';
 }
 
+function prepareShiftNumericTextInput(input) {
+  if (
+    !(input instanceof HTMLInputElement)
+    || input.type !== 'number'
+    || !input.closest('#shift-entry-screen')
+  ) {
+    return;
+  }
+
+  // Native number controls can discard mixed Arabic/Western digits before the
+  // input handler sees them. Text controls keep the raw value so our shared
+  // localized-number normalizer can always convert it to ASCII for calculations.
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.lang = 'en';
+  input.dir = 'ltr';
+  input.classList.add('shift-numeric-text-input');
+  normalizeLocalizedNumericInputValue(input);
+}
+
+function prepareShiftNumericTextInputs() {
+  document.querySelectorAll('#shift-entry-screen input[type="number"]')
+    .forEach(prepareShiftNumericTextInput);
+}
+
 function getShiftInputSelection(input) {
   try {
     const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
@@ -10566,6 +10592,7 @@ function initializeLocalizedNumericInputHandling() {
   document.querySelectorAll('input[type="number"]').forEach(prepareLocalizedNumericInput);
 
   document.addEventListener('focusin', (event) => {
+    prepareShiftNumericTextInput(event.target);
     prepareLocalizedNumericInput(event.target);
   }, true);
 
@@ -10727,8 +10754,27 @@ function getShiftFuelCustomerHorizontalFields() {
   return fuelFields;
 }
 
+function isShiftCustomerFirstColumnField(field) {
+  return Boolean(field?.matches?.(
+    '#customers-table-body tr[data-customer-row] input[data-field="diesel"]'
+  ));
+}
+
+function getLastShiftFuelCounterField() {
+  for (let index = SHIFT_FUEL_LAST_COUNTER_FIELD_IDS.length - 1; index >= 0; index -= 1) {
+    const field = document.getElementById(SHIFT_FUEL_LAST_COUNTER_FIELD_IDS[index]);
+    if (isShiftNavigationField(field)) return field;
+  }
+
+  return null;
+}
+
 function findAdjacentShiftFuelCustomerField(currentField, direction) {
   if (direction !== 'ArrowLeft' && direction !== 'ArrowRight') return null;
+
+  if (direction === 'ArrowRight' && isShiftCustomerFirstColumnField(currentField)) {
+    return getLastShiftFuelCounterField();
+  }
 
   const fields = getShiftFuelCustomerHorizontalFields();
   const currentIndex = fields.indexOf(currentField);
@@ -15834,7 +15880,7 @@ function handleCustomerInput(rowIndex) {
   // Check if input is in the last row
   if (rowIndex === lastRowIndex) {
     // Check if any field in the last row has a value
-    const inputs = lastRow.querySelectorAll('input[type="number"], [data-field="name"]');
+    const inputs = lastRow.querySelectorAll('.customer-fuel-input, [data-field="name"]');
     const hasValue = Array.from(inputs).some(input => input.value.trim() !== '');
 
     if (hasValue) {
@@ -16715,6 +16761,7 @@ async function saveShift() {
 
   const saveButton = document.getElementById('save-shift-btn');
   const originalSaveButtonText = saveButton?.textContent || 'حفظ الوردية';
+  const editingControlsState = captureShiftEditingControlsState();
   let savedSuccessfully = false;
 
   try {
@@ -16732,6 +16779,7 @@ async function saveShift() {
     if (errors.length > 0) {
       currentShiftData.hasUnsavedChanges = true;
       setShiftDraftStatus('dirty', 'صحح الأخطاء ثم أعد الحفظ');
+      restoreShiftEditingControlsAfterFailedSave(editingControlsState);
       alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
       return;
     }
@@ -16798,6 +16846,7 @@ async function saveShift() {
       if (result.error === 'validation_failed' && Array.isArray(result.validationErrors) && result.validationErrors.length > 0) {
         currentShiftData.hasUnsavedChanges = true;
         setShiftDraftStatus('dirty', 'صحح الأخطاء ثم أعد الحفظ');
+        restoreShiftEditingControlsAfterFailedSave(editingControlsState);
         alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
         return;
       }
@@ -16815,7 +16864,7 @@ async function saveShift() {
       saveButton.textContent = originalSaveButtonText;
     }
     if (!savedSuccessfully) {
-      restoreShiftEditingControlsAfterFailedSave();
+      restoreShiftEditingControlsAfterFailedSave(editingControlsState);
     }
   }
 }
@@ -17094,10 +17143,41 @@ function setShiftIdentifierFieldsLocked(locked) {
   if (shiftNumberSelect) shiftNumberSelect.disabled = Boolean(locked);
 }
 
-function restoreShiftEditingControlsAfterFailedSave() {
-  if (currentScreen !== 'shift-entry' || shiftViewMode === 'history') return;
+function captureShiftEditingControlsState() {
+  const shiftEntryScreen = document.getElementById('shift-entry-screen');
+  if (!shiftEntryScreen) return null;
+
+  const fields = Array.from(shiftEntryScreen.querySelectorAll('input, select, textarea'))
+    .map((field) => ({
+      field,
+      disabled: field.disabled,
+      readOnly: field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
+        ? field.readOnly
+        : undefined
+    }));
+
+  return { fields };
+}
+
+function restoreShiftEditingControlsAfterFailedSave(editingControlsState = null) {
+  if (shiftViewMode === 'history') return;
 
   disableReadOnlyMode();
+
+  if (Array.isArray(editingControlsState?.fields)) {
+    editingControlsState.fields.forEach(({ field, disabled, readOnly }) => {
+      if (!field?.isConnected) return;
+
+      field.disabled = Boolean(disabled);
+      if (
+        readOnly !== undefined
+        && (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)
+      ) {
+        field.readOnly = Boolean(readOnly);
+      }
+    });
+  }
+
   setShiftIdentifierFieldsLocked(shiftViewMode === 'correction');
   syncShiftVoucherControls();
 
@@ -18015,6 +18095,7 @@ async function saveShiftCorrection() {
 
   const saveButton = document.getElementById('save-shift-correction-btn');
   const originalSaveButtonText = saveButton?.textContent || 'حفظ التصحيح';
+  const editingControlsState = captureShiftEditingControlsState();
   let savedSuccessfully = false;
 
   try {
@@ -18029,6 +18110,7 @@ async function saveShiftCorrection() {
     const errors = validateShiftData();
     if (errors.length > 0) {
       setShiftDraftStatus('error');
+      restoreShiftEditingControlsAfterFailedSave(editingControlsState);
       alert(`أخطاء في البيانات:\n${errors.join('\n')}`);
       return;
     }
@@ -18055,6 +18137,7 @@ async function saveShiftCorrection() {
         && result.validationErrors.length > 0
       ) {
         setShiftDraftStatus('error');
+        restoreShiftEditingControlsAfterFailedSave(editingControlsState);
         alert(`أخطاء في البيانات:\n${result.validationErrors.join('\n')}`);
         return;
       }
@@ -18091,7 +18174,7 @@ async function saveShiftCorrection() {
       saveButton.textContent = originalSaveButtonText;
     }
     if (!savedSuccessfully) {
-      restoreShiftEditingControlsAfterFailedSave();
+      restoreShiftEditingControlsAfterFailedSave(editingControlsState);
     }
   }
 }
@@ -18876,6 +18959,7 @@ async function initializeShiftEntry() {
 
   // Load active oils
   await loadActiveOils();
+  prepareShiftNumericTextInputs();
   lockResetInlineFields();
   setShiftDraftStatus('idle');
 
@@ -18946,7 +19030,7 @@ async function initializeShiftEntry() {
 
         const isCustomerTableNavigation = Boolean(target.closest('.customers-table'));
         const isSummaryNavigation = Boolean(target.closest('.shift-summary-sidebar'));
-        if (target.type !== 'number' && !isCustomerTableNavigation && !isSummaryNavigation) {
+        if (!isShiftNumericInputTarget(target) && !isCustomerTableNavigation && !isSummaryNavigation) {
           return;
         }
 

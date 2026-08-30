@@ -10196,6 +10196,15 @@ select option {
   text-align: center !important;
 }
 
+#shift-entry-screen input.shift-numeric-text-input {
+  direction: ltr !important;
+}
+
+.customers-table input.customer-fuel-input {
+  width: 3.5rem;
+  direction: ltr !important;
+}
+
 .customers-table input.customer-name-select {
   width: 8rem;
   background-color: #fff;
