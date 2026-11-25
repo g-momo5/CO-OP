@@ -1816,6 +1816,10 @@ body.readonly-web {
   margin: 0.65rem 0 0;
 }
 
+.readonly-web .settings-price-row .settings-details {
+  margin-block-end: 0.65rem;
+}
+
 .readonly-web .settings-confirmation {
   margin: 0;
 }

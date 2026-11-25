@@ -4026,7 +4026,24 @@ function createMonthlyProfitChart(entries = []) {
   });
 }
 
+let priceEditProduct = null;
+let priceEditSaving = false;
+
+function priceRowsForEditor(products, type) {
+  if (!priceEditProduct) return products;
+  return products.filter((product) => type === priceEditProduct.type && product.id === priceEditProduct.id);
+}
+
+function appendPriceEffectiveDate(cell, date) {
+  if (!priceEditProduct || !date) return;
+  const note = document.createElement('small');
+  note.className = 'price-effective-date';
+  note.textContent = `ساري من ${formatDateOnlyDisplay(date)}`;
+  cell.appendChild(note);
+}
+
 async function loadFuelPrices() {
+  const priceProduct = priceEditProduct;
   try {
     const [pricesRaw, purchasePricesRaw] = await Promise.all([
       invokeCached('get-fuel-prices', {}, { ttlMs: 30_000 }),
@@ -4040,7 +4057,7 @@ async function loadFuelPrices() {
     fuelProductCodesByName = new Map((Array.isArray(prices) ? prices : [])
       .map(product => [String(product.fuel_type || '').trim(), String(product.product_code || '').trim()])
       .filter(([name]) => Boolean(name)));
-    renderFuelPriceRows(prices, purchasePrices);
+    if (priceProduct === priceEditProduct) renderFuelPriceRows(prices, purchasePrices);
   } catch (error) {
     console.error('Error loading fuel prices:', error);
   }
@@ -4052,6 +4069,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
 
   tbody.innerHTML = '';
   tbody.dataset.loaded = '1';
+  prices = priceRowsForEditor(prices, 'fuel');
 
   if (prices.length === 0) {
     const row = document.createElement('tr');
@@ -4084,6 +4102,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     const currentPriceCell = document.createElement('td');
     currentPriceCell.style.textAlign = 'center';
     currentPriceCell.textContent = formatArabicCurrency(parseFloat(product.price) || 0);
+    appendPriceEffectiveDate(currentPriceCell, product.effective_date);
 
     const newPriceCell = document.createElement('td');
     newPriceCell.style.textAlign = 'center';
@@ -4097,6 +4116,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     saleInput.autocomplete = 'off';
     saleInput.dataset.priceKind = 'sale';
     saleInput.dataset.productType = 'fuel';
+    saleInput.dataset.productId = product.id;
     saleInput.dataset.productName = productName;
     saleInput.dataset.productCode = productCode;
     saleInput.dataset.currentPrice = String(parseFloat(product.price) || 0);
@@ -4112,6 +4132,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     currentPurchaseCell.textContent = Number.isFinite(purchasePrice) && purchasePrice > 0
       ? formatArabicCurrencyPreserveDecimals(purchase.price)
       : '-';
+    appendPriceEffectiveDate(currentPurchaseCell, purchase.effective_date);
 
     const newPurchaseCell = document.createElement('td');
     newPurchaseCell.style.textAlign = 'center';
@@ -4125,6 +4146,7 @@ function renderFuelPriceRows(prices, purchasePrices = []) {
     purchaseInput.autocomplete = 'off';
     purchaseInput.dataset.priceKind = 'purchase';
     purchaseInput.dataset.productType = 'fuel';
+    purchaseInput.dataset.productId = product.id;
     purchaseInput.dataset.productName = productName;
     purchaseInput.dataset.productCode = productCode;
     purchaseInput.dataset.currentPrice = String(Number.isFinite(purchasePrice) ? purchasePrice : 0);
@@ -6401,70 +6423,79 @@ function updateOilType(itemId, oilType) {
 
 // Oil Prices Functions
 async function loadOilPrices() {
+  const priceProduct = priceEditProduct;
   try {
     const prices = await invokeCached('get-oil-prices', {}, { ttlMs: 30_000 });
-    const tbody = document.getElementById('oil-prices-table-body');
-
-    if (!tbody) return;
-
-    tbody.innerHTML = '';
-    tbody.dataset.loaded = '1';
-
-    if (!Array.isArray(prices) || prices.length === 0) {
-      const row = document.createElement('tr');
-      row.innerHTML = '<td colspan="3" style="text-align:center; color:#666;">لا توجد منتجات زيوت</td>';
-      tbody.appendChild(row);
-      initializePriceDate();
-      return;
-    }
-
-    prices.forEach((oil, index) => {
-      const oilName = oil.oil_type || '';
-      const row = document.createElement('tr');
-      row.dataset.product = oilName;
-
-      const nameCell = document.createElement('td');
-      nameCell.className = 'product-name';
-      nameCell.textContent = oilName;
-
-      const currentPriceCell = document.createElement('td');
-      currentPriceCell.style.textAlign = 'center';
-      currentPriceCell.textContent = formatArabicCurrency(parseFloat(oil.price) || 0);
-
-      const newPriceCell = document.createElement('td');
-      newPriceCell.style.textAlign = 'center';
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.id = `price-oil-${oil.id || index}`;
-      input.step = '0.01';
-      input.min = '0';
-      input.className = 'table-price-input';
-      input.placeholder = '0.00';
-      input.autocomplete = 'off';
-      input.dataset.productType = 'oil';
-      input.dataset.productName = oilName;
-      input.dataset.currentPrice = String(parseFloat(oil.price) || 0);
-      input.dataset.dirty = '0';
-      input.addEventListener('input', () => {
-        input.dataset.dirty = '1';
-      });
-      newPriceCell.appendChild(input);
-
-      row.appendChild(nameCell);
-      row.appendChild(currentPriceCell);
-      row.appendChild(newPriceCell);
-      tbody.appendChild(row);
-    });
-
-    // Initialize price date
-    initializePriceDate();
+    if (priceProduct === priceEditProduct) renderOilPriceRows(Array.isArray(prices) ? prices : []);
   } catch (error) {
     console.error('Error loading oil prices:', error);
   }
 }
 
+function renderOilPriceRows(prices) {
+  const tbody = document.getElementById('oil-prices-table-body');
+
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+  tbody.dataset.loaded = '1';
+  prices = priceRowsForEditor(prices, 'oil');
+
+  if (prices.length === 0) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td colspan="3" style="text-align:center; color:#666;">لا توجد منتجات زيوت</td>';
+    tbody.appendChild(row);
+    initializePriceDate();
+    return;
+  }
+
+  prices.forEach((oil, index) => {
+    const oilName = oil.oil_type || '';
+    const row = document.createElement('tr');
+    row.dataset.product = oilName;
+
+    const nameCell = document.createElement('td');
+    nameCell.className = 'product-name';
+    nameCell.textContent = oilName;
+
+    const currentPriceCell = document.createElement('td');
+    currentPriceCell.style.textAlign = 'center';
+    currentPriceCell.textContent = formatArabicCurrency(parseFloat(oil.price) || 0);
+    appendPriceEffectiveDate(currentPriceCell, oil.effective_date);
+
+    const newPriceCell = document.createElement('td');
+    newPriceCell.style.textAlign = 'center';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = `price-oil-${oil.id || index}`;
+    input.step = '0.01';
+    input.min = '0';
+    input.className = 'table-price-input';
+    input.placeholder = '0.00';
+    input.autocomplete = 'off';
+    input.dataset.productType = 'oil';
+    input.dataset.productId = oil.id;
+    input.dataset.productName = oilName;
+    input.dataset.productCode = String(oil.product_code || '').trim();
+    input.dataset.currentPrice = String(parseFloat(oil.price) || 0);
+    input.dataset.dirty = '0';
+    input.addEventListener('input', () => {
+      input.dataset.dirty = '1';
+    });
+    newPriceCell.appendChild(input);
+
+    row.appendChild(nameCell);
+    row.appendChild(currentPriceCell);
+    row.appendChild(newPriceCell);
+    tbody.appendChild(row);
+  });
+
+  initializePriceDate();
+}
+
 // Switch between fuel and oil price tabs
 function switchPriceType(type) {
+  if (priceEditProduct && priceEditProduct.type !== type) return;
   const priceEditModal = document.getElementById('price-edit-modal');
   const scope = priceEditModal || document;
 
@@ -6489,9 +6520,9 @@ function switchPriceType(type) {
 
   // Load missing data without clearing unsaved inputs on tab switches.
   if (type === 'fuel' && document.getElementById('fuel-prices-table-body')?.dataset.loaded !== '1') {
-    loadFuelPrices();
+    return loadFuelPrices();
   } else if (type === 'oil' && document.getElementById('oil-prices-table-body')?.dataset.loaded !== '1') {
-    loadOilPrices();
+    return loadOilPrices();
   }
 }
 
@@ -6524,6 +6555,8 @@ function parseSalePriceInputValue(value) {
 
 // Save all prices at once
 async function saveAllPrices() {
+  if (priceEditSaving) return;
+  const saveButton = document.getElementById('price-edit-save');
   const startDate = document.getElementById('price-start-date').value;
 
   if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
@@ -6543,9 +6576,14 @@ async function saveAllPrices() {
       if (input.dataset.dirty !== '1') {
         return;
       }
+      if (priceEditProduct && (
+        input.dataset.productType !== priceEditProduct.type || input.dataset.productId !== String(priceEditProduct.id)
+      )) {
+        return;
+      }
 
       const rawPrice = normalizeSalePriceInput(input.value);
-      if (rawPrice === '') {
+      if (rawPrice === '' && !input.validity.badInput) {
         return;
       }
 
@@ -6555,25 +6593,18 @@ async function saveAllPrices() {
       const priceKind = input.dataset.priceKind || 'sale';
       const price = parseSalePriceInputValue(rawPrice);
 
-      if (!productType || !productName || isNaN(price) || price <= 0) {
+      if (!productType || !productName || !Number.isFinite(price) || price <= 0) {
         invalidProducts.push(productName || '');
         return;
       }
 
+      const priceChange = { product_name: productName, price, start_date: startDate };
+      if (priceEditProduct) priceChange.product_id = priceEditProduct.id;
       if (priceKind === 'purchase') {
-        purchasePrices.push({
-          product_name: productName,
-          product_code: productCode,
-          price,
-          start_date: startDate
-        });
+        purchasePrices.push({ ...priceChange, product_code: productCode });
       } else {
-        salePrices.push({
-          product_type: productType,
-          product_name: productName,
-          price,
-          start_date: startDate
-        });
+        if (priceEditProduct) priceChange.product_code = productCode;
+        salePrices.push({ ...priceChange, product_type: productType });
       }
     });
 
@@ -6583,11 +6614,17 @@ async function saveAllPrices() {
     }
 
     if (salePrices.length === 0 && purchasePrices.length === 0) {
+      if (priceEditProduct) {
+        showMessage('يرجى إدخال سعر جديد واحد على الأقل', 'info');
+        return;
+      }
       showMessage('لم يتم إدخال أسعار جديدة؛ سيتم استخدام السعر السابق للحقول الفارغة', 'info');
       closePriceEditModal();
       return;
     }
 
+    priceEditSaving = true;
+    saveButton.disabled = true;
     const [saleResult, purchaseResult] = await Promise.all([
       salePrices.length > 0
         ? ipcRenderer.invoke('save-all-prices', salePrices)
@@ -6627,13 +6664,16 @@ async function saveAllPrices() {
       loadOilPrices(),
       loadManageProducts()
     ]);
-
-    closePriceEditModal();
-    showSettingsSectionWithoutHistory('manage-products');
   } catch (error) {
     showMessage('حدث خطأ أثناء حفظ الأسعار', 'error');
     console.error('Error saving prices:', error);
+    return;
+  } finally {
+    priceEditSaving = false;
+    saveButton.disabled = false;
   }
+  closePriceEditModal();
+  showSettingsSectionWithoutHistory('manage-products');
 }
 
 // Toggle VAT field visibility
@@ -6856,9 +6896,13 @@ function showSettingsSectionWithoutHistory(sectionName) {
   }
 }
 
-async function openPriceEditModal() {
+async function openPriceEditModal(selection = null) {
   const modal = document.getElementById('price-edit-modal');
-  if (!modal) return;
+  if (!modal || priceEditSaving) return;
+
+  priceEditProduct = selection;
+  document.getElementById('price-edit-title').textContent = selection ? 'تحديث السعر' : 'تعديل الأسعار';
+  modal.querySelector('.price-edit-tabs').hidden = Boolean(selection);
 
   const dateInput = document.getElementById('price-start-date');
   if (dateInput) {
@@ -6867,24 +6911,35 @@ async function openPriceEditModal() {
 
   const fuelBody = document.getElementById('fuel-prices-table-body');
   const oilBody = document.getElementById('oil-prices-table-body');
-  if (fuelBody) fuelBody.dataset.loaded = '';
-  if (oilBody) oilBody.dataset.loaded = '';
+  for (const body of [fuelBody, oilBody]) {
+    if (!body) continue;
+    body.dataset.loaded = '';
+    body.replaceChildren();
+  }
 
   modal.classList.add('show');
 
-  await Promise.all([
-    loadFuelPrices(),
-    loadOilPrices()
-  ]);
+  if (selection) {
+    const { type, product, purchase } = selection;
+    if (type === 'fuel') {
+      renderFuelPriceRows([product], purchase ? [purchase] : []);
+    } else {
+      renderOilPriceRows([product]);
+    }
+    switchPriceType(type);
+    modal.querySelector(`#${type}-prices-section .table-price-input`)?.focus();
+    return;
+  }
 
-  switchPriceType('fuel');
+  await Promise.all([switchPriceType('fuel'), loadOilPrices()]);
 }
 
 function closePriceEditModal() {
   const modal = document.getElementById('price-edit-modal');
-  if (!modal) return;
+  if (!modal || priceEditSaving) return;
 
   modal.classList.remove('show');
+  priceEditProduct = null;
   resetPriceInputs();
 }
 
@@ -7084,7 +7139,38 @@ async function saveAppDeviceDisplayName(input) {
   }
 }
 
-// Load manage products tables
+function createProductRowActions(type, product, purchase) {
+  const name = type === 'fuel' ? product.fuel_type : product.oil_type;
+  const actions = document.createElement('div');
+  actions.className = 'product-row-actions';
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.className = 'btn-icon';
+  editButton.title = 'تعديل الاسم';
+  editButton.setAttribute('aria-label', editButton.title);
+  editButton.onclick = () => editProductName(type, name, product.id);
+  editButton.innerHTML = getActionEditIconSvg();
+
+  const priceButton = document.createElement('button');
+  priceButton.type = 'button';
+  priceButton.className = 'btn btn-secondary product-price-action';
+  priceButton.textContent = 'تحديث السعر';
+  priceButton.onclick = () => openPriceEditModal({ type, id: product.id, name, product, purchase });
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'btn-icon btn-icon-danger';
+  deleteButton.title = 'حذف المنتج';
+  deleteButton.setAttribute('aria-label', deleteButton.title);
+  const deleteProduct = type === 'fuel' ? deleteFuelProduct : deleteOilProduct;
+  deleteButton.onclick = () => deleteProduct(name);
+  deleteButton.innerHTML = getActionDeleteIconSvg();
+
+  actions.append(editButton, priceButton, deleteButton);
+  return actions;
+}
+
 async function loadManageProducts() {
   try {
     // Remember which tab was active before reload
@@ -7152,25 +7238,7 @@ async function loadManageProducts() {
         td6.textContent = purchase.effective_date ? formatDateOnlyDisplay(purchase.effective_date) : '-';
 
         const td7 = document.createElement('td');
-        td7.style.textAlign = 'center';
-
-        // Edit button
-        const editBtn = document.createElement('button');
-        editBtn.className = 'btn-icon';
-        editBtn.title = 'تعديل الاسم';
-        editBtn.onclick = () => editProductName('fuel', product.fuel_type, product.id);
-        editBtn.innerHTML = getActionEditIconSvg();
-
-        // Delete button
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn-icon btn-icon-danger';
-        deleteBtn.title = 'حذف المنتج';
-        deleteBtn.style.marginLeft = '0.5rem';
-        deleteBtn.onclick = () => deleteFuelProduct(product.fuel_type);
-        deleteBtn.innerHTML = getActionDeleteIconSvg();
-
-        td7.appendChild(editBtn);
-        td7.appendChild(deleteBtn);
+        td7.appendChild(createProductRowActions('fuel', product, purchase));
 
         row.appendChild(td1);
         row.appendChild(td2);
@@ -7232,25 +7300,7 @@ async function loadManageProducts() {
         td4.textContent = formatArabicNumber(vat) + '%';
 
         const td5 = document.createElement('td');
-        td5.style.textAlign = 'center';
-
-        // Edit button
-        const editBtn = document.createElement('button');
-        editBtn.className = 'btn-icon';
-        editBtn.title = 'تعديل الاسم';
-        editBtn.onclick = () => editProductName('oil', product.oil_type, product.id);
-        editBtn.innerHTML = getActionEditIconSvg();
-
-        // Delete button
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn-icon btn-icon-danger';
-        deleteBtn.title = 'حذف المنتج';
-        deleteBtn.style.marginLeft = '0.5rem';
-        deleteBtn.onclick = () => deleteOilProduct(product.oil_type);
-        deleteBtn.innerHTML = getActionDeleteIconSvg();
-
-        td5.appendChild(editBtn);
-        td5.appendChild(deleteBtn);
+        td5.appendChild(createProductRowActions('oil', product));
 
         row.appendChild(td1);
         row.appendChild(td2);
@@ -7414,6 +7464,7 @@ async function deleteOilProduct(oilType) {
 async function showPriceHistory() {
   const modal = document.getElementById('price-history-modal');
   if (modal) {
+    const selectedName = priceEditProduct?.name;
     const fuelFilterGroup = document.getElementById('fuel-filter-group');
     const oilFilterGroup = document.getElementById('oil-filter-group');
     if (fuelFilterGroup) {
@@ -7458,6 +7509,10 @@ async function showPriceHistory() {
       }
     }
 
+    const filter = document.getElementById('history-product-filter');
+    if (selectedName && [...filter.options].some((option) => option.value === selectedName)) {
+      filter.value = selectedName;
+    }
     modal.classList.add('show');
     loadPriceHistory();
   }

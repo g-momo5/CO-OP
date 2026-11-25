@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20261125-settings">
+  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20261125-product-price">
 </head>
 <body class="readonly-web">
   <div class="app-container">
@@ -131,6 +131,9 @@
             ابتداءً من
             <input type="date" id="settingsPriceDate" required>
           </label>
+          <div id="settingsProductHistory" class="settings-actions" hidden>
+            <button type="button" class="settings-button secondary">سجل الأسعار</button>
+          </div>
           <div id="settingsPriceRows" class="settings-form"></div>
         </div>
         <p id="settingsConfirmation" class="settings-confirmation" hidden></p>
@@ -178,6 +181,7 @@
       <label class="settings-checkbox" hidden><input type="checkbox"> في البيع</label>
       <div class="settings-actions">
         <button type="button" class="settings-button secondary" data-record-edit>تعديل الاسم</button>
+        <button type="button" class="settings-button secondary" data-record-price hidden>تحديث السعر</button>
         <button type="button" class="settings-button danger" data-record-remove></button>
       </div>
     </article>
@@ -186,6 +190,7 @@
   <template id="settingsPriceRow">
     <fieldset class="settings-price-row">
       <legend></legend>
+      <dl class="settings-details" hidden></dl>
       <div class="settings-fields">
         <label class="settings-field">
           سعر البيع الجديد
@@ -200,7 +205,7 @@
   </template>
 
   <script src="/shared/readonly-ui.js?v=20260730-native-date-x-center"></script>
-  <script src="/mobile-assets/mobile-settings.js?v=20261125-settings"></script>
+  <script src="/mobile-assets/mobile-settings.js?v=20261125-product-price"></script>
   <script src="/mobile-assets/mobile.js?v=20261125-settings"></script>
 </body>
 </html>

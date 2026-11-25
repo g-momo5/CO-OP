@@ -2771,10 +2771,10 @@
       </div>
 
       <!-- Compact Price Edit Modal -->
-      <div id="price-edit-modal" class="modal">
+      <div id="price-edit-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="price-edit-title">
         <div class="modal-content modal-compact modal-medium">
           <div class="modal-header">
-            <h3>تعديل الأسعار</h3>
+            <h3 id="price-edit-title">تعديل الأسعار</h3>
             <button class="close-modal" onclick="closePriceEditModal()">&times;</button>
           </div>
           <div class="modal-body">
@@ -2830,7 +2830,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-primary" onclick="saveAllPrices()">حفظ</button>
+            <button class="btn btn-primary" id="price-edit-save" onclick="saveAllPrices()">حفظ</button>
             <button class="btn btn-secondary" onclick="closePriceEditModal()">إلغاء</button>
           </div>
         </div>

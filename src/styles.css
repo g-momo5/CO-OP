@@ -7899,6 +7899,28 @@ select option {
   margin-bottom: 0.75rem;
 }
 
+.price-edit-tabs[hidden] {
+  display: none;
+}
+
+.product-row-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.product-row-actions .product-price-action {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.price-effective-date {
+  display: block;
+}
+
 .price-edit-tabs .price-type-tab {
   padding: 0.35rem 1rem;
   font-size: 0.95rem;

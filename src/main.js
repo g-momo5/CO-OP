@@ -1791,6 +1791,14 @@ async function getProductByCodeOrName(productType, productCode, productName) {
   return null;
 }
 
+async function findProductForPriceChange(type, name, item) {
+  const code = String(item?.product_code || '').trim();
+  const product = await getProductByCodeOrName(type, code, name);
+  if (item?.product_id === undefined) return product;
+  if (product?.id !== item.product_id || (code && product?.product_code !== code)) return null;
+  return product;
+}
+
 async function withDesktopPriceWrite(product, write) {
   let startedWrite = false;
   if (dbManager.isOnline && dbManager.pgPool) {
@@ -2077,21 +2085,21 @@ function setupIPCHandlers() {
     }
 
     try {
-      const rows = await executeQuery('SELECT SUBSTR(date, 1, 7) AS month_key FROM shifts WHERE date IS NOT NULL');
+      const rows = await executeQuery('SELECT SUBSTR(CAST(date AS TEXT), 1, 7) AS month_key FROM shifts WHERE date IS NOT NULL');
       rows.forEach((row) => addMonth(row.month_key));
     } catch (error) {
       console.warn('Unable to read shifts months:', error.message);
     }
 
     try {
-      const rows = await executeQuery('SELECT SUBSTR(date, 1, 7) AS month_key FROM fuel_invoices WHERE date IS NOT NULL');
+      const rows = await executeQuery('SELECT SUBSTR(CAST(date AS TEXT), 1, 7) AS month_key FROM fuel_invoices WHERE date IS NOT NULL');
       rows.forEach((row) => addMonth(row.month_key));
     } catch (error) {
       console.warn('Unable to read fuel_invoices months:', error.message);
     }
 
     try {
-      const rows = await executeQuery('SELECT SUBSTR(date, 1, 7) AS month_key FROM oil_invoices WHERE date IS NOT NULL');
+      const rows = await executeQuery('SELECT SUBSTR(CAST(date AS TEXT), 1, 7) AS month_key FROM oil_invoices WHERE date IS NOT NULL');
       rows.forEach((row) => addMonth(row.month_key));
     } catch (error) {
       console.warn('Unable to read oil_invoices months:', error.message);
@@ -3763,7 +3771,7 @@ function setupIPCHandlers() {
           continue;
         }
 
-        const product = await getProductByCodeOrName(product_type, null, product_name);
+        const product = await findProductForPriceChange(product_type, product_name, item);
         const result = product && await withDesktopPriceWrite(product, (db, target) => saveSalePrice(db, target, price, start_date));
         if (!result?.found) {
           skipped.push({ product_name, reason: 'product_not_found' });
@@ -3815,7 +3823,6 @@ function setupIPCHandlers() {
 
       for (const item of prices) {
         const product_name = String(item?.product_name || item?.fuel_type || '').trim();
-        const product_code_input = String(item?.product_code || '').trim();
         const normalizedPrice = String(item?.price ?? '').replace(',', '.').trim();
         const price = parseFloat(normalizedPrice);
         const start_date = normalizeDateOnly(item?.start_date);
@@ -3834,7 +3841,7 @@ function setupIPCHandlers() {
           continue;
         }
 
-        const product = await getProductByCodeOrName('fuel', product_code_input, product_name);
+        const product = await findProductForPriceChange('fuel', product_name, item);
         const result = product && await withDesktopPriceWrite(product, (db, target) => savePurchasePrice(db, target, price, start_date));
         if (!result?.found) {
           skipped.push({ product_name, reason: 'product_not_found' });
@@ -4300,7 +4307,7 @@ ipcMain.handle('get-sales-summary', async () => {
       const loadSalesReconciliation = () => runMetric('sales-reconciliation', async () => {
         const monthSet = new Set();
         const shiftMonths = await executeQuery(
-          `SELECT DISTINCT SUBSTR(date, 1, 7) AS month_key
+          `SELECT DISTINCT SUBSTR(CAST(date AS TEXT), 1, 7) AS month_key
            FROM shifts
            WHERE is_saved = 1 AND date IS NOT NULL
            ORDER BY month_key DESC
@@ -4316,7 +4323,7 @@ ipcMain.handle('get-sales-summary', async () => {
 
         if (dbManager?.isOnline) {
           const saleMonths = await executeQuery(
-            `SELECT DISTINCT SUBSTR(date, 1, 7) AS month_key
+            `SELECT DISTINCT SUBSTR(CAST(date AS TEXT), 1, 7) AS month_key
              FROM sales
              WHERE date IS NOT NULL
              ORDER BY month_key DESC

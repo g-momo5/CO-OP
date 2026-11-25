@@ -110,10 +110,11 @@
     newProductType.value = state.productType;
     configureProductFields();
     byId('settingsPriceFields').hidden = !options.prices;
+    byId('settingsProductHistory').hidden = !options.priceProduct;
     priceRows.replaceChildren();
     if (options.prices) {
       byId('settingsPriceDate').value = localDate();
-      renderPriceFields();
+      renderPriceFields(options.priceProduct);
     }
     const confirmation = byId('settingsConfirmation');
     confirmation.hidden = !options.confirmation;
@@ -129,7 +130,25 @@
     }
   }
 
-  function renderPriceFields() {
+  function priceRow(product, showCurrent = false) {
+    const row = byId('settingsPriceRow').content.firstElementChild.cloneNode(true);
+    row.dataset.priceProduct = product.id;
+    row.querySelector('legend').textContent = product.name;
+    row.querySelector('[data-purchase-field]').hidden = product.type !== 'fuel';
+    if (showCurrent) {
+      fillDetails(row.querySelector('dl'), productPriceDetails(product));
+    } else {
+      row.querySelector('[data-sale-price]').placeholder = formatPrice(product.salePrice);
+      row.querySelector('[data-purchase-price]').placeholder = formatPrice(product.purchasePrice);
+    }
+    return row;
+  }
+
+  function renderPriceFields(product) {
+    if (product) {
+      priceRows.append(priceRow(product, true));
+      return;
+    }
     for (const [type, label] of Object.entries(labels)) {
       const products = state.products.filter((product) => product.type === type);
       if (!products.length) continue;
@@ -139,17 +158,19 @@
       const heading = document.createElement('summary');
       heading.textContent = label;
       group.append(heading);
-      for (const product of products) {
-        const row = byId('settingsPriceRow').content.firstElementChild.cloneNode(true);
-        row.dataset.priceProduct = product.id;
-        row.querySelector('legend').textContent = product.name;
-        row.querySelector('[data-sale-price]').placeholder = formatPrice(product.salePrice);
-        row.querySelector('[data-purchase-field]').hidden = product.type !== 'fuel';
-        row.querySelector('[data-purchase-price]').placeholder = formatPrice(product.purchasePrice);
-        group.append(row);
-      }
+      group.append(...products.map((item) => priceRow(item)));
       priceRows.append(group);
     }
+  }
+
+  function openPriceEditor(product) {
+    openEditor({
+      title: product ? 'تحديث السعر' : 'تعديل الأسعار',
+      prices: true,
+      priceProduct: product,
+      action: 'save-prices',
+      read: readPriceFields
+    });
   }
 
   function readPriceFields() {
@@ -209,6 +230,16 @@
     }
   }
 
+  function productPriceDetails(product) {
+    const fields = [['سعر البيع', formatPrice(product.salePrice)]];
+    if (product.saleDate) fields.push(['سريان البيع', formatDay(product.saleDate)]);
+    if (product.type === 'fuel') {
+      fields.push(['سعر الشراء', formatPrice(product.purchasePrice)]);
+      if (product.purchaseDate) fields.push(['سريان الشراء', formatDay(product.purchaseDate)]);
+    }
+    return fields;
+  }
+
   async function changeOilStatus(checkbox, product) {
     const active = checkbox.checked;
     checkbox.disabled = true;
@@ -229,12 +260,11 @@
     const card = byId('settingsRecord').content.firstElementChild.cloneNode(true);
     card.querySelector('h3').textContent = item.name;
     if (isProduct) {
-      const metrics = [['سعر البيع', formatPrice(item.salePrice)]];
-      if (item.saleDate) metrics.push(['سريان البيع', formatDay(item.saleDate)]);
-      if (item.type === 'fuel') {
-        metrics.push(['سعر الشراء', formatPrice(item.purchasePrice)]);
-        if (item.purchaseDate) metrics.push(['سريان الشراء', formatDay(item.purchaseDate)]);
-      } else {
+      const updatePrice = card.querySelector('[data-record-price]');
+      updatePrice.hidden = false;
+      updatePrice.addEventListener('click', () => openPriceEditor(item));
+      const metrics = productPriceDetails(item);
+      if (item.type === 'oil') {
         metrics.push(['الضريبة المضافة', `${number.format(item.vat)}٪`]);
         const checkbox = card.querySelector('input');
         checkbox.closest('label').hidden = false;
@@ -311,12 +341,14 @@
     return loadSection();
   }
 
-  function renderHistory(updateProducts) {
+  function renderHistory(updateProducts, product) {
     const byType = state.history.filter((entry) => !historyType.value || entry.type === historyType.value);
     if (updateProducts) {
       const options = new Map(byType.map(({ key, name }) => [String(key), name]));
+      if (product) options.set(String(product.id), product.name);
       const sorted = [...options].sort((left, right) => left[1].localeCompare(right[1], 'ar'));
       historyProduct.replaceChildren(new Option('كل المنتجات', ''), ...sorted.map(([key, name]) => new Option(name, key)));
+      if (product) historyProduct.value = String(product.id);
     }
     const rows = byType.filter((entry) => !historyProduct.value || String(entry.key) === historyProduct.value);
     if (!rows.length) {
@@ -341,7 +373,7 @@
     historyList.replaceChildren(...elements);
   }
 
-  async function loadHistory() {
+  async function loadHistory(product) {
     const version = ++state.historyVersion;
     historyType.disabled = true;
     historyProduct.disabled = true;
@@ -350,13 +382,19 @@
       const entries = await request('price-history');
       if (version !== state.historyVersion || !history.open) return;
       state.history = entries;
-      renderHistory(true);
+      renderHistory(true, product);
       historyType.disabled = false;
       historyProduct.disabled = false;
     } catch {
       if (version !== state.historyVersion || !history.open) return;
-      showListMessage(historyList, 'تعذر تحميل سجل الأسعار.', 'error', loadHistory);
+      showListMessage(historyList, 'تعذر تحميل سجل الأسعار.', 'error', () => loadHistory(product));
     }
+  }
+
+  function openPriceHistory(product) {
+    historyType.value = product?.type || '';
+    history.showModal();
+    void loadHistory(product);
   }
 
   root.querySelectorAll('[data-settings-section]').forEach((button) => {
@@ -386,12 +424,7 @@
     action: 'add-customer',
     read: () => ({ name: nameInput.value })
   }));
-  editPricesButton.addEventListener('click', () => openEditor({
-    title: 'تعديل الأسعار',
-    prices: true,
-    action: 'save-prices',
-    read: readPriceFields
-  }));
+  editPricesButton.addEventListener('click', () => openPriceEditor());
   newProductType.addEventListener('change', configureProductFields);
   editForm.addEventListener('submit', saveEditor);
   cancelButtons.forEach((button) => button.addEventListener('click', () => edit.close()));
@@ -400,10 +433,10 @@
   });
   edit.addEventListener('close', () => { state.editing = null; });
 
-  byId('settingsOpenHistory').addEventListener('click', () => {
-    historyType.value = '';
-    history.showModal();
-    void loadHistory();
+  byId('settingsOpenHistory').addEventListener('click', () => openPriceHistory());
+  byId('settingsProductHistory').querySelector('button').addEventListener('click', () => {
+    const product = state.editing?.priceProduct;
+    if (product && !state.saving) openPriceHistory(product);
   });
   byId('settingsCloseHistory').addEventListener('click', () => history.close());
   historyType.addEventListener('change', () => renderHistory(true));
