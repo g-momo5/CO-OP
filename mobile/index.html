@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20260730-native-date-x-center">
+  <link rel="stylesheet" href="/mobile-assets/mobile.css?v=20261125-settings">
 </head>
 <body class="readonly-web">
   <div class="app-container">
@@ -35,6 +35,36 @@
       <div id="content" class="content">
         <div class="loading">جار التحميل...</div>
       </div>
+      <section id="mobileSettings" class="mobile-settings section-stack" aria-labelledby="settingsTitle" hidden>
+        <header class="card">
+          <h2 id="settingsTitle">الإعدادات</h2>
+          <div class="settings-switch" role="group" aria-label="أقسام الإعدادات">
+            <button type="button" data-settings-section="products" aria-controls="settingsProducts" aria-pressed="true">إدارة المنتجات</button>
+            <button type="button" data-settings-section="customers" aria-controls="settingsCustomers" aria-pressed="false">إدارة العملاء</button>
+          </div>
+        </header>
+        <p id="settingsNotice" class="settings-notice" role="status" hidden></p>
+        <section id="settingsProducts" class="section-stack" aria-label="إدارة المنتجات">
+          <div class="card settings-toolbar">
+            <div class="settings-switch" role="group" aria-label="نوع المنتج">
+              <button type="button" data-settings-type="fuel" aria-controls="settingsProductsList" aria-pressed="true">الوقود</button>
+              <button type="button" data-settings-type="oil" aria-controls="settingsProductsList" aria-pressed="false">الزيوت</button>
+            </div>
+            <div class="settings-actions">
+              <button type="button" class="settings-button" id="settingsAddProduct">إضافة منتج جديد</button>
+              <button type="button" class="settings-button secondary" id="settingsEditPrices" disabled>تعديل الأسعار</button>
+              <button type="button" class="settings-button secondary" id="settingsOpenHistory">سجل الأسعار</button>
+            </div>
+          </div>
+          <div id="settingsProductsList" class="settings-records"></div>
+        </section>
+        <section id="settingsCustomers" class="section-stack" aria-label="إدارة العملاء" hidden>
+          <div class="card settings-actions">
+            <button type="button" class="settings-button" id="settingsAddCustomer">إضافة عميل جديد</button>
+          </div>
+          <div id="settingsCustomersList" class="settings-records"></div>
+        </section>
+      </section>
     </main>
 
     <nav class="bottom-navigation" aria-label="Mobile sections">
@@ -48,6 +78,7 @@
       </div>
       <span class="mobile-nav-separator" aria-hidden="true">|</span>
       <button class="nav-btn active" data-view="overview">الرئيسية</button>
+      <button class="nav-btn" type="button" data-view="settings">الإعدادات</button>
       <button class="nav-btn" data-view="sales-summary">ملخص المبيعات</button>
       <button class="nav-btn" data-view="profit">المكسب</button>
       <button class="nav-btn" data-view="expenses">المصاريف</button>
@@ -67,7 +98,109 @@
     </div>
   </dialog>
 
+  <dialog id="settingsEditDialog" class="mobile-modal settings-dialog" aria-labelledby="settingsEditTitle">
+    <div class="mobile-modal-panel">
+      <div class="settings-dialog-heading">
+        <h2 id="settingsEditTitle"></h2>
+        <button type="button" class="modal-close" data-cancel-edit aria-label="إغلاق">×</button>
+      </div>
+      <form id="settingsEditForm" class="settings-form" novalidate>
+        <label id="settingsNameField" class="settings-field">
+          <span id="settingsNameLabel"></span>
+          <input id="settingsName" type="text" autocomplete="off" required>
+        </label>
+        <div id="settingsNewProductFields" class="settings-form" hidden>
+          <label class="settings-field">
+            نوع المنتج
+            <select id="settingsNewProductType">
+              <option value="fuel">وقود</option>
+              <option value="oil">زيت</option>
+            </select>
+          </label>
+          <label class="settings-field">
+            سعر البيع
+            <input id="settingsNewProductPrice" type="text" inputmode="decimal" autocomplete="off" required>
+          </label>
+          <label id="settingsVatField" class="settings-field" hidden>
+            الضريبة المضافة (%)
+            <input id="settingsVat" type="text" inputmode="decimal" autocomplete="off" placeholder="٠">
+          </label>
+        </div>
+        <div id="settingsPriceFields" class="settings-form" hidden>
+          <label class="settings-field">
+            ابتداءً من
+            <input type="date" id="settingsPriceDate" required>
+          </label>
+          <div id="settingsPriceRows" class="settings-form"></div>
+        </div>
+        <p id="settingsConfirmation" class="settings-confirmation" hidden></p>
+        <p id="settingsFormError" class="settings-notice" data-tone="error" role="alert" hidden></p>
+        <div class="settings-actions settings-form-actions">
+          <button type="submit" class="settings-button" id="settingsSave"></button>
+          <button type="button" class="settings-button secondary" data-cancel-edit>إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="settingsHistoryDialog" class="mobile-modal settings-dialog" aria-labelledby="settingsHistoryTitle">
+    <div class="mobile-modal-panel">
+      <div class="settings-dialog-heading">
+        <h2 id="settingsHistoryTitle">سجل الأسعار</h2>
+        <button type="button" class="modal-close" id="settingsCloseHistory" aria-label="إغلاق">×</button>
+      </div>
+      <div class="settings-form">
+        <div class="settings-fields">
+          <label class="settings-field">
+            النوع
+            <select id="settingsHistoryType">
+              <option value="">الكل</option>
+              <option value="fuel">الوقود</option>
+              <option value="oil">الزيوت</option>
+            </select>
+          </label>
+          <label class="settings-field">
+            المنتج
+            <select id="settingsHistoryProduct">
+              <option value="">كل المنتجات</option>
+            </select>
+          </label>
+        </div>
+        <div id="settingsHistoryList" class="settings-form"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <template id="settingsRecord">
+    <article class="card settings-record">
+      <h3></h3>
+      <dl class="settings-details" hidden></dl>
+      <label class="settings-checkbox" hidden><input type="checkbox"> في البيع</label>
+      <div class="settings-actions">
+        <button type="button" class="settings-button secondary" data-record-edit>تعديل الاسم</button>
+        <button type="button" class="settings-button danger" data-record-remove></button>
+      </div>
+    </article>
+  </template>
+
+  <template id="settingsPriceRow">
+    <fieldset class="settings-price-row">
+      <legend></legend>
+      <div class="settings-fields">
+        <label class="settings-field">
+          سعر البيع الجديد
+          <input type="text" inputmode="decimal" autocomplete="off" data-sale-price>
+        </label>
+        <label class="settings-field" data-purchase-field>
+          سعر الشراء الجديد
+          <input type="text" inputmode="decimal" autocomplete="off" data-purchase-price>
+        </label>
+      </div>
+    </fieldset>
+  </template>
+
   <script src="/shared/readonly-ui.js?v=20260730-native-date-x-center"></script>
-  <script src="/mobile-assets/mobile.js?v=20260730-native-date-x-center"></script>
+  <script src="/mobile-assets/mobile-settings.js?v=20261125-settings"></script>
+  <script src="/mobile-assets/mobile.js?v=20261125-settings"></script>
 </body>
 </html>

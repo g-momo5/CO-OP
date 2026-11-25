@@ -443,6 +443,14 @@
       button.classList.toggle('active', button.dataset.view === view);
     });
     keepActiveNavigationVisible();
+    const settings = window.CoopMobileSettings;
+    content.hidden = view === 'settings';
+    if (view === 'settings') {
+      disconnectShiftLoadHandler();
+      await settings.open();
+      return;
+    }
+    settings.close();
 
     try {
       if (view === 'overview') await loadOverview();

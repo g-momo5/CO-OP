@@ -992,6 +992,7 @@ class DatabaseManager {
     // Replace PostgreSQL specific functions
     sqliteSql = sqliteSql.replace(/CURRENT_TIMESTAMP/gi, "strftime('%s', 'now')");
     sqliteSql = sqliteSql.replace(/NOW\(\)/gi, "strftime('%s', 'now')");
+    sqliteSql = sqliteSql.replace(/STATEMENT_TIMESTAMP\(\)/gi, "strftime('%s', 'now')");
 
     // Remove RETURNING clause (SQLite doesn't support it)
     sqliteSql = sqliteSql.replace(/RETURNING\s+\w+/gi, '');

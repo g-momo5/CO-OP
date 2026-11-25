@@ -2,7 +2,7 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-if (process.env.VERCEL) {
+if (process.env.VERCEL || process.argv.includes('--mobile')) {
   const root = path.resolve(__dirname, '..');
   const publicDir = path.join(root, 'public');
 
@@ -17,7 +17,7 @@ if (process.env.VERCEL) {
   fs.copyFileSync(path.join(root, 'assets', 'logo_cpc.png'), path.join(publicDir, 'assets', 'logo_cpc.png'));
   fs.copyFileSync(path.join(root, 'mobile', 'index.html'), path.join(publicDir, 'index.html'));
 
-  console.log('Prepared Vercel public output for the mobile read-only app.');
+  console.log('Prepared public output for the mobile app.');
   process.exit(0);
 }
 

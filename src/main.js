@@ -9,6 +9,16 @@ const nodemailer = require('nodemailer');
 const DatabaseManager = require('./database-manager');
 const SyncManager = require('./sync-manager');
 const { CustomerService, normalizeCustomerName } = require('./customer-service');
+const {
+  createOilProduct,
+  createProduct: insertProduct,
+  generateProductCode,
+  listPurchasePrices,
+  savePurchasePrice,
+  saveSalePrice,
+  todayDate
+} = require('./product-prices');
+const { withPostgresTransaction } = require('./postgres-transaction');
 const { LAND_TABLES, registerLandIpcHandlers } = require('./land-service');
 const {
   buildCascadeUpdates,
@@ -903,11 +913,12 @@ async function executeInsert(query, params = [], tableName = 'unknown') {
   return result;
 }
 
-const customerService = new CustomerService({
+const desktopDb = {
   query: executeQuery,
   update: executeUpdate,
   insert: executeInsert
-});
+};
+const customerService = new CustomerService(desktopDb);
 
 function getAppSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -1756,11 +1767,6 @@ function isDatabaseConnectionError(error) {
   ].some((fragment) => message.includes(fragment));
 }
 
-function generateProductCode(productType) {
-  const cleanType = String(productType || 'product').replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase();
-  return `${cleanType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
 async function getProductByCodeOrName(productType, productCode, productName) {
   const cleanType = String(productType || '').trim();
   const cleanCode = String(productCode || '').trim();
@@ -1785,79 +1791,31 @@ async function getProductByCodeOrName(productType, productCode, productName) {
   return null;
 }
 
-function normalizeDateOnlyValue(value) {
-  if (!value) return '';
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().split('T')[0];
+async function withDesktopPriceWrite(product, write) {
+  let startedWrite = false;
+  if (dbManager.isOnline && dbManager.pgPool) {
+    try {
+      const result = await withPostgresTransaction(dbManager.pgPool, async (db) => {
+        let target = product;
+        if (product.id) {
+          const rows = await db.query(
+            'SELECT id, product_type, product_name, product_code FROM products WHERE id = $1 FOR UPDATE',
+            [product.id]
+          );
+          if (!rows[0]) return { found: false };
+          target = rows[0];
+        }
+        startedWrite = true;
+        return { found: true, value: await write(db, target) };
+      });
+      if (result.found) invalidateViewCache('write');
+      return result;
+    } catch (error) {
+      if (startedWrite || !isDatabaseConnectionError(error)) throw error;
+      dbManager.isOnline = false;
+    }
   }
-
-  const raw = String(value).trim();
-  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (dateOnlyMatch) {
-    return dateOnlyMatch[1];
-  }
-
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
-}
-
-function getTodayDateOnly() {
-  return new Date().toISOString().split('T')[0];
-}
-
-async function getCurrentPurchasePriceFromHistory(product, currentDate = getTodayDateOnly()) {
-  const productId = product?.product_id || product?.id || null;
-  const productCode = String(product?.product_code || '').trim();
-  const fuelType = String(product?.fuel_type || product?.product_name || '').trim();
-  const normalizedCurrentDate = normalizeDateOnlyValue(currentDate) || getTodayDateOnly();
-
-  const rows = await executeQuery(
-    `
-      SELECT id, fuel_type, product_code, price, start_date, product_id, created_at
-      FROM purchase_price_history
-      WHERE (
-          product_id = $1
-          OR product_code = NULLIF($2, '')
-          OR (product_id IS NULL AND (product_code IS NULL OR TRIM(product_code) = '') AND fuel_type = $3)
-        )
-        AND start_date <= $4
-      ORDER BY created_at DESC, start_date DESC, id DESC
-      LIMIT 1
-    `,
-    [productId, productCode, fuelType, normalizedCurrentDate]
-  );
-
-  return rows[0] || null;
-}
-
-async function syncCurrentPurchasePriceFromHistory(product, currentDate = getTodayDateOnly()) {
-  const currentPrice = await getCurrentPurchasePriceFromHistory(product, currentDate);
-  if (!currentPrice) {
-    return null;
-  }
-
-  const fuelType = String(product?.fuel_type || product?.product_name || currentPrice.fuel_type || '').trim();
-  const productCode = String(product?.product_code || currentPrice.product_code || '').trim() || null;
-  const productId = product?.product_id || product?.id || currentPrice.product_id || null;
-  const effectiveDate = normalizeDateOnlyValue(currentPrice.start_date);
-
-  if (!fuelType || !effectiveDate) {
-    return null;
-  }
-
-  await executeUpdate(
-    `INSERT INTO purchase_prices (fuel_type, product_code, price, effective_date, product_id, updated_at)
-     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-     ON CONFLICT (fuel_type) DO UPDATE
-     SET product_code = EXCLUDED.product_code,
-         price = EXCLUDED.price,
-         effective_date = EXCLUDED.effective_date,
-         product_id = EXCLUDED.product_id,
-         updated_at = CURRENT_TIMESTAMP`,
-    [fuelType, productCode, currentPrice.price, effectiveDate, productId]
-  );
-
-  return { ...currentPrice, start_date: effectiveDate };
+  return { found: true, value: await write(desktopDb, product) };
 }
 
 async function migrateShiftProductDataKeys() {
@@ -1939,36 +1897,8 @@ async function migrateShiftProductDataKeys() {
   }
 }
 
-async function createProduct(productType, productName, price, extra = {}) {
-  const productCode = generateProductCode(productType);
-  const columns = ['product_type', 'product_name', 'product_code', 'current_price'];
-  const values = [productType, productName, productCode, price];
-
-  if (Object.prototype.hasOwnProperty.call(extra, 'vat')) {
-    columns.push('vat');
-    values.push(extra.vat);
-  }
-  if (Object.prototype.hasOwnProperty.call(extra, 'effective_date')) {
-    columns.push('effective_date');
-    values.push(extra.effective_date);
-  }
-  if (Object.prototype.hasOwnProperty.call(extra, 'display_order')) {
-    columns.push('display_order');
-    values.push(extra.display_order);
-  }
-
-  const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
-  await executeInsert(
-    `INSERT INTO products (${columns.join(', ')}) VALUES (${placeholders})`,
-    values,
-    'products'
-  );
-
-  const rows = await executeQuery(
-    'SELECT id, product_code FROM products WHERE product_code = $1 LIMIT 1',
-    [productCode]
-  );
-  return rows[0] || { product_code: productCode };
+function createProduct(productType, productName, price, extra = {}) {
+  return insertProduct(desktopDb, productType, productName, price, extra);
 }
 
 // IPC Handlers setup function
@@ -3540,42 +3470,7 @@ function setupIPCHandlers() {
 
   ipcMain.handle('get-purchase-prices', async () => {
     try {
-      const currentDate = getTodayDateOnly();
-      const rows = await executeQuery(`
-        SELECT
-          pp.id,
-          p.id AS product_id,
-          p.product_code,
-          p.product_name AS fuel_type,
-          pp.price AS fallback_price,
-          pp.effective_date AS fallback_effective_date,
-          pp.updated_at
-        FROM products p
-        LEFT JOIN purchase_prices pp
-          ON pp.product_code = p.product_code
-          OR (pp.product_code IS NULL AND pp.fuel_type = p.product_name)
-        WHERE p.product_type = 'fuel'
-        ORDER BY p.product_name
-      `);
-
-      const purchasePrices = [];
-      for (const row of rows) {
-        const currentPrice = await getCurrentPurchasePriceFromHistory(row, currentDate);
-        const fallbackEffectiveDate = normalizeDateOnlyValue(row.fallback_effective_date);
-        const canUseFallback = !fallbackEffectiveDate || fallbackEffectiveDate <= currentDate;
-
-        purchasePrices.push({
-          id: row.id,
-          product_id: row.product_id,
-          product_code: row.product_code,
-          fuel_type: row.fuel_type,
-          price: currentPrice ? currentPrice.price : (canUseFallback ? row.fallback_price : null),
-          effective_date: currentPrice ? currentPrice.start_date : (canUseFallback ? row.fallback_effective_date : null),
-          updated_at: row.updated_at
-        });
-      }
-
-      return purchasePrices;
+      return await listPurchasePrices(desktopDb);
     } catch (error) {
       console.error('Error getting purchase prices:', error);
       throw error;
@@ -3584,24 +3479,11 @@ function setupIPCHandlers() {
 
   ipcMain.handle('update-purchase-price', async (event, { fuel_type, price }) => {
     try {
-      const product = await getProductByCodeOrName('fuel', null, fuel_type);
-      const productCode = product?.product_code || null;
-      const productId = product?.id || null;
-      const productName = product?.product_name || fuel_type;
-      const today = getTodayDateOnly();
-      await executeInsert(
-        `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-        [productName, productCode, price, today, productId],
-        'purchase_price_history'
-      );
-      await syncCurrentPurchasePriceFromHistory({
-        id: productId,
-        product_code: productCode,
-        product_name: productName
-      }, today);
-
-      return { success: true };
+      const product = await getProductByCodeOrName('fuel', null, fuel_type)
+        || { id: null, product_name: fuel_type, product_code: null };
+      const today = todayDate();
+      const result = await withDesktopPriceWrite(product, (db, target) => savePurchasePrice(db, target, price, today, today));
+      return { success: result.found };
     } catch (error) {
       console.error('Error updating purchase price:', error);
       throw error;
@@ -3725,13 +3607,7 @@ function setupIPCHandlers() {
       }
 
       // Insert new oil product with VAT
-      const vatValue = vat || 0;
-      const orderRows = await executeQuery(
-        'SELECT COALESCE(MAX(display_order), 0) AS max_order FROM products WHERE product_type = $1',
-        ['oil']
-      );
-      const nextOrder = (parseInt(orderRows[0]?.max_order, 10) || 0) + 1;
-      const product = await createProduct('oil', oil_type, price, { vat: vatValue, display_order: nextOrder });
+      const product = await createOilProduct(desktopDb, oil_type, price, vat || 0);
       return product.id || 1;
     } catch (error) {
       console.error('Error adding oil price:', error);
@@ -3887,32 +3763,14 @@ function setupIPCHandlers() {
           continue;
         }
 
-        // Get product_id and current effective_date from products table
-        const productQuery = 'SELECT id, product_code, effective_date FROM products WHERE product_type = $1 AND product_name = $2';
-        const productResult = await executeQuery(productQuery, [product_type, product_name]);
-
-        if (productResult.length === 0) {
-          console.warn(`Product not found: ${product_type} - ${product_name}`);
+        const product = await getProductByCodeOrName(product_type, null, product_name);
+        const result = product && await withDesktopPriceWrite(product, (db, target) => saveSalePrice(db, target, price, start_date));
+        if (!result?.found) {
           skipped.push({ product_name, reason: 'product_not_found' });
           continue;
         }
-
-        const product_id = productResult[0].id;
-        const product_code = productResult[0].product_code || null;
-        const current_effective_date = normalizeDateOnly(productResult[0].effective_date);
-
-        // Save to history with product_id (always save to history)
-        const historyQuery = 'INSERT INTO price_history (product_type, product_name, product_code, price, start_date, product_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)';
-        await executeInsert(historyQuery, [product_type, product_name, product_code, price, start_date, product_id], 'price_history');
         saved++;
-
-        // Update current price in products table ONLY if new date is more recent
-        // If no current date exists, always update
-        if (!current_effective_date || start_date >= current_effective_date) {
-          const updateQuery = 'UPDATE products SET current_price = $1, effective_date = $2 WHERE id = $3';
-          await executeUpdate(updateQuery, [price, start_date, product_id]);
-          updatedCurrent++;
-        }
+        if (result.value) updatedCurrent++;
       }
       return { success: true, saved, skipped, updatedCurrent };
     } catch (error) {
@@ -3977,35 +3835,14 @@ function setupIPCHandlers() {
         }
 
         const product = await getProductByCodeOrName('fuel', product_code_input, product_name);
-        if (!product) {
+        const result = product && await withDesktopPriceWrite(product, (db, target) => savePurchasePrice(db, target, price, start_date));
+        if (!result?.found) {
           skipped.push({ product_name, reason: 'product_not_found' });
           continue;
         }
-
-        const product_id = product.id;
-        const product_code = product.product_code || product_code_input || null;
-        const fuel_type = product.product_name || product_name;
-
-        await executeInsert(
-          `INSERT INTO purchase_price_history (fuel_type, product_code, price, start_date, product_id, created_at)
-           VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-          [fuel_type, product_code, price, start_date, product_id],
-          'purchase_price_history'
-        );
         saved++;
-
-        const currentPrice = await syncCurrentPurchasePriceFromHistory({
-          id: product_id,
-          product_code,
-          product_name: fuel_type
-        });
-        if (
-          currentPrice
-          && normalizeDateOnly(currentPrice.start_date) === start_date
-          && parseFloat(currentPrice.price) === price
-        ) {
-          updatedCurrent++;
-        }
+        const current = result.value;
+        if (current?.start_date === start_date && Number(current.price) === price) updatedCurrent++;
       }
 
       return { success: true, saved, skipped, updatedCurrent };

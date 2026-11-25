@@ -52,7 +52,7 @@ class CustomerService {
 
       const customerId = getCustomerId(existingCustomer.id);
       const updatedRows = await this.update(
-        'UPDATE customers SET is_active = 1 WHERE id = $1',
+        'UPDATE customers SET is_active = 1 WHERE id = $1 AND is_active = 0',
         [customerId]
       );
       if (!customerId || updatedRows < 1) {
@@ -62,7 +62,7 @@ class CustomerService {
     }
 
     return this.insert(
-      'INSERT INTO customers (name, is_active) VALUES ($1, 1)',
+      'INSERT INTO customers (name, is_active) VALUES ($1, 1) RETURNING id',
       [cleanName],
       'customers'
     );

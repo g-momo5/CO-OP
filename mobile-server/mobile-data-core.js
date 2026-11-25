@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+const { query } = require('./database');
 const { formatSurface, formatMoney, calculatePaymentSummary } = require('../src/land-domain');
 const {
   calculateMonthlyProfit,
@@ -6,8 +6,6 @@ const {
   findSupersededProfitCustomRowKeys
 } = require('../src/accounting/monthly-profit');
 const { buildAccountingProfitRows } = require('../src/accounting/monthly-accounting');
-
-let pool = null;
 
 const FUEL_ORDER = ['سولار', 'بنزين ٨٠', 'بنزين ٩٢', 'بنزين ٩٥', 'غاز سيارات'];
 const DEFAULT_EXPENSE_ROW_ORDER = [
@@ -19,31 +17,6 @@ const DEFAULT_EXPENSE_ROW_ORDER = [
   'رسوم البوسطة',
   'تامينات'
 ];
-
-function getDatabaseUrl() {
-  return process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL || '';
-}
-
-function getPool() {
-  const connectionString = getDatabaseUrl();
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is not configured');
-  }
-
-  if (!pool) {
-    pool = new Pool({
-      connectionString,
-      ssl: { rejectUnauthorized: false },
-      max: 5,
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 10000,
-      query_timeout: 20000,
-      statement_timeout: 20000
-    });
-  }
-
-  return pool;
-}
 
 function json(statusCode, payload) {
   return {
@@ -318,11 +291,6 @@ function sortArabicRowsByOrder(rows, order, labelKey = 'name') {
     }
     return aLabel.localeCompare(bLabel, 'ar');
   });
-}
-
-async function query(sql, params = []) {
-  const result = await getPool().query(sql, params);
-  return result.rows;
 }
 
 async function getLastDataTimestamp() {
