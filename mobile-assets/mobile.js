@@ -188,7 +188,7 @@
     try {
       const data = await api(view, range);
       if (!target.isConnected || state.currentView !== 'overview') return;
-      target.innerHTML = render(data);
+      target.innerHTML = render(data, range);
       if (view === 'home-chart') {
         setLastSync(data.lastSync);
         requestAnimationFrame(() => ui.mountHomeChart(data.chart || {}, homeChartRef));
@@ -209,9 +209,10 @@
     disconnectShiftLoadHandler();
     content.innerHTML = '<div data-overview-sales></div><div data-overview-finance></div>';
     const { fromMonth, toMonth } = ui.currentMonthRange();
+    const range = { fromMonth, toMonth };
     await Promise.all([
-      loadOverviewChart(content.querySelector('[data-overview-sales]'), 'home-chart', { fromMonth, toMonth }, ui.renderOverview),
-      loadOverviewChart(content.querySelector('[data-overview-finance]'), 'profit', ui.financialMonthRange(), ui.renderFinancialOverview)
+      loadOverviewChart(content.querySelector('[data-overview-sales]'), 'home-chart', range, ui.renderOverview),
+      loadOverviewChart(content.querySelector('[data-overview-finance]'), 'profit', range, ui.renderFinancialOverview)
     ]);
   }
 

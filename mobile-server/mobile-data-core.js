@@ -498,7 +498,7 @@ async function getProfit(queryParams) {
   const months = buildMonthRange(fromMonth, toMonth);
   const fromRange = monthToRange(fromMonth);
   const toRange = monthToRange(toMonth);
-  if (!months.length || !fromRange || !toRange) return { rows: [], customRows: [] };
+  if (!months.length || !fromRange || !toRange) return { rows: [], activeMonths: [], customRows: [] };
 
   const [manualRows, shiftRows, oilInvoiceRows, customRows, customValues, accountingDocumentRows] = await Promise.all([
     query('SELECT * FROM monthly_profit_inputs WHERE month_key BETWEEN $1 AND $2 ORDER BY month_key ASC', [fromMonth, toMonth]).catch(() => []),
@@ -569,9 +569,17 @@ async function getProfit(queryParams) {
     fromMonth,
     toMonth
   }).sort((a, b) => b.month_key.localeCompare(a.month_key));
+  const recordedMonths = new Set([
+    ...manualRows.map(({ month_key }) => normalizeMonth(month_key)),
+    ...shiftRows.map(({ date }) => normalizeMonth(normalizeDate(date))),
+    ...oilInvoiceRows.map(({ date }) => normalizeMonth(normalizeDate(date))),
+    ...visibleCustomValues.map(({ month_key }) => normalizeMonth(month_key)),
+    ...monthlyAccountingDocuments.map(({ month_key }) => month_key)
+  ]);
 
   return {
     rows,
+    activeMonths: months.filter((month) => recordedMonths.has(month)),
     customRows: [
       ...visibleCustomRows.map((row) => ({
         row_key: String(row?.row_key || '').trim(),

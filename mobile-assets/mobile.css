@@ -483,27 +483,18 @@ body.readonly-web {
   color: #854d0e;
 }
 
-.readonly-web .home-chart-box {
-  width: 100%;
-  height: 680px;
-  min-height: 680px;
-}
-
-.readonly-web .readonly-line-chart {
+.readonly-web .overview-chart-graphic {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 0.55rem;
-  padding: 0.4rem 0.35rem 0.2rem;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  -webkit-overflow-scrolling: touch;
+  gap: 0.5rem;
+  width: min(100%, 58rem);
+  margin-inline: auto;
+  direction: rtl;
 }
 
-.readonly-web .readonly-line-chart svg {
+.readonly-web .overview-chart-graphic svg {
+  display: block;
   width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  height: auto;
   direction: ltr;
 }
 
@@ -521,7 +512,7 @@ body.readonly-web {
 .readonly-web .chart-month-label {
   fill: var(--coop-muted);
   font-family: "Noto Naskh Arabic", Tahoma, Arial, sans-serif;
-  font-size: 14px;
+  font-size: 17px;
   text-anchor: middle;
 }
 
@@ -550,7 +541,7 @@ body.readonly-web {
   width: 0.85rem;
   height: 0.85rem;
   flex: 0 0 auto;
-  border-radius: 50%;
+  border-radius: 0.2rem;
   background: var(--legend-color);
 }
 
@@ -577,33 +568,15 @@ body.readonly-web {
   -webkit-overflow-scrolling: touch;
 }
 
-.readonly-web .chart-zoom-scroll .readonly-line-chart {
-  width: max-content;
-  min-width: 980px;
-  height: auto;
-  min-height: 0;
+.readonly-web .chart-zoom-scroll .overview-chart-graphic {
+  width: 100%;
+  min-width: 42rem;
   padding: 0.6rem;
 }
 
-.readonly-web .chart-zoom-scroll .readonly-line-chart svg {
-  width: 980px;
-  min-width: 980px;
-  height: auto;
-  min-height: 0;
-  aspect-ratio: 920 / 720;
-}
-
-.readonly-web .chart-zoom-scroll .chart-legend {
-  min-width: 980px;
-}
-
-.readonly-web .overview-chart-error,
-.readonly-web .financial-chart-graphic {
+.readonly-web .overview-chart-error {
   display: grid;
   gap: 0.5rem;
-}
-
-.readonly-web .overview-chart-error {
   justify-items: center;
 }
 
@@ -612,25 +585,23 @@ body.readonly-web {
   color: var(--coop-muted);
 }
 
-.readonly-web .financial-chart-graphic {
-  width: min(100%, 58rem);
-  margin-inline: auto;
-  direction: rtl;
+.readonly-web .sales-chart-line {
+  fill: none;
+  stroke: var(--series-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.readonly-web .financial-chart-graphic svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  direction: ltr;
+.readonly-web .sales-chart-projection {
+  stroke-dasharray: 6 5;
 }
 
-.readonly-web .financial-chart-graphic .chart-axis-label,
-.readonly-web .financial-chart-graphic .chart-month-label {
-  font-size: 17px;
+.readonly-web .sales-chart-point {
+  fill: var(--series-color);
 }
 
-.readonly-web .financial-chart-graphic .financial-deduction-tick {
+.readonly-web .financial-deduction-tick {
   fill: var(--coop-red-dark);
   text-anchor: start;
 }
@@ -655,7 +626,8 @@ body.readonly-web {
 }
 
 .readonly-web .financial-deductions {
-  fill: var(--coop-red-soft);
+  fill: var(--coop-red);
+  fill-opacity: 0.22;
   stroke: var(--coop-red);
   --legend-color: var(--coop-red-soft);
 }
@@ -683,15 +655,11 @@ body.readonly-web {
   stroke-width: 1.5;
 }
 
-.readonly-web .financial-chart-graphic .chart-legend i {
-  border-radius: 0.2rem;
-}
-
-.readonly-web .financial-chart-graphic .chart-legend .financial-deductions {
+.readonly-web .chart-legend .financial-deductions {
   border: 1px solid var(--coop-red);
 }
 
-.readonly-web .financial-chart-graphic .chart-legend .financial-net {
+.readonly-web .chart-legend .financial-net {
   height: 0.2rem;
   width: 1rem;
   --legend-color: var(--coop-ink);
@@ -721,51 +689,6 @@ body.readonly-web {
 .readonly-web .financial-chart-table th[scope="row"] {
   background: var(--coop-panel);
   color: var(--coop-ink);
-}
-
-.readonly-web .chart-zoom-scroll .financial-chart-graphic {
-  width: 100%;
-  min-width: 42rem;
-  padding: 0.6rem;
-}
-
-.readonly-web .chart-zoom-scroll .financial-chart-graphic .chart-legend {
-  min-width: 0;
-  width: auto;
-}
-
-.readonly-web .bar-chart {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.readonly-web .bar-row {
-  display: grid;
-  grid-template-columns: minmax(92px, 150px) 1fr minmax(74px, auto);
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.readonly-web .bar-track {
-  height: 16px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #f1d6d4;
-}
-
-.readonly-web .bar-fill {
-  display: block;
-  width: var(--bar-width, 0%);
-  min-width: 2px;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(to left, var(--coop-red), var(--coop-red-dark));
-}
-
-.readonly-web .bar-row strong {
-  color: var(--coop-red);
-  direction: ltr;
-  text-align: left;
 }
 
 .readonly-web .shift-day-card {
@@ -1130,18 +1053,6 @@ body.readonly-web {
   .readonly-web .base-table td {
     padding: 0.65rem 0.75rem;
     font-size: 0.88rem;
-  }
-
-  .readonly-web .home-chart-box,
-  .readonly-web .home-chart-box svg {
-    height: 620px;
-    min-height: 620px;
-  }
-
-  .readonly-web .bar-row {
-    grid-template-columns: minmax(76px, 108px) 1fr minmax(64px, auto);
-    gap: 0.5rem;
-    font-size: 0.9rem;
   }
 
   .readonly-web .mobile-modal {
@@ -1624,51 +1535,6 @@ body.readonly-web {
   .readonly-web .mobile-modal .base-table td {
     padding: 0.5rem 0.55rem;
     font-size: 0.82rem;
-  }
-
-  .readonly-web .home-chart-box,
-  .readonly-web .home-chart-box svg {
-    height: auto;
-    min-height: 0;
-  }
-
-  .readonly-web .readonly-line-chart {
-    padding: 0.35rem 0.25rem 0.25rem;
-    overflow-x: hidden;
-  }
-
-  .readonly-web .readonly-line-chart svg {
-    width: 100%;
-    min-width: 0;
-    height: auto;
-    min-height: 0;
-    aspect-ratio: 920 / 720;
-  }
-
-  .readonly-web .chart-legend {
-    min-width: 0;
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .readonly-web .chart-zoom-scroll .readonly-line-chart {
-    min-width: 1040px;
-    overflow-x: visible;
-  }
-
-  .readonly-web .chart-zoom-scroll .readonly-line-chart svg,
-  .readonly-web .chart-zoom-scroll .chart-legend {
-    width: 1040px;
-    min-width: 1040px;
-  }
-
-  .readonly-web .bar-row {
-    grid-template-columns: 1fr;
-    gap: 0.32rem;
-  }
-
-  .readonly-web .bar-row strong {
-    text-align: right;
   }
 }
 

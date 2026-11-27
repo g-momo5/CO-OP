@@ -7,9 +7,9 @@
   const numberFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
   const moneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
   const wholeMoneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 });
-  const financialAxisFormatter = new Intl.NumberFormat('ar-EG', { notation: 'compact', maximumFractionDigits: 2 });
-  const financialValueFormatter = new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 });
-  const financialMonthFormatter = new Intl.NumberFormat('ar-EG', { minimumIntegerDigits: 2 });
+  const chartAxisFormatter = new Intl.NumberFormat('ar-EG', { notation: 'compact', maximumFractionDigits: 2 });
+  const chartValueFormatter = new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 });
+  const chartExpandButton = '<button type="button" class="chart-expand-btn" data-chart-expand>تكبير الرسم</button>';
   const profitTotals = [
     { key: 'total_positive', label: 'إجمالي الإيرادات', kind: 'summary', style: 'revenue' },
     { key: 'total_deductions', label: 'إجمالي الخصومات', kind: 'summary', style: 'deductions' },
@@ -172,31 +172,10 @@
     return `${year}-${month}`;
   }
 
-  function financialMonthRange(now = new Date()) {
-    return {
-      fromMonth: getMonthKey(new Date(now.getFullYear(), now.getMonth() - 11, 1)),
-      toMonth: getMonthKey(now)
-    };
-  }
-
   function getDaysInMonthKey(monthKey) {
     const [year, month] = String(monthKey || '').split('-').map((value) => parseInt(value, 10));
     if (!Number.isFinite(year) || !Number.isFinite(month)) return 0;
     return new Date(year, month, 0).getDate();
-  }
-
-  function getCurrentMonthForecastValue(actualQuantity, monthKey, registeredDays, now = new Date()) {
-    if (monthKey !== getMonthKey(now)) return actualQuantity;
-    const elapsedDays = Math.max(1, parseInt(registeredDays, 10) || 0);
-    const daysInMonth = getDaysInMonthKey(monthKey);
-    return daysInMonth ? (actualQuantity / elapsedDays) * daysInMonth : actualQuantity;
-  }
-
-  function getProjectedMonthValue(actualQuantity, monthKey, registeredDays) {
-    const elapsedDays = Math.max(1, parseInt(registeredDays, 10) || 0);
-    const daysInMonth = getDaysInMonthKey(monthKey);
-    if (!daysInMonth || elapsedDays >= daysInMonth) return actualQuantity;
-    return (Number(actualQuantity) || 0) / elapsedDays * daysInMonth;
   }
 
   function table(headers, rows, emptyText = 'لا توجد بيانات', tableClass = '') {
@@ -251,118 +230,51 @@
     `;
   }
 
-  function renderBarChart(rows, valueKey = 'quantity') {
-    const safeRows = Array.isArray(rows) ? rows.filter((row) => Number(row[valueKey]) > 0) : [];
-    const max = Math.max(...safeRows.map((row) => Math.abs(Number(row[valueKey]) || 0)), 1);
-    if (!safeRows.length) return '<div class="empty">لا توجد بيانات للرسم</div>';
+  function chartValue(input) {
+    const value = Number(input);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function isOverviewMonth(month, { fromMonth, toMonth }) {
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && month >= fromMonth && month <= toMonth;
+  }
+
+  function chartTickStep(interval) {
+    if (interval <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(interval));
+    return Math.max(0.01, magnitude * [1, 2, 2.5, 5, 10].find((factor) => factor * magnitude >= interval));
+  }
+
+  function createChartLayout(months, { start, end, step, deductionStep }) {
+    const plot = { x: 76, y: 20, width: 368, height: 188 };
+    const right = plot.x + plot.width;
+    const spacing = plot.width / months.length;
+    const xFor = (index) => plot.x + spacing * (index + 0.5);
+    const yFor = (tick) => plot.y + (end - tick) * plot.height / (end - start);
+    const grid = Array.from({ length: end - start + 1 }, (_, index) => {
+      const tick = start + index;
+      const y = yFor(tick);
+      return `<line x1="${plot.x}" x2="${right}" y1="${y}" y2="${y}" class="${tick === 0 ? 'chart-axis-line' : 'chart-grid-line'}"></line>
+        <text x="${plot.x - 8}" y="${y + 5}" class="chart-axis-label">${chartAxisFormatter.format(tick * step)}</text>
+        ${deductionStep ? `<text x="${right + 8}" y="${y + 5}" class="chart-axis-label financial-deduction-tick">${chartAxisFormatter.format(tick * deductionStep)}</text>` : ''}`;
+    }).join('');
+    const monthLabels = months.map((month, index) => (
+      `<text x="${xFor(index)}" y="${plot.y + plot.height + 27}" class="chart-month-label"><title>${escapeHtml(monthLabel(month))}</title>${chartValueFormatter.format(Number(month.slice(5)))}</text>`
+    )).join('');
+
+    return { xFor, yFor, spacing, axes: grid + monthLabels };
+  }
+
+  function renderOverviewPlot(title, axes, marks, legend, caption = '') {
     return `
-      <div class="bar-chart">
-        ${safeRows.map((row) => {
-          const value = Number(row[valueKey]) || 0;
-          const width = Math.max(2, Math.round((Math.abs(value) / max) * 100));
-          return `
-            <div class="bar-row">
-              <span>${escapeHtml(row.name)}</span>
-              <div class="bar-track"><span class="bar-fill" style="--bar-width: ${width}%"></span></div>
-              <strong>${formatNumber(value)}</strong>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  function getChartRows(chart) {
-    const months = Array.isArray(chart?.months) ? chart.months : [];
-    const projectionMonthIndex = getProjectionMonthIndex(chart, months);
-    return (chart?.rows || [])
-      .map((row) => {
-        const values = months.map((month, index) => {
-          const value = Number(row.byMonth?.[month]) || 0;
-          if (index !== projectionMonthIndex) return value;
-          return getProjectedMonthValue(value, month, chart.salesDaysByMonth?.[month]);
-        });
-        return {
-          name: row.name,
-          values,
-          quantity: values.reduce((sum, value) => sum + value, 0)
-        };
-      })
-      .filter((row) => row.quantity > 0);
-  }
-
-  function getProjectionMonthIndex(chart, months) {
-    if (!months.length) return -1;
-    const lastIndex = months.length - 1;
-    const monthKey = months[lastIndex];
-    const registeredDays = parseInt(chart?.salesDaysByMonth?.[monthKey], 10) || 0;
-    if (registeredDays <= 0) return -1;
-    const daysInMonth = getDaysInMonthKey(monthKey);
-    return daysInMonth && registeredDays < daysInMonth ? lastIndex : -1;
-  }
-
-  function renderHomeChartShell(chart) {
-    const months = Array.isArray(chart?.months) ? chart.months : [];
-    const rows = getChartRows(chart);
-    if (!months.length || !rows.length) return renderBarChart(chart?.rows || []);
-
-    const width = 920;
-    const height = 720;
-    const plot = { x: 58, y: 50, width: 800, height: 560 };
-    const maxValue = Math.max(...rows.flatMap((row) => row.values), 1);
-    const projectionMonthIndex = getProjectionMonthIndex(chart, months);
-    const colors = ['#c4291d', '#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#15803d', '#be185d'];
-    const xFor = (index) => months.length === 1
-      ? plot.x + (plot.width / 2)
-      : plot.x + ((plot.width / (months.length - 1)) * index);
-    const yFor = (value) => plot.y + plot.height - ((Number(value) || 0) / maxValue) * plot.height;
-    const gridValues = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(maxValue * ratio));
-    const labelEvery = Math.max(1, Math.ceil(months.length / 6));
-
-    return `
-      <div class="home-chart-box readonly-line-chart" data-chart-visual role="img" aria-label="كميات المبيعات الشهرية حسب نوع الوقود">
-        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-          <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="#ffffff"></rect>
-          ${gridValues.map((value) => {
-            const y = yFor(value);
-            return `
-              <line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.width}" y2="${y}" class="chart-grid-line"></line>
-              <text x="${plot.x - 12}" y="${y + 4}" class="chart-axis-label">${formatNumber(value)}</text>
-            `;
-          }).join('')}
-          <line x1="${plot.x}" y1="${plot.y + plot.height}" x2="${plot.x + plot.width}" y2="${plot.y + plot.height}" class="chart-axis-line"></line>
-          <line x1="${plot.x}" y1="${plot.y}" x2="${plot.x}" y2="${plot.y + plot.height}" class="chart-axis-line"></line>
-          ${months.map((month, index) => {
-            if (index % labelEvery !== 0 && index !== months.length - 1) return '';
-            const x = xFor(index);
-            return `<text x="${x}" y="${plot.y + plot.height + 40}" class="chart-month-label">${escapeHtml(monthLabel(month))}</text>`;
-          }).join('')}
-          ${rows.map((row, rowIndex) => {
-            const color = colors[rowIndex % colors.length];
-            const points = row.values.map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ');
-            const solidPoints = projectionMonthIndex > 0
-              ? row.values.slice(0, projectionMonthIndex).map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ')
-              : points;
-            const projectedPoints = projectionMonthIndex > 0
-              ? row.values.slice(projectionMonthIndex - 1, projectionMonthIndex + 1).map((value, offset) => {
-                const index = projectionMonthIndex - 1 + offset;
-                return `${xFor(index)},${yFor(value)}`;
-              }).join(' ')
-              : '';
-            return `
-              <polyline points="${solidPoints}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></polyline>
-              ${projectedPoints ? `<polyline points="${projectedPoints}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 7"></polyline>` : ''}
-              ${row.values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="3.4" fill="${color}"></circle>`).join('')}
-            `;
-          }).join('')}
+      <div class="overview-chart-graphic" data-chart-visual>
+        ${caption}
+        <svg viewBox="0 0 520 244" role="img" aria-label="${escapeHtml(title)}">
+          ${axes}
+          ${marks}
         </svg>
-        <div class="chart-legend">
-          ${rows.map((row, index) => `
-            <span><i style="--legend-color: ${colors[index % colors.length]}"></i>${escapeHtml(row.name)}</span>
-          `).join('')}
-        </div>
-      </div>
-    `;
+        <div class="chart-legend">${legend}</div>
+      </div>`;
   }
 
   function mountHomeChart(chart, chartRef = {}) {
@@ -371,25 +283,52 @@
     return null;
   }
 
-  function renderOverview(data = {}) {
+  function renderOverview(data = {}, range = currentMonthRange()) {
     const chart = data.chart || {};
-    return sectionCard(
-      '📊',
-      'كميات المبيعات الشهرية حسب نوع الوقود',
-      renderHomeChartShell(chart),
-      '<button type="button" class="chart-expand-btn" data-chart-expand>تكبير الرسم</button>'
-    );
+    const title = 'كميات المبيعات الشهرية حسب نوع الوقود';
+    const sourceRows = Array.isArray(chart.rows) ? chart.rows : [];
+    const monthKeys = Array.isArray(chart.months) ? chart.months : [];
+    const months = monthKeys
+      .filter((month) => isOverviewMonth(month, range) && (
+        chart.salesDaysByMonth?.[month] > 0 || sourceRows.some((row) => chartValue(row.byMonth?.[month]) > 0)
+      ))
+      .sort();
+    const registeredDays = Number(chart.salesDaysByMonth?.[range.toMonth]);
+    const daysInMonth = getDaysInMonthKey(range.toMonth);
+    const projectionIndex = registeredDays > 0 && registeredDays < daysInMonth ? months.indexOf(range.toMonth) : -1;
+    const rows = sourceRows.map((row) => ({
+      name: row.name,
+      values: months.map((month, index) => {
+        const value = chartValue(row.byMonth?.[month]);
+        return index === projectionIndex ? value * daysInMonth / registeredDays : value;
+      })
+    })).filter((row) => row.values.some((value) => value > 0));
+    if (!rows.length) return sectionCard('📊', title, '<div class="empty">لا توجد بيانات مبيعات لهذا العام</div>');
+
+    const max = Math.max(...rows.flatMap((row) => row.values));
+    const step = chartTickStep(max / 4);
+    const { xFor, yFor, axes } = createChartLayout(months, { start: 0, end: Math.ceil(max / step), step });
+    const colors = ['#c4291d', '#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#15803d', '#be185d'];
+    const colorFor = (index) => colors[index % colors.length];
+    const marks = rows.map(({ values }, rowIndex) => {
+      const points = values.map((value, index) => `${xFor(index)},${yFor(value / step)}`);
+      const solidPoints = projectionIndex > 0 ? points.slice(0, projectionIndex) : points;
+      const projectedPoints = projectionIndex > 0 ? points.slice(projectionIndex - 1) : [];
+      return `<g style="--series-color: ${colorFor(rowIndex)}">
+        <polyline points="${solidPoints.join(' ')}" class="sales-chart-line"></polyline>
+        ${projectedPoints.length ? `<polyline points="${projectedPoints.join(' ')}" class="sales-chart-line sales-chart-projection"></polyline>` : ''}
+        ${values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value / step)}" r="3.4" class="sales-chart-point"></circle>`).join('')}
+      </g>`;
+    }).join('');
+    const legend = rows.map(({ name }, index) => (
+      `<span><i style="--legend-color: ${colorFor(index)}" aria-hidden="true"></i>${escapeHtml(name)}</span>`
+    )).join('');
+    return sectionCard('📊', title, renderOverviewPlot(title, axes, marks, legend), chartExpandButton);
   }
 
-  function financialTickStep(interval) {
-    if (interval <= 0) return 1;
-    const magnitude = 10 ** Math.floor(Math.log10(interval));
-    return Math.max(0.01, magnitude * [1, 2, 2.5, 5, 10].find((factor) => factor * magnitude >= interval));
-  }
-
-  function financialScale(rows) {
-    const primary = rows.flatMap(({ values }) => [values[0], values[2]]);
-    const deductions = rows.map(({ values }) => values[1]);
+  function financialScale(chartValues) {
+    const primary = chartValues.flatMap(([revenue, , net]) => [revenue, net]);
+    const deductions = chartValues.map((values) => values[1]);
     const minDeductions = Math.min(0, ...deductions);
     const maxDeductions = Math.max(0, ...deductions);
     const peakDeductions = Math.max(-minDeductions, maxDeductions);
@@ -398,78 +337,59 @@
     const values = separateDeductions ? primary : primary.concat(deductions);
     const min = Math.min(0, ...values);
     const max = Math.max(0, ...values);
-    const step = financialTickStep((max - min) / 4);
+    const step = chartTickStep((max - min) / 4);
     const start = Math.min(Math.floor(min / step), minDeductions < 0 ? -1 : 0);
-    const end = Math.max(Math.ceil(max / step), maxDeductions > 0 ? 1 : 0);
+    const end = Math.max(Math.ceil(max / step), maxDeductions > 0 || start === 0 ? 1 : 0);
     const deductionStep = separateDeductions
-      ? financialTickStep(Math.max(maxDeductions / Math.max(end, 1), -minDeductions / Math.max(-start, 1)))
-      : step;
-    return { start, end, step, deductionStep, separateDeductions };
+      ? chartTickStep(Math.max(maxDeductions / Math.max(end, 1), -minDeductions / Math.max(-start, 1)))
+      : null;
+    return { start, end, step, deductionStep };
   }
 
   function renderFinancialPlot(rows) {
-    const { start, end, step, deductionStep, separateDeductions } = financialScale(rows);
-    const plot = { x: 76, y: 20, width: separateDeductions ? 368 : 424, height: 188 };
-    const ticks = Array.from({ length: end - start + 1 }, (_, index) => start + index);
-    const spacing = plot.width / rows.length;
-    const barWidth = Math.min(26, spacing * 0.29);
-    const xFor = (index) => plot.x + plot.width - spacing * (index + 0.5);
-    const yFor = (tick) => plot.y + (end - tick) * plot.height / (end - start);
+    const chartValues = rows.map(({ values: [revenue, deductions, net] }) => [revenue, -deductions, net]);
+    const scale = financialScale(chartValues);
+    const { step, deductionStep } = scale;
+    const { xFor, yFor, spacing, axes } = createChartLayout(rows.map(({ month }) => month), scale);
+    const barWidth = Math.min(26, spacing * 0.6);
     const zero = yFor(0);
-    const pointTitle = (row, index) => escapeHtml(
-      `${monthLabel(row.month)} · ${profitTotals[index].label} ${financialValueFormatter.format(row.values[index])} ج.م`
+    const pointTitle = (index, column) => escapeHtml(
+      `${monthLabel(rows[index].month)} · ${profitTotals[column].label} ${chartValueFormatter.format(chartValues[index][column] || 0)} ج.م`
     );
-    const points = rows.map(({ values }, index) => `${xFor(index)},${yFor(values[2] / step)}`).join(' ');
-
-    return `
-      <div class="financial-chart-graphic" data-chart-visual>
-        ${separateDeductions ? `<p class="financial-chart-scales"><span>الخصومات على اليمين</span><span>الإيرادات والصافي على اليسار</span></p>` : ''}
-        <svg viewBox="0 0 520 244" role="img" aria-label="${profitTotals.map(({ label }) => label).join('، ')} لكل شهر بالجنيه المصري">
-          ${ticks.map((tick) => {
-            const y = yFor(tick);
-            return `<line x1="${plot.x}" x2="${plot.x + plot.width}" y1="${y}" y2="${y}" class="${tick === 0 ? 'chart-axis-line' : 'chart-grid-line'}"></line>
-              <text x="${plot.x - 8}" y="${y + 5}" class="chart-axis-label">${financialAxisFormatter.format(tick * step)}</text>
-              ${separateDeductions ? `<text x="${plot.x + plot.width + 8}" y="${y + 5}" class="chart-axis-label financial-deduction-tick">${financialAxisFormatter.format(tick * deductionStep)}</text>` : ''}`;
-          }).join('')}
-          ${rows.map((row, index) => {
-            const x = xFor(index);
-            const bars = profitTotals.slice(0, 2).map((series, column) => {
-              const y = yFor(row.values[column] / (column === 0 ? step : deductionStep));
-              const barX = column === 0 ? x + 2 : x - barWidth - 2;
-              return `<rect x="${barX}" y="${Math.min(y, zero)}" width="${barWidth}" height="${Math.abs(y - zero)}" rx="3" class="financial-${series.style}"><title>${pointTitle(row, column)}</title></rect>`;
-            }).join('');
-            return `${bars}<text x="${x}" y="${plot.y + plot.height + 27}" class="chart-month-label"><title>${escapeHtml(monthLabel(row.month))}</title>${financialMonthFormatter.format(Number(row.month.slice(5)))}</text>`;
-          }).join('')}
-          <polyline points="${points}" class="financial-net-outline"></polyline>
-          <polyline points="${points}" class="financial-net-line"></polyline>
-          ${rows.map((row, index) => `<circle cx="${xFor(index)}" cy="${yFor(row.values[2] / step)}" r="4.5" class="financial-net-point"><title>${pointTitle(row, 2)}</title></circle>`).join('')}
-        </svg>
-        <div class="chart-legend">
-          ${profitTotals.map(({ label, style }) => `<span><i class="financial-${style}" aria-hidden="true"></i>${label}</span>`).join('')}
-        </div>
-      </div>`;
+    const bars = chartValues.map((values, index) => profitTotals.slice(0, 2).map((series, column) => {
+      const y = yFor(values[column] / (column === 1 && deductionStep ? deductionStep : step));
+      return `<rect x="${xFor(index) - barWidth / 2}" y="${Math.min(y, zero)}" width="${barWidth}" height="${Math.abs(y - zero)}" rx="3" class="financial-${series.style}"><title>${pointTitle(index, column)}</title></rect>`;
+    }).join('')).join('');
+    const netPoints = chartValues.map((values, index) => ({ x: xFor(index), y: yFor(values[2] / step) }));
+    const points = netPoints.map(({ x, y }) => `${x},${y}`).join(' ');
+    const marks = `${bars}
+      <polyline points="${points}" class="financial-net-outline"></polyline>
+      <polyline points="${points}" class="financial-net-line"></polyline>
+      ${netPoints.map(({ x, y }, index) => `<circle cx="${x}" cy="${y}" r="4.5" class="financial-net-point"><title>${pointTitle(index, 2)}</title></circle>`).join('')}`;
+    const legend = profitTotals.map(({ label, style }) => `<span><i class="financial-${style}" aria-hidden="true"></i>${label}</span>`).join('');
+    const caption = deductionStep ? '<p class="financial-chart-scales"><span>الخصومات على اليمين</span><span>الإيرادات والصافي على اليسار</span></p>' : '';
+    return renderOverviewPlot(`${profitTotals.map(({ label }) => label).join('، ')} لكل شهر بالجنيه المصري`, axes, marks, legend, caption);
   }
 
-  function renderFinancialOverview(data = {}) {
+  function renderFinancialOverview(data = {}, range = currentMonthRange()) {
+    const activeMonths = new Set(Array.isArray(data.activeMonths) ? data.activeMonths : []);
     const rows = (Array.isArray(data.rows) ? data.rows : [])
-      .filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row?.month_key))
-      .sort((a, b) => a.month_key.localeCompare(b.month_key))
+      .filter((row) => isOverviewMonth(row?.month_key, range))
       .map((row) => ({
         month: row.month_key,
-        values: profitTotals.map(({ key }) => {
-          const value = Number(row[key]);
-          return Number.isFinite(value) ? value : 0;
-        })
-      }));
+        values: profitTotals.map(({ key }) => chartValue(row[key]))
+      }))
+      .filter(({ month, values }) => activeMonths.has(month) || values.some((value) => value !== 0))
+      .sort((a, b) => a.month.localeCompare(b.month));
     const title = 'الأداء المالي الشهري';
-    if (!rows.some(({ values }) => values.some((value) => value !== 0))) {
-      return sectionCard('📈', title, '<div class="empty">لا توجد بيانات مالية لآخر ١٢ شهرًا</div>');
+    if (!rows.length) {
+      return sectionCard('📈', title, '<div class="empty">لا توجد بيانات مالية لهذا العام</div>');
     }
 
     const monthRows = rows.map(({ month, values }) => `
       <tr>
         <th scope="row">${escapeHtml(monthLabel(month))}</th>
-        ${values.map((value) => `<td>${financialValueFormatter.format(value)}</td>`).join('')}
+        ${values.map((value) => `<td>${chartValueFormatter.format(value)}</td>`).join('')}
       </tr>`);
     return sectionCard('📈', title, `
       <p class="financial-chart-period">${escapeHtml(monthLabel(rows[0].month))} – ${escapeHtml(monthLabel(rows.at(-1).month))} · ج.م</p>
@@ -478,7 +398,7 @@
         <summary>القيم الشهرية</summary>
         ${table(['الشهر', ...profitTotals.map(({ label }) => label)], monthRows, '', 'financial-chart-table')}
       </details>`,
-    '<button type="button" class="chart-expand-btn" data-chart-expand>تكبير الرسم</button>');
+    chartExpandButton);
   }
 
   function renderSalesSummary(data = {}) {
@@ -917,7 +837,6 @@
   return {
     currentMonthRange,
     escapeHtml,
-    financialMonthRange,
     formatDate,
     formatDay,
     formatMoney,
