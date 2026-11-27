@@ -9,10 +9,11 @@
   const wholeMoneyFormatter = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 });
   const financialAxisFormatter = new Intl.NumberFormat('ar-EG', { notation: 'compact', maximumFractionDigits: 2 });
   const financialValueFormatter = new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 });
-  const financialSeries = [
-    { key: 'total_positive', label: 'المكسب', style: 'gain' },
-    { key: 'expenses_month', label: 'المصاريف', style: 'expenses' },
-    { key: 'net_profit', label: 'صافي الربح', style: 'net' }
+  const financialMonthFormatter = new Intl.NumberFormat('ar-EG', { minimumIntegerDigits: 2 });
+  const profitTotals = [
+    { key: 'total_positive', label: 'إجمالي الإيرادات', kind: 'summary', style: 'revenue' },
+    { key: 'total_deductions', label: 'إجمالي الخصومات', kind: 'summary', style: 'deductions' },
+    { key: 'net_profit', label: 'صافي المكسب', kind: 'net', style: 'net' }
   ];
 
   const monthNames = [
@@ -173,7 +174,7 @@
 
   function financialMonthRange(now = new Date()) {
     return {
-      fromMonth: getMonthKey(new Date(now.getFullYear(), now.getMonth() - 5, 1)),
+      fromMonth: getMonthKey(new Date(now.getFullYear(), now.getMonth() - 11, 1)),
       toMonth: getMonthKey(now)
     };
   }
@@ -380,57 +381,71 @@
     );
   }
 
-  function financialScale(values) {
+  function financialTickStep(interval) {
+    if (interval <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(interval));
+    return Math.max(0.01, magnitude * [1, 2, 2.5, 5, 10].find((factor) => factor * magnitude >= interval));
+  }
+
+  function financialScale(rows) {
+    const primary = rows.flatMap(({ values }) => [values[0], values[2]]);
+    const deductions = rows.map(({ values }) => values[1]);
+    const minDeductions = Math.min(0, ...deductions);
+    const maxDeductions = Math.max(0, ...deductions);
+    const peakDeductions = Math.max(-minDeductions, maxDeductions);
+    const peakPrimary = Math.max(...primary.map(Math.abs));
+    const separateDeductions = peakDeductions > 0 && peakDeductions < peakPrimary / 10;
+    const values = separateDeductions ? primary : primary.concat(deductions);
     const min = Math.min(0, ...values);
     const max = Math.max(0, ...values);
-    const interval = (max - min) / 4;
-    const magnitude = 10 ** Math.floor(Math.log10(interval));
-    const step = Math.max(0.01, magnitude * [1, 2, 2.5, 5, 10].find((factor) => factor * magnitude >= interval));
-    const start = Math.floor(min / step);
-    const end = Math.ceil(max / step);
-    return {
-      min: start * step,
-      max: end * step,
-      ticks: Array.from({ length: end - start + 1 }, (_, index) => (start + index) * step)
-    };
+    const step = financialTickStep((max - min) / 4);
+    const start = Math.min(Math.floor(min / step), minDeductions < 0 ? -1 : 0);
+    const end = Math.max(Math.ceil(max / step), maxDeductions > 0 ? 1 : 0);
+    const deductionStep = separateDeductions
+      ? financialTickStep(Math.max(maxDeductions / Math.max(end, 1), -minDeductions / Math.max(-start, 1)))
+      : step;
+    return { start, end, step, deductionStep, separateDeductions };
   }
 
   function renderFinancialPlot(rows) {
-    const plot = { x: 76, y: 20, width: 424, height: 188 };
-    const scale = financialScale(rows.flatMap(({ values }) => values));
+    const { start, end, step, deductionStep, separateDeductions } = financialScale(rows);
+    const plot = { x: 76, y: 20, width: separateDeductions ? 368 : 424, height: 188 };
+    const ticks = Array.from({ length: end - start + 1 }, (_, index) => start + index);
     const spacing = plot.width / rows.length;
     const barWidth = Math.min(26, spacing * 0.29);
     const xFor = (index) => plot.x + plot.width - spacing * (index + 0.5);
-    const yFor = (value) => plot.y + (scale.max - value) * plot.height / (scale.max - scale.min);
+    const yFor = (tick) => plot.y + (end - tick) * plot.height / (end - start);
     const zero = yFor(0);
     const pointTitle = (row, index) => escapeHtml(
-      `${monthLabel(row.month)} · ${financialSeries[index].label} ${financialValueFormatter.format(row.values[index])} ج.م`
+      `${monthLabel(row.month)} · ${profitTotals[index].label} ${financialValueFormatter.format(row.values[index])} ج.م`
     );
-    const points = rows.map(({ values }, index) => `${xFor(index)},${yFor(values[2])}`).join(' ');
+    const points = rows.map(({ values }, index) => `${xFor(index)},${yFor(values[2] / step)}`).join(' ');
 
     return `
       <div class="financial-chart-graphic" data-chart-visual>
-        <svg viewBox="0 0 520 244" role="img" aria-label="المكسب والمصاريف وصافي الربح لكل شهر بالجنيه المصري">
-          ${scale.ticks.map((value) => {
-            const y = yFor(value);
-            return `<line x1="${plot.x}" x2="${plot.x + plot.width}" y1="${y}" y2="${y}" class="${value === 0 ? 'chart-axis-line' : 'chart-grid-line'}"></line>
-              <text x="${plot.x - 8}" y="${y + 5}" class="chart-axis-label">${financialAxisFormatter.format(value)}</text>`;
+        ${separateDeductions ? `<p class="financial-chart-scales"><span>الخصومات على اليمين</span><span>الإيرادات والصافي على اليسار</span></p>` : ''}
+        <svg viewBox="0 0 520 244" role="img" aria-label="${profitTotals.map(({ label }) => label).join('، ')} لكل شهر بالجنيه المصري">
+          ${ticks.map((tick) => {
+            const y = yFor(tick);
+            return `<line x1="${plot.x}" x2="${plot.x + plot.width}" y1="${y}" y2="${y}" class="${tick === 0 ? 'chart-axis-line' : 'chart-grid-line'}"></line>
+              <text x="${plot.x - 8}" y="${y + 5}" class="chart-axis-label">${financialAxisFormatter.format(tick * step)}</text>
+              ${separateDeductions ? `<text x="${plot.x + plot.width + 8}" y="${y + 5}" class="chart-axis-label financial-deduction-tick">${financialAxisFormatter.format(tick * deductionStep)}</text>` : ''}`;
           }).join('')}
           ${rows.map((row, index) => {
             const x = xFor(index);
-            const bars = financialSeries.slice(0, 2).map((series, column) => {
-              const y = yFor(row.values[column]);
+            const bars = profitTotals.slice(0, 2).map((series, column) => {
+              const y = yFor(row.values[column] / (column === 0 ? step : deductionStep));
               const barX = column === 0 ? x + 2 : x - barWidth - 2;
               return `<rect x="${barX}" y="${Math.min(y, zero)}" width="${barWidth}" height="${Math.abs(y - zero)}" rx="3" class="financial-${series.style}"><title>${pointTitle(row, column)}</title></rect>`;
             }).join('');
-            return `${bars}<text x="${x}" y="${plot.y + plot.height + 27}" class="chart-month-label">${monthNames[Number(row.month.slice(5)) - 1]}</text>`;
+            return `${bars}<text x="${x}" y="${plot.y + plot.height + 27}" class="chart-month-label"><title>${escapeHtml(monthLabel(row.month))}</title>${financialMonthFormatter.format(Number(row.month.slice(5)))}</text>`;
           }).join('')}
           <polyline points="${points}" class="financial-net-outline"></polyline>
           <polyline points="${points}" class="financial-net-line"></polyline>
-          ${rows.map((row, index) => `<circle cx="${xFor(index)}" cy="${yFor(row.values[2])}" r="4.5" class="financial-net-point"><title>${pointTitle(row, 2)}</title></circle>`).join('')}
+          ${rows.map((row, index) => `<circle cx="${xFor(index)}" cy="${yFor(row.values[2] / step)}" r="4.5" class="financial-net-point"><title>${pointTitle(row, 2)}</title></circle>`).join('')}
         </svg>
         <div class="chart-legend">
-          ${financialSeries.map(({ label, style }) => `<span><i class="financial-${style}" aria-hidden="true"></i>${label}</span>`).join('')}
+          ${profitTotals.map(({ label, style }) => `<span><i class="financial-${style}" aria-hidden="true"></i>${label}</span>`).join('')}
         </div>
       </div>`;
   }
@@ -441,14 +456,14 @@
       .sort((a, b) => a.month_key.localeCompare(b.month_key))
       .map((row) => ({
         month: row.month_key,
-        values: financialSeries.map(({ key }) => {
+        values: profitTotals.map(({ key }) => {
           const value = Number(row[key]);
           return Number.isFinite(value) ? value : 0;
         })
       }));
     const title = 'الأداء المالي الشهري';
     if (!rows.some(({ values }) => values.some((value) => value !== 0))) {
-      return sectionCard('📈', title, '<div class="empty">لا توجد بيانات مالية لآخر ستة أشهر</div>');
+      return sectionCard('📈', title, '<div class="empty">لا توجد بيانات مالية لآخر ١٢ شهرًا</div>');
     }
 
     const monthRows = rows.map(({ month, values }) => `
@@ -457,11 +472,11 @@
         ${values.map((value) => `<td>${financialValueFormatter.format(value)}</td>`).join('')}
       </tr>`);
     return sectionCard('📈', title, `
-      <p class="financial-chart-period">آخر ستة أشهر · ج.م</p>
+      <p class="financial-chart-period">${escapeHtml(monthLabel(rows[0].month))} – ${escapeHtml(monthLabel(rows.at(-1).month))} · ج.م</p>
       ${renderFinancialPlot(rows)}
       <details class="financial-chart-values">
         <summary>القيم الشهرية</summary>
-        ${table(['الشهر', ...financialSeries.map(({ label }) => label)], monthRows, '', 'financial-chart-table')}
+        ${table(['الشهر', ...profitTotals.map(({ label }) => label)], monthRows, '', 'financial-chart-table')}
       </details>`,
     '<button type="button" class="chart-expand-btn" data-chart-expand>تكبير الرسم</button>');
   }
@@ -526,9 +541,7 @@
       ...getProfitCustomRows(customRows, 'revenue'),
       ...profitBaseRows.filter(([, , kind]) => kind === 'deduction').map(([key, label, kind]) => ({ key, label, kind })),
       ...getProfitCustomRows(customRows, 'deduction'),
-      { key: 'total_positive', label: 'إجمالي الإيرادات', kind: 'summary' },
-      { key: 'total_deductions', label: 'إجمالي الخصومات', kind: 'summary' },
-      { key: 'net_profit', label: 'صافي المكسب', kind: 'net' }
+      ...profitTotals
     ];
     const getValue = (monthRow, item) => {
       if (!item.custom) return monthRow?.[item.key] || 0;
