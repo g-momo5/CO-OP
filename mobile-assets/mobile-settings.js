@@ -219,23 +219,28 @@
 
   function fillDetails(details, fields) {
     details.hidden = false;
-    for (const [title, value] of fields) {
+    for (const [title, value, date] of fields) {
       const field = document.createElement('div');
       const term = document.createElement('dt');
       term.textContent = title;
       const data = document.createElement('dd');
       data.textContent = value;
+      if (date) {
+        const effective = document.createElement('time');
+        effective.dateTime = date;
+        effective.textContent = formatDay(date);
+        effective.setAttribute('aria-label', `ساري من ${effective.textContent}`);
+        data.append(effective);
+      }
       field.append(term, data);
       details.append(field);
     }
   }
 
   function productPriceDetails(product) {
-    const fields = [['سعر البيع', formatPrice(product.salePrice)]];
-    if (product.saleDate) fields.push(['سريان البيع', formatDay(product.saleDate)]);
+    const fields = [['سعر البيع', formatPrice(product.salePrice), product.saleDate]];
     if (product.type === 'fuel') {
-      fields.push(['سعر الشراء', formatPrice(product.purchasePrice)]);
-      if (product.purchaseDate) fields.push(['سريان الشراء', formatDay(product.purchaseDate)]);
+      fields.push(['سعر الشراء', formatPrice(product.purchasePrice), product.purchaseDate]);
     }
     return fields;
   }
@@ -259,7 +264,17 @@
   function record(item, isProduct) {
     const card = byId('settingsRecord').content.firstElementChild.cloneNode(true);
     card.querySelector('h3').textContent = item.name;
+    const actions = card.querySelector('.settings-record-actions');
+    const trigger = actions.querySelector('summary');
+    trigger.setAttribute('aria-label', `إجراءات ${item.name}`);
+    const editFromMenu = (options) => {
+      actions.open = false;
+      trigger.focus({ preventScroll: true });
+      openEditor(options);
+    };
+
     if (isProduct) {
+      card.querySelector('.settings-record-meta').hidden = false;
       const updatePrice = card.querySelector('[data-record-price]');
       updatePrice.hidden = false;
       updatePrice.addEventListener('click', () => openPriceEditor(item));
@@ -274,7 +289,7 @@
       fillDetails(card.querySelector('dl'), metrics);
     }
     const editName = card.querySelector('[data-record-edit]');
-    editName.addEventListener('click', () => openEditor({
+    editName.addEventListener('click', () => editFromMenu({
       title: isProduct ? 'تعديل اسم المنتج' : 'تعديل اسم العميل',
       nameLabel: isProduct ? 'اسم المنتج' : 'اسم العميل',
       name: item.name,
@@ -283,7 +298,7 @@
     }));
     const remove = card.querySelector('[data-record-remove]');
     remove.textContent = isProduct ? 'حذف' : 'أرشفة';
-    remove.addEventListener('click', () => openEditor({
+    remove.addEventListener('click', () => editFromMenu({
       title: isProduct ? 'حذف المنتج' : 'أرشفة العميل',
       confirmation: isProduct
         ? `هل تريد حذف «${item.name}»؟ لا يمكن التراجع عن الحذف.`
@@ -406,6 +421,20 @@
       void loadSection();
     });
   });
+  document.addEventListener('click', (event) => {
+    if (root.hidden) return;
+    for (const actions of root.querySelectorAll('.settings-record-actions[open]')) {
+      if (!actions.contains(event.target)) actions.open = false;
+    }
+  });
+  root.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const actions = event.target.closest('.settings-record-actions[open]');
+    if (!actions) return;
+    actions.open = false;
+    actions.querySelector('summary').focus();
+    event.preventDefault();
+  });
   byId('settingsAddProduct').addEventListener('click', () => openEditor({
     title: 'إضافة منتج جديد',
     nameLabel: 'اسم المنتج',
@@ -434,7 +463,7 @@
   edit.addEventListener('close', () => { state.editing = null; });
 
   byId('settingsOpenHistory').addEventListener('click', () => openPriceHistory());
-  byId('settingsProductHistory').querySelector('button').addEventListener('click', () => {
+  byId('settingsProductHistory').addEventListener('click', () => {
     const product = state.editing?.priceProduct;
     if (product && !state.saving) openPriceHistory(product);
   });

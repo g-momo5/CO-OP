@@ -64,10 +64,11 @@
 
   async function api(view, params = {}) {
     const query = { view, ...params };
-    const primaryUrl = buildUrl(state.apiBase, query);
+    const base = state.apiBase;
+    const primaryUrl = buildUrl(base, query);
     let response = await fetch(primaryUrl, { method: 'GET', cache: 'no-store' });
 
-    if (response.status === 404 && state.apiBase !== '/.netlify/functions/mobile-data') {
+    if (response.status === 404 && base !== '/.netlify/functions/mobile-data') {
       state.apiBase = '/.netlify/functions/mobile-data';
       response = await fetch(buildUrl(state.apiBase, query), { method: 'GET', cache: 'no-store' });
     }
@@ -152,7 +153,7 @@
     dialog.className = 'mobile-modal chart-zoom-modal';
     dialog.innerHTML = `
       <div class="mobile-modal-panel chart-zoom-panel">
-        <button class="modal-close chart-zoom-close" type="button" aria-label="Close">×</button>
+        <button class="modal-close chart-zoom-close" type="button" aria-label="إغلاق">×</button>
         <div class="chart-zoom-scroll"></div>
       </div>
     `;
@@ -164,8 +165,8 @@
     return dialog;
   }
 
-  function openChartZoomDialog() {
-    const sourceChart = content.querySelector('.readonly-line-chart');
+  function openChartZoomDialog(button) {
+    const sourceChart = button.closest('.card')?.querySelector('[data-chart-visual]');
     if (!sourceChart) return;
     const dialog = getChartZoomDialog();
     const target = dialog.querySelector('.chart-zoom-scroll');
@@ -182,13 +183,36 @@
     });
   }
 
+  async function loadOverviewChart(target, view, range, render) {
+    target.innerHTML = '<div class="loading">جار التحميل...</div>';
+    try {
+      const data = await api(view, range);
+      if (!target.isConnected || state.currentView !== 'overview') return;
+      target.innerHTML = render(data);
+      if (view === 'home-chart') {
+        setLastSync(data.lastSync);
+        requestAnimationFrame(() => ui.mountHomeChart(data.chart || {}, homeChartRef));
+      }
+    } catch (error) {
+      if (!target.isConnected || state.currentView !== 'overview') return;
+      target.innerHTML = `<div class="error overview-chart-error">
+        <span>${ui.escapeHtml(errorMessage(error))}</span>
+        <button type="button" class="chart-expand-btn">إعادة المحاولة</button>
+      </div>`;
+      target.querySelector('button').addEventListener('click', () => {
+        void loadOverviewChart(target, view, range, render);
+      });
+    }
+  }
+
   async function loadOverview() {
-    setLoading();
-    const range = ui.currentMonthRange();
-    const data = await api('home-chart', { fromMonth: range.fromMonth, toMonth: range.toMonth });
-    setLastSync(data.lastSync);
-    content.innerHTML = ui.renderOverview(data);
-    requestAnimationFrame(() => ui.mountHomeChart(data.chart || {}, homeChartRef));
+    disconnectShiftLoadHandler();
+    content.innerHTML = '<div data-overview-sales></div><div data-overview-finance></div>';
+    const { fromMonth, toMonth } = ui.currentMonthRange();
+    await Promise.all([
+      loadOverviewChart(content.querySelector('[data-overview-sales]'), 'home-chart', { fromMonth, toMonth }, ui.renderOverview),
+      loadOverviewChart(content.querySelector('[data-overview-finance]'), 'profit', ui.financialMonthRange(), ui.renderFinancialOverview)
+    ]);
   }
 
   async function loadSalesSummary() {
@@ -493,9 +517,8 @@
     if (event.target === shiftSummaryDialog) closeSummaryModal();
   });
   content.addEventListener('click', (event) => {
-    if (event.target?.closest?.('[data-chart-expand]')) {
-      openChartZoomDialog();
-    }
+    const button = event.target?.closest?.('[data-chart-expand]');
+    if (button) openChartZoomDialog(button);
   });
 
   loadView('overview');
